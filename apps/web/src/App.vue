@@ -1,0 +1,905 @@
+<script setup lang="ts">
+import {
+  reactive,
+  watch,
+  ref,
+  computed,
+  onMounted,
+  onBeforeUnmount,
+  nextTick,
+} from "vue";
+import KanbanBoard from "./KanbanBoard.vue";
+import ChatPanel from "./ChatPanel.vue";
+import TaskDialog from "./TaskDialog.vue";
+import MergeDialog from "./MergeDialog.vue";
+import ModelDialog from "./ModelDialog.vue";
+import { isMergeRequest } from "./git.ts";
+import { api, APIError } from "./api.ts";
+import type {
+  Snapshot,
+  Task,
+  Receipt,
+  MergePreview,
+  MergeOperation,
+  Conversation,
+  Profile,
+} from "./types.ts";
+import {
+  createLocalState,
+  selectConversation,
+  setDraft,
+  acceptSent,
+  mergeSnapshot,
+  createRefreshQueue,
+  createOperationID,
+  isStartRequest,
+} from "./workbench.ts";
+const local = reactive(createLocalState());
+const authenticated = ref(false),
+  loaded = ref(false),
+  online = ref(false),
+  agentAvailable = ref(false),
+  token = ref(""),
+  loginBusy = ref(false),
+  error = ref(""),
+  projectID = ref(""),
+  taskID = ref(""),
+  mobileTopic = ref(""),
+  chatVisible = ref(false),
+  dialog = ref(""),
+  dialogTopic = ref(""),
+  formError = ref(""),
+  saving = ref(false);
+const mergePreview = ref<MergePreview>();
+const modelTarget = ref<{ scope: string; projectId?: string; conversationId?: string; taskId?: string; profile?: Profile }>();
+const modelSaving = ref(false), modelError = ref("");
+const mergeTarget = ref<Task>();
+const mergeError = ref(""),
+  mergeSaving = ref(false),
+  mergeOpID = ref("");
+let mergeRequest:
+  | {
+      operationId: string;
+      projectId: string;
+      taskId: string;
+      previewId: string;
+      commitMessage: string;
+    }
+  | undefined;
+let mergeDraft: { conversationId: string; revision: number } | undefined;
+const mergeOperation = computed(() => state.value?.merges?.[mergeOpID.value]);
+let gitTimer: ReturnType<typeof setTimeout> | undefined,
+  gitChecking = false;
+const unread = reactive<Record<string, number>>({});
+const lengths = new Map<string, number>();
+const state = computed(() => local.snapshot);
+const project = computed(() => state.value?.projects[projectID.value]);
+const topics = computed(
+  () =>
+    state.value?.topics.filter((t) => t.projectId === projectID.value) ?? [],
+);
+const tasks = computed(() =>
+  Object.values(state.value?.tasks ?? {}).filter(
+    (t) => t.projectId === projectID.value,
+  ),
+);
+const task = computed(() => state.value?.tasks[taskID.value]);
+const conversation = computed(() => state.value?.conversations[local.current]);
+const draft = computed(() => local.drafts[local.current]?.text ?? "");
+let ws: WebSocket | undefined,
+  retry: ReturnType<typeof setTimeout> | undefined,
+  stopped = false,
+  authEpoch = 0;
+const width = ref(innerWidth);
+const operations = reactive(
+  new Map<string, { id: string; signature: string; draftRevision?: number }>(),
+);
+function readLocation() {
+  const match = location.pathname.match(
+    /^\/projects\/([^/]+)(?:\/tasks\/([^/]+))?$/,
+  );
+  if (match) {
+    projectID.value = match[1]!;
+    taskID.value = match[2] ?? "";
+  }
+}
+function navigate(task?: Task) {
+  if (!project.value) return;
+  unread[task?.conversationId ?? project.value.conversationId] = 0;
+  taskID.value = task?.id ?? "";
+  selectConversation(
+    local,
+    task?.conversationId ?? project.value.conversationId,
+  );
+  history.pushState(
+    null,
+    "",
+    "/projects/" + project.value.id + (task ? "/tasks/" + task.id : ""),
+  );
+  if (width.value < 1024) chatVisible.value = true;
+}
+function chooseProject(id: string) {
+  projectID.value = id;
+  taskID.value = "";
+  mobileTopic.value = "";
+  navigate();
+  chatVisible.value = false;
+}
+function clearIdentity() {
+  authEpoch++;
+  authenticated.value = false;
+  online.value = false;
+  loginBusy.value = false;
+  saving.value = false;
+  dialog.value = "";
+  modelTarget.value = undefined;
+  modelSaving.value = false;
+  modelError.value = "";
+  mergePreview.value = undefined;
+  mergeTarget.value = undefined;
+  mergeRequest = undefined;
+  mergeDraft = undefined;
+  mergeOpID.value = "";
+  mergeSaving.value = false;
+  clearTimeout(gitTimer);
+  formError.value = "";
+  ws?.close();
+  clearTimeout(retry);
+  local.snapshot = null;
+  local.drafts = {};
+  local.scroll = {};
+  local.pending = {};
+  local.current = "";
+  operations.clear();
+  lengths.clear();
+  for (const id of Object.keys(unread)) delete unread[id];
+  projectID.value = "";
+  taskID.value = "";
+}
+const refresh = createRefreshQueue(async () => {
+  const epoch = authEpoch;
+  try {
+    const data = await api<{
+      state: Snapshot;
+      capabilities: { agent: boolean };
+    }>("snapshot");
+    if (epoch !== authEpoch) return;
+    for (const c of Object.values(data.state.conversations)) {
+      const length = c.messages.reduce(
+          (n, m) => n + (m.role === "assistant" ? m.text.length : 0),
+          0,
+        ),
+        previous = lengths.get(c.id);
+      if (previous !== undefined && length > previous && c.id !== local.current)
+        unread[c.id] = 1;
+      lengths.set(c.id, length);
+    }
+    mergeSnapshot(local, data.state);
+    authenticated.value = true;
+    agentAvailable.value = data.capabilities.agent;
+    const projects = Object.values(data.state.projects);
+    if (!projectID.value && projects.length) projectID.value = projects[0]!.id;
+    if (projectID.value && !data.state.projects[projectID.value]) {
+      error.value = "项目不存在，请重新选择";
+      selectConversation(local, "");
+    } else if (project.value) {
+      const selected = taskID.value
+        ? data.state.tasks[taskID.value]
+        : undefined;
+      if (
+        taskID.value &&
+        (!selected || selected.projectId !== projectID.value)
+      ) {
+        error.value = "任务链接已失效，未切换发送目标";
+        selectConversation(local, "");
+      } else
+        selectConversation(
+          local,
+          selected?.conversationId ?? project.value.conversationId,
+        );
+    }
+    if (!topics.value.some((t) => t.id === mobileTopic.value))
+      mobileTopic.value = topics.value[0]?.id ?? "";
+    online.value = true;
+  } catch (e) {
+    if (epoch === authEpoch) {
+      report(e);
+      online.value = false;
+    }
+  } finally {
+    loaded.value = true;
+  }
+});
+function report(e: unknown) {
+  error.value = e instanceof Error ? e.message : "操作失败";
+  if (e instanceof APIError && e.status === 401) clearIdentity();
+}
+function connect() {
+  if (stopped || !authenticated.value) return;
+  ws?.close();
+  const socket = new WebSocket(
+    (location.protocol === "https:" ? "wss:" : "ws:") +
+      "//" +
+      location.host +
+      "/api/events",
+  );
+  ws = socket;
+  socket.onopen = () => {
+    online.value = true;
+    void reconcile();
+  };
+  socket.onmessage = () => void refresh();
+  socket.onclose = () => {
+    if (ws !== socket || stopped || !authenticated.value) return;
+    online.value = false;
+    retry = setTimeout(async () => {
+      await refresh();
+      connect();
+    }, 1500);
+  };
+  socket.onerror = () => socket.close();
+}
+async function login() {
+  const epoch = ++authEpoch;
+  loginBusy.value = true;
+  error.value = "";
+  try {
+    await api("login", { token: token.value });
+    if (epoch !== authEpoch) return;
+    token.value = "";
+    readLocation();
+    await refresh();
+    connect();
+  } catch (e) {
+    if (epoch === authEpoch) report(e);
+  } finally {
+    if (epoch === authEpoch) loginBusy.value = false;
+  }
+}
+async function logout() {
+  clearIdentity();
+  const epoch = authEpoch;
+  history.replaceState(null, "", "/");
+  try {
+    await api("logout", {});
+  } catch (e) {
+    if (epoch === authEpoch) report(e);
+  }
+}
+async function command(body: Record<string, string>): Promise<Receipt> {
+  const epoch = authEpoch;
+  if (!state.value) throw new Error("服务数据尚未就绪");
+  const scope = body.type + ":" + (body.conversationId ?? "form");
+  const signature = JSON.stringify(body);
+  let operation = operations.get(scope);
+  if (operation && operation.signature !== signature)
+    throw new Error("上一操作结果尚未确认，请保留原输入并先重试确认");
+  operation ??= {
+    id: createOperationID(),
+    signature,
+    draftRevision:
+      body.text === undefined
+        ? undefined
+        : local.drafts[body.conversationId ?? ""]?.revision,
+  };
+  operations.set(scope, operation);
+  try {
+    const receipt = await api<Receipt>("commands", {
+      ...body,
+      operationId: operation.id,
+      revision: state.value.revision,
+      structureRevision: state.value.structureRevision ?? 0,
+    });
+    if (epoch !== authEpoch) throw new Error("身份已切换");
+    operations.delete(scope);
+    await refresh();
+    return receipt;
+  } catch (e) {
+    if (epoch !== authEpoch) throw e;
+    if (e instanceof APIError && e.status === 0) {
+      try {
+        const receipt = await api<Receipt>("operations/" + operation.id);
+        if (epoch !== authEpoch) throw new Error("身份已切换");
+        operations.delete(scope);
+        await refresh();
+        return receipt;
+      } catch {
+        if (epoch !== authEpoch) throw new Error("身份已切换");
+      }
+    } else if (e instanceof APIError) operations.delete(scope);
+    await refresh();
+    throw e;
+  }
+}
+async function reconcile(retryOriginal = false) {
+  const epoch = authEpoch;
+  await refresh();
+  if (epoch !== authEpoch) return;
+  for (const [scope, operation] of [...operations]) {
+    const body = JSON.parse(operation.signature) as Record<string, string>;
+    try {
+      let receipt: Receipt;
+      try {
+        receipt = await api<Receipt>("operations/" + operation.id);
+      } catch (e) {
+        if (epoch !== authEpoch) return;
+        if (
+          retryOriginal &&
+          e instanceof APIError &&
+          e.status === 404 &&
+          state.value
+        ) {
+          receipt = await api<Receipt>("commands", {
+            ...body,
+            operationId: operation.id,
+            revision: state.value.revision,
+            structureRevision: state.value.structureRevision ?? 0,
+          });
+        } else throw e;
+      }
+      if (epoch !== authEpoch) return;
+      operations.delete(scope);
+      if (body.type === "send_message" || body.type === "start_task") {
+        const d = local.drafts[body.conversationId!];
+        if (d && operation.draftRevision !== undefined)
+          acceptSent(local, body.conversationId!, operation.draftRevision);
+      }
+      error.value = receipt.notice ?? "";
+      await refresh();
+    } catch (e) {
+      if (epoch !== authEpoch) return;
+      if (e instanceof APIError && e.status === 404)
+        error.value =
+          "上一操作暂无回执，输入已保留；可点击确认，以原操作标识重试";
+      else report(e);
+    }
+  }
+}
+function open(kind: string, topic = "") {
+  dialog.value = kind;
+  dialogTopic.value = topic || projectID.value + "_other";
+  formError.value = "";
+}
+function openModels(c?: Conversation) {
+  modelTarget.value = c ? { scope: c.id, projectId: c.projectId, conversationId: c.id, taskId: c.taskId, profile: { ...(c.profile.model ? c.profile : state.value?.profile) } as Profile } : { scope: 'default', profile: state.value?.profile };
+  modelError.value = "";
+}
+async function saveModel(values: Record<string, string>) {
+  const target = modelTarget.value, epoch = authEpoch;
+  if (!target || modelSaving.value) return;
+  modelSaving.value = true; modelError.value = "";
+  try {
+    await command({ ...values, type: target.scope === 'default' ? 'set_default_profile' : 'set_conversation_profile', projectId: target.projectId ?? '', conversationId: target.conversationId ?? '', taskId: target.taskId ?? '' });
+    if (epoch === authEpoch && modelTarget.value?.scope === target.scope) modelTarget.value = undefined;
+  } catch (e) { if (epoch === authEpoch) modelError.value = e instanceof Error ? e.message : '模型保存失败'; }
+  finally { if (epoch === authEpoch) modelSaving.value = false; }
+}
+async function save(values: Record<string, string>) {
+  const epoch = authEpoch;
+  saving.value = true;
+  formError.value = "";
+  try {
+    const kind = dialog.value;
+    const receipt = await command({
+      ...values,
+      type: (
+        {
+          project: "add_project",
+          topic: "add_topic",
+          task: "add_task",
+          delete: "delete_topic",
+          git: "update_project_git",
+        } as Record<string, string>
+      )[kind]!,
+      projectId: kind === "project" ? "" : projectID.value,
+      ...(kind === "delete" ? { topicId: dialogTopic.value } : {}),
+    });
+    if (epoch !== authEpoch) return;
+    dialog.value = "";
+    if (kind === "project" && receipt.createdId)
+      chooseProject(receipt.createdId);
+    if (kind === "topic" && receipt.createdId)
+      mobileTopic.value = receipt.createdId;
+    if (kind === "task" && receipt.createdId) {
+      const created = state.value?.tasks[receipt.createdId];
+      if (created) {
+        mobileTopic.value = created.topicId;
+        navigate(created);
+      }
+    }
+    if (receipt.notice) error.value = receipt.notice;
+    await nextTick();
+    if (width.value < 1024 && kind === "task")
+      document.querySelector<HTMLElement>("#chat-title")?.focus();
+  } catch (e) {
+    if (epoch === authEpoch)
+      formError.value = e instanceof Error ? e.message : "保存失败";
+  } finally {
+    if (epoch === authEpoch) saving.value = false;
+  }
+}
+async function send() {
+  const epoch = authEpoch;
+  const id = local.current,
+    conv = conversation.value,
+    d = local.drafts[id];
+  if (d && isMergeRequest(d.text)) {
+    const target = conv?.taskId ? state.value?.tasks[conv.taskId] : undefined;
+    if (!target) {
+      error.value = "请先选择一张任务卡片，再合并到主分支";
+      return;
+    }
+    await openMerge(target, { conversationId: id, revision: d.revision });
+    return;
+  }
+  if (d && isStartRequest(d.text)) {
+    const target = conv?.taskId ? state.value?.tasks[conv.taskId] : undefined;
+    if (!target) {
+      error.value = "请先选择一张任务卡片，再开始开发";
+      return;
+    }
+    await start(target, { text: d.text, revision: d.revision });
+    return;
+  }
+  if (
+    !conv ||
+    !d?.text.trim() ||
+    local.pending[id] ||
+    !online.value ||
+    !agentAvailable.value ||
+    !conv.profile.provider ||
+    !conv.profile.model ||
+    conv.runState !== "idle"
+  )
+    return;
+  const text = d.text,
+    revision = d.revision;
+  local.pending[id] = true;
+  error.value = "";
+  try {
+    await command({
+      type: "send_message",
+      projectId: conv.projectId,
+      conversationId: id,
+      taskId: conv.taskId ?? "",
+      text,
+    });
+    if (epoch === authEpoch) acceptSent(local, id, revision);
+  } catch (e) {
+    if (epoch === authEpoch) report(e);
+  } finally {
+    if (epoch === authEpoch) local.pending[id] = false;
+  }
+}
+async function start(target: Task, sent?: { text: string; revision: number }) {
+  const epoch = authEpoch,
+    id = target.conversationId;
+  const c = state.value?.conversations[id];
+  if (
+    !c ||
+    !online.value ||
+    local.pending[id] ||
+    !["idle", "failed"].includes(target.status) ||
+    ["starting", "running", "interrupted"].includes(c.runState)
+  )
+    return;
+  navigate(target);
+  if (!c.profile.provider || !c.profile.model) { openModels(c); return; }
+  local.pending[id] = true;
+  error.value = "";
+  try {
+    await command({
+      type: "start_task",
+      projectId: target.projectId,
+      taskId: target.id,
+      conversationId: id,
+      ...(sent ? { text: sent.text } : {}),
+    });
+    if (epoch === authEpoch && sent) acceptSent(local, id, sent.revision);
+  } catch (e) {
+    if (epoch === authEpoch) report(e);
+  } finally {
+    if (epoch === authEpoch) local.pending[id] = false;
+  }
+}
+async function resume() {
+  const epoch = authEpoch;
+  const c = conversation.value;
+  if (
+    !c ||
+    local.pending[c.id] ||
+    !agentAvailable.value ||
+    !c.profile.provider ||
+    !c.profile.model
+  )
+    return;
+  local.pending[c.id] = true;
+  try {
+    await command({
+      type: "resume",
+      projectId: c.projectId,
+      conversationId: c.id,
+      taskId: c.taskId ?? "",
+    });
+  } catch (e) {
+    if (epoch === authEpoch) report(e);
+  } finally {
+    if (epoch === authEpoch) local.pending[c.id] = false;
+  }
+}
+async function pollGit(manual = false) {
+  if (
+    !authenticated.value ||
+    !projectID.value ||
+    document.hidden ||
+    gitChecking ||
+    stopped
+  )
+    return;
+  const epoch = authEpoch,
+    id = projectID.value;
+  gitChecking = true;
+  clearTimeout(gitTimer);
+  try {
+    await api("git/refresh", { projectId: id });
+    if (epoch === authEpoch && id === projectID.value) await refresh();
+  } catch (e) {
+    if (epoch === authEpoch && manual) report(e);
+  } finally {
+    gitChecking = false;
+    if (authenticated.value && !document.hidden && !stopped) {
+      clearTimeout(gitTimer);
+      gitTimer = setTimeout(
+        () => void pollGit(),
+        id === projectID.value ? 3000 : 0,
+      );
+    }
+  }
+}
+function visibility() {
+  clearTimeout(gitTimer);
+  if (!document.hidden) void pollGit();
+}
+watch(
+  [
+    authenticated,
+    projectID,
+    () => tasks.value.map((t) => t.id + ":" + t.status).join(","),
+  ],
+  () => {
+    clearTimeout(gitTimer);
+    void pollGit();
+  },
+);
+async function openMerge(
+  target: Task,
+  sent?: { conversationId: string; revision: number },
+) {
+  const epoch = authEpoch,
+    scope = projectID.value,
+    selection = taskID.value;
+  error.value = "";
+  try {
+    const previous = Object.values(state.value?.merges ?? {})
+      .filter(
+        (op) =>
+          op.taskId === target.id &&
+          [
+            "queued",
+            "preparing",
+            "committing",
+            "committed",
+            "merging",
+            "needs_check",
+          ].includes(op.phase),
+      )
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+    const preview =
+      previous?.preview ??
+      (await api<MergePreview>("git/preview", {
+        projectId: target.projectId,
+        taskId: target.id,
+      }));
+    if (
+      epoch !== authEpoch ||
+      scope !== projectID.value ||
+      selection !== taskID.value
+    )
+      return;
+    mergeTarget.value = target;
+    mergePreview.value = preview;
+    mergeError.value = "";
+    mergeSaving.value = false;
+    mergeOpID.value = previous?.id ?? "";
+    mergeRequest = undefined;
+    mergeDraft = sent;
+  } catch (e) {
+    if (epoch === authEpoch && scope === projectID.value) report(e);
+  }
+}
+function closeMerge() {
+  mergePreview.value = undefined;
+  mergeTarget.value = undefined;
+  mergeError.value = "";
+}
+async function recheckMerge() {
+  const target = mergeTarget.value;
+  const sent = mergeDraft;
+  closeMerge();
+  if (target) await openMergeFresh(target, sent);
+}
+async function openMergeFresh(
+  target: Task,
+  sent?: { conversationId: string; revision: number },
+) {
+  const epoch = authEpoch,
+    scope = projectID.value,
+    selection = taskID.value;
+  try {
+    const preview = await api<MergePreview>("git/preview", {
+      projectId: target.projectId,
+      taskId: target.id,
+    });
+    if (
+      epoch !== authEpoch ||
+      scope !== projectID.value ||
+      selection !== taskID.value
+    )
+      return;
+    mergeTarget.value = target;
+    mergePreview.value = preview;
+    mergeError.value = "";
+    mergeOpID.value = "";
+    mergeRequest = undefined;
+    mergeDraft = sent;
+  } catch (e) {
+    if (epoch === authEpoch) report(e);
+  }
+}
+async function confirmMerge(message: string) {
+  const preview = mergePreview.value,
+    target = mergeTarget.value,
+    epoch = authEpoch;
+  if (!preview || !target || mergeSaving.value) return;
+  mergeRequest ??= {
+    operationId: createOperationID(),
+    projectId: target.projectId,
+    taskId: target.id,
+    previewId: preview.id,
+    commitMessage: message,
+  };
+  const request = { ...mergeRequest },
+    sent = mergeDraft;
+  mergeSaving.value = true;
+  mergeError.value = "";
+  try {
+    let op: MergeOperation;
+    try {
+      op = await api<MergeOperation>("git/merge", request);
+    } catch (e) {
+      if (!(e instanceof APIError) || e.status !== 0) throw e;
+      try {
+        op = await api<MergeOperation>("git/operations/" + request.operationId);
+      } catch {
+        throw new APIError(
+          0,
+          "merge_uncertain",
+          "尚未查到合并回执；请以原操作标识重试确认",
+        );
+      }
+    }
+    if (epoch !== authEpoch) return;
+    if (sent) acceptSent(local, sent.conversationId, sent.revision);
+    if (mergePreview.value?.id === preview.id) mergeOpID.value = op.id;
+    await refresh();
+    void pollGit();
+  } catch (e) {
+    if (epoch === authEpoch && mergePreview.value?.id === preview.id) {
+      mergeError.value = e instanceof Error ? e.message : "合并请求未确认";
+      if (e instanceof APIError && e.status !== 0) mergeRequest = undefined;
+      report(e);
+    }
+  } finally {
+    if (epoch === authEpoch) mergeSaving.value = false;
+  }
+}
+function beforeUnload(event: BeforeUnloadEvent) {
+  if (Object.values(local.drafts).some((d) => d.text.trim())) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+}
+function resize() {
+  width.value = innerWidth;
+}
+function pop() {
+  readLocation();
+  void refresh();
+}
+onMounted(async () => {
+  readLocation();
+  window.addEventListener("beforeunload", beforeUnload);
+  window.addEventListener("resize", resize);
+  window.addEventListener("popstate", pop);
+  document.addEventListener("visibilitychange", visibility);
+  await refresh();
+  connect();
+});
+onBeforeUnmount(() => {
+  stopped = true;
+  clearTimeout(retry);
+  clearTimeout(gitTimer);
+  document.removeEventListener("visibilitychange", visibility);
+  ws?.close();
+  window.removeEventListener("beforeunload", beforeUnload);
+  window.removeEventListener("resize", resize);
+  window.removeEventListener("popstate", pop);
+});
+</script>
+<template>
+  <div v-if="!loaded" class="entry"><p>正在连接开悟……</p></div>
+  <main v-else-if="!authenticated" class="entry">
+    <form class="login-card" @submit.prevent="login">
+      <span class="logo">悟</span>
+      <h1>进入开悟</h1>
+      <p>连接你自己的开发工作台</p>
+      <label
+        ><span>本机访问令牌</span
+        ><input
+          v-model="token"
+          type="password"
+          autocomplete="current-password"
+          required
+          autofocus
+      /></label>
+      <p class="error" role="alert">{{ error }}</p>
+      <button class="primary" :disabled="loginBusy">
+        {{ loginBusy ? "连接中…" : "进入工作台" }}
+      </button>
+      <p class="muted">
+        登录状态保留 30 天，刷新无需重新输入；点击“退出”可清除登录。
+      </p>
+    </form>
+  </main>
+  <template v-else
+    ><header class="top">
+      <span class="logo">悟</span><span class="brand">开悟</span
+      ><span class="slash">/</span
+      ><select
+        v-if="state && Object.keys(state.projects).length"
+        aria-label="当前项目"
+        :value="projectID"
+        @change="chooseProject(($event.target as HTMLSelectElement).value)"
+      >
+        <option v-for="p in state.projects" :key="p.id" :value="p.id">
+          {{ p.name }}
+        </option></select
+      ><button aria-label="添加项目" @click="open('project')">＋ 项目</button
+      ><button
+        v-if="project"
+        class="icon project-git-settings"
+        aria-label="项目 Git 设置"
+        title="项目 Git 设置"
+        @click="open('git')"
+      >
+        ⚙</button
+      ><button
+        v-if="project"
+        class="icon"
+        aria-label="刷新 Git 状态"
+        title="刷新 Git 状态"
+        @click="pollGit(true)"
+      >
+        ↻</button
+      ><button aria-label="默认模型" title="为新项目和任务选择默认模型" @click="openModels()">默认模型</button
+      ><span class="connection" :class="{ off: !online }">{{
+        online ? "● 已连接" : "○ 正在重连"
+      }}</span
+      ><button @click="logout">退出</button>
+    </header>
+    <div v-if="error || operations.size" class="global-error" role="alert">
+      {{ error || "正在确认操作结果"
+      }}<button
+        v-if="operations.size"
+        :disabled="!online"
+        @click="reconcile(true)"
+      >
+        确认上一操作</button
+      ><button @click="error = ''">关闭提示</button>
+    </div>
+    <div v-if="!project" class="entry">
+      <div>
+        <h1>从你的第一个项目开始</h1>
+        <p>添加服务器上的项目目录，也可初始化新 Git 项目。</p>
+        <button class="primary" @click="open('project')">＋ 添加项目</button>
+      </div>
+    </div>
+    <template v-else
+      ><nav class="mobile-switch" aria-label="看板与聊天">
+        <button :aria-pressed="!chatVisible" @click="chatVisible = false">
+          ▦ 看板</button
+        ><button :aria-pressed="chatVisible" @click="chatVisible = true">
+          ◌ 聊天
+        </button>
+      </nav>
+      <div class="app" :class="{ 'chat-visible': chatVisible }">
+        <KanbanBoard
+          :git="state?.taskGit ?? {}"
+          :topics="topics"
+          :tasks="tasks"
+          :unread="unread"
+          :selected="taskID"
+          :mobile-topic="mobileTopic"
+          :online="online"
+          :pending="local.pending"
+          :conversations="state?.conversations ?? {}"
+          @select="navigate"
+          @start="start($event)"
+          @merge="openMerge($event)"
+          @topic="mobileTopic = $event"
+          @add-topic="open('topic')"
+          @add-task="open('task', $event)"
+          @delete-topic="open('delete', $event.id)"
+        /><ChatPanel
+          v-if="conversation"
+          :key="'chat-panel'"
+          :conversation="conversation"
+          :task="task"
+          :git="task ? state?.taskGit?.[task.id] : undefined"
+          :execution="
+            task?.executionId
+              ? state?.executions?.[task.executionId]
+              : undefined
+          "
+          :project-name="project.name"
+          :draft="draft"
+          :pending="!!local.pending[local.current]"
+          :online="online"
+          :agent-available="
+            agentAvailable &&
+            !!conversation.profile.provider &&
+            !!conversation.profile.model
+          "
+          :visible="width >= 1024 || chatVisible"
+          :scroll="local.scroll"
+          @draft="setDraft(local, $event)"
+          @send="send"
+          @project="navigate()"
+          @create="open('task')"
+          @resume="resume"
+          @start="task && start(task)"
+          @merge="task && openMerge(task)"
+          @model="openModels(conversation)"
+        />
+        <aside v-else class="chat">
+          <p class="error">聊天目标无效。请显式选择项目或任务。</p>
+          <button @click="navigate()">返回项目对话</button>
+        </aside>
+      </div></template
+    >
+    <MergeDialog
+      v-if="mergePreview && mergeTarget"
+      :key="mergePreview.id"
+      :preview="mergePreview"
+      :task-title="mergeTarget.title"
+      :saving="mergeSaving"
+      :operation="mergeOperation"
+      :error="mergeError"
+      @close="closeMerge"
+      @confirm="confirmMerge"
+      @recheck="recheckMerge"
+    />
+    <ModelDialog v-if="modelTarget" :key="modelTarget.scope" :scope="modelTarget.scope" :profile="modelTarget.profile" :saving="modelSaving" :error="modelError" @close="modelTarget = undefined" @submit="saveModel" />
+    <TaskDialog
+      v-if="dialog"
+      :kind="dialog"
+      :project="project"
+      :topic-i-d="dialogTopic"
+      :topics="topics"
+      :error="formError"
+      :saving="saving"
+      @close="dialog = ''"
+      @submit="save"
+    />
+  </template>
+</template>

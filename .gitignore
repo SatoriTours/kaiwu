@@ -1,0 +1,30 @@
+# Local build products
+/server/bin/
+/server/kaiwu-server
+/server/kaiwu-server.exe
+/apps/web/node_modules/
+/apps/web/dist/
+/apps/web/test-results/
+/apps/web/playwright-report/
+/server/internal/webui/dist/*
+!/server/internal/webui/dist/.gitkeep
+
+# Local agent execution scratch records
+.superpowers/
+
+# Runtime state, personal configuration, and credentials
+.kaiwu/
+.env
+.env.*
+!.env.example
+auth.local.json
+credentials.local.json
+
+# Python smoke-test bytecode
+__pycache__/
+*.pyc
+
+# Local editor and OS metadata
+.DS_Store
+.idea/
+.vscode/

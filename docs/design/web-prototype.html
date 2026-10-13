@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>开悟 · 看板与会话</title>
+  <style>
+    :root { color-scheme:light; --ink:#202526; --muted:#808588; --border:#e8e9eb; --blue:#4e70a6; --bg:#fcfcfc; }
+    * { box-sizing:border-box; }
+    body { margin:0; height:100dvh; overflow:hidden; color:var(--ink); background:white; font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; display:flex; flex-direction:column; }
+    button,input,textarea,select { font:inherit; color:inherit; }
+    button { min-height:36px; border:1px solid var(--border); border-radius:7px; padding:7px 11px; cursor:pointer; background:white; }
+    button:hover { background:#f2f4f7; } button:disabled { opacity:.45; cursor:not-allowed; }
+    button.primary { background:#283c5d; color:white; border-color:#283c5d; }
+    :focus-visible { outline:3px solid #7f9fd1; outline-offset:3px; }
+    select,input,textarea { border:1px solid var(--border); border-radius:7px; padding:9px 10px; background:white; max-width:100%; }
+    input,textarea { width:100%; } textarea { resize:vertical; }
+    h1,h2,h3,p { margin:0; } h1 { font-size:19px; } h2 { font-size:15px; } h3 { font-size:14px; }
+    .row { display:flex; align-items:center; gap:9px; min-width:0; } .between { justify-content:space-between; } .muted { color:var(--muted); } small { font-size:12px; color:var(--muted); }
+    .demo { flex-shrink:0; font-size:11px; padding:5px 20px; color:#77715f; background:#f5f3ec; border-bottom:1px solid #eae7de; }
+    .top { flex-shrink:0; min-height:61px; padding:10px 22px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:16px; }
+    .logo { width:29px; height:29px; display:grid; place-items:center; background:#27352f; color:#fff; border-radius:8px; font-size:17px; font-weight:600; }
+    .brand { font-size:18px; font-weight:650; letter-spacing:1px; } .slash { color:#c6c9cb; font-size:20px; } .project-name { font-weight:550; }
+    .top .connection { margin-left:auto; font-size:12px; color:#5e7564; border:0; background:#f2f6f1; } .connection.off { color:#9a702c; background:#fff7e8; }
+    .app { flex:1; min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 410px; }
+    .board-side { min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--bg); }
+    .toolbar { min-height:66px; padding:13px 22px; flex-shrink:0; display:flex; align-items:center; gap:9px; }
+    .toolbar h1 { margin-right:auto; } .toolbar .running { font-size:12px; color:#6f7974; }
+    .board { flex:1; min-height:0; overflow-x:auto; display:flex; align-items:stretch; gap:16px; padding:0 20px 20px; scrollbar-width:thin; }
+    .column { flex:1 0 248px; width:248px; max-width:350px; min-width:0; min-height:0; background:#f5f6f7; border-radius:10px; display:flex; flex-direction:column; }
+    .column:nth-child(2) { background:#f8f7f1; } .column:last-child { background:#f6f6f5; }
+    .column-head { padding:15px 12px 12px; display:flex; align-items:center; gap:7px; flex-shrink:0; }
+    .column-head h2 { min-width:0; overflow-wrap:anywhere; font-size:13px; font-weight:600; }
+    .column-dot { width:8px; height:8px; border:2px solid #8392a5; border-radius:50%; flex-shrink:0; }
+    .column:nth-child(2) .column-dot { border-color:#c1a462; } .column:last-child .column-dot { border-color:#a9abaa; }
+    .count { color:#93989b; font-size:12px; } .column-actions { margin-left:auto; display:flex; gap:3px; }
+    .icon { border:0; padding:2px 6px; min-width:28px; min-height:30px; color:#9ca2a5; background:transparent; font-size:18px; }
+    .column-cards { overflow-y:auto; min-height:0; padding:0 10px 12px; scrollbar-width:thin; }
+    .task-card { width:100%; text-align:left; display:block; padding:13px; margin-bottom:10px; border:1px solid #e3e5e7; border-radius:8px; background:white; box-shadow:0 1px 2px #20202008; }
+    .task-card:hover { background:white; border-color:#b7c5d8; box-shadow:0 2px 7px #263c5c0c; }
+    .task-card.selected { border-color:#7d9bc6; background:#f7faff; box-shadow:0 0 0 1px #7d9bc622; }
+    .task-top { display:flex; gap:6px; align-items:flex-start; justify-content:space-between; margin-bottom:10px; }
+    .task-number { color:#969b9f; font-size:11px; white-space:nowrap; padding-top:2px; }
+    .task-status { display:inline-flex; align-items:center; gap:4px; font-size:10px; line-height:1.5; border-radius:4px; padding:2px 5px; color:#727a80; background:#f3f4f5; text-align:right; }
+    .task-status[data-status=running] { background:#f8f1db; color:#937c25; }
+    .task-status[data-status=needs_confirmation] { background:#fff0df; color:#ac6a2d; }
+    .task-status[data-status=completed] { background:#eaf4ee; color:#4f8765; }
+    .task-status[data-status=failed] { background:#fceeed; color:#b56260; }
+    .task-card h3 { font-size:14px; font-weight:550; line-height:1.65; margin-bottom:18px; overflow-wrap:anywhere; }
+    .task-bottom { display:flex; gap:4px; align-items:center; justify-content:space-between; font-size:11px; color:#8a8e91; }
+    .owner { display:inline-flex; align-items:center; gap:5px; min-width:0; }
+    .avatar { width:19px; height:19px; border-radius:50%; display:inline-grid; place-items:center; background:#ebeef1; color:#6a747e; font-size:9px; flex-shrink:0; }
+    .unread { width:6px; height:6px; border-radius:50%; background:#5078b8; display:inline-block; margin-left:5px; }
+    .empty { border:1px dashed #dddfe1; border-radius:8px; padding:22px 10px; text-align:center; color:#a0a5a7; font-size:12px; }
+    .board-bottom { font-size:11px; color:#94999c; padding:9px 22px; flex-shrink:0; border-top:1px solid #f0f0f0; }
+    .chat { min-width:0; min-height:0; border-left:1px solid var(--border); display:flex; flex-direction:column; background:white; }
+    .chat-head { padding:18px 20px 14px; border-bottom:1px solid var(--border); flex-shrink:0; }
+    .chat-head .avatar { background:#27352f; color:white; width:30px; height:30px; font-size:13px; }
+    .chat-head h2 { font-size:14px; overflow-wrap:anywhere; } .chat-head small { display:block; font-size:11px; margin-top:3px; }
+    .return { border:0; min-height:30px; padding:3px 0; color:var(--blue); font-size:12px; margin-top:9px; background:transparent; }
+    .scope { padding:9px 20px; border-bottom:1px solid #f1f2f3; font-size:11px; color:#899094; background:#fdfdfd; flex-shrink:0; }
+    .messages { flex:1; min-height:0; overflow-y:auto; padding:22px 20px; scrollbar-width:thin; }
+    .message { margin-bottom:22px; } .message .author { display:flex; align-items:center; gap:7px; font-size:11px; color:#92979b; margin-bottom:8px; }
+    .message .author strong { color:#626b70; font-weight:500; } .message .text { line-height:1.85; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; }
+    .message.user .text { background:#f3f5f7; border-radius:10px; padding:12px 14px; } .message.user { margin-left:18px; }
+    .context-card { border:1px solid var(--border); border-radius:8px; padding:13px; background:#fbfcfd; margin-top:17px; font-size:12px; }
+    .context-card p { margin-top:7px; color:#778187; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .quick-create { margin-top:15px; font-size:12px; color:var(--blue); }
+    .composer { padding:14px 17px; border-top:1px solid var(--border); flex-shrink:0; }
+    .context-label { color:#848e95; font-size:11px; margin-bottom:9px; overflow-wrap:anywhere; }
+    .editor { border:1px solid #dfe3e7; border-radius:10px; padding:10px; }
+    .editor textarea { display:block; padding:0; border:0; resize:none; width:100%; height:80px; min-height:50px; max-height:150px; font-size:13px; line-height:1.8; }
+    .editor textarea:focus { outline:none; } .editor:focus-within { border-color:#849fc3; box-shadow:0 0 0 2px #dce6f4; }
+    .editor .row { justify-content:space-between; margin-top:8px; }
+    #send { min-height:32px; font-size:12px; padding:4px 12px; }
+    .composer-tip { margin-top:8px; font-size:10px; color:#a2a7aa; }
+    .demo-controls { padding:10px 17px; border-top:1px solid var(--border); background:#fbfbfb; font-size:11px; display:flex; align-items:center; gap:8px; flex-shrink:0; }
+    .demo-controls select { font-size:11px; padding:5px; min-width:0; flex:1; }
+    .mobile-switch,.mobile-topic { display:none; }
+    dialog { width:min(460px,calc(100vw - 30px)); max-height:85dvh; overflow:auto; border:1px solid #dce0e5; border-radius:12px; padding:25px; box-shadow:0 20px 90px #17203233; }
+    dialog::backdrop { background:#20293655; } dialog h2 { font-size:18px; } dialog p { margin:12px 0; font-size:13px; color:#778087; } dialog label { display:block; font-size:12px; margin:15px 0; } dialog label span { display:block; margin-bottom:6px; } dialog select { width:100%; } dialog textarea { min-height:110px; }
+    .dialog-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:20px; } .danger { color:#b04d4d; } .error { color:#b45545; font-size:12px; min-height:18px; }
+    .toast { position:fixed; bottom:18px; left:24px; background:#2e3949; color:white; border-radius:8px; padding:10px 15px; z-index:5; font-size:12px; max-width:calc(100vw - 48px); pointer-events:none; } .toast:empty { display:none; }
+    @media(min-width:1700px) { .app { grid-template-columns:minmax(0,1fr) 440px; } .column { flex-basis:275px; } }
+    @media(max-width:1023px) {
+      .top { padding:9px 15px; gap:10px; } .top .project-name { font-size:12px; } .app { display:block; }
+      .board-side { height:100%; } .chat { height:100%; display:none; border:0; } body.chat-visible .board-side { display:none; } body.chat-visible .chat { display:flex; }
+      .mobile-switch { display:flex; padding:7px 15px; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0; } .mobile-switch button { flex:1; min-height:34px; font-size:12px; }
+      body:not(.chat-visible) #show-board,body.chat-visible #show-chat { background:#eef2f8; color:var(--blue); }
+      .toolbar { min-height:60px; padding:12px 15px; flex-wrap:wrap; } .toolbar .running { display:none; }
+      .column { flex-basis:265px; } .board { padding:0 14px 14px; gap:12px; } .composer { padding-bottom:18px; }
+    }
+    @media(max-width:599px) {
+      .demo { padding:5px 15px; font-size:10px; } .top { min-height:55px; gap:8px; } .brand { font-size:16px; } .top .slash { display:none; } .top .connection { padding:5px 7px; font-size:10px; min-height:32px; }
+      .toolbar h1 { font-size:16px; } .toolbar button { font-size:11px; padding:6px 8px; } .mobile-topic { display:block; width:100%; font-size:12px; min-height:38px; }
+      .board { display:block; overflow-x:hidden; } .column { height:100%; width:100%; max-width:none; } .column.mobile-hidden { display:none; }
+      .task-card h3 { font-size:15px; } .task-status { font-size:11px; } .board-bottom { padding:8px 15px; } .chat-head { padding:14px 17px; } .messages { padding:18px 17px; }
+      .column-head h2 { font-size:14px; } .column-head { padding:14px; }
+    }
+    @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; } }
+  </style>
+</head>
+<body>
+  <div class="demo">界面原型 · 模拟数据与 pi 会话 · 无真实模型或 Git 操作 · 刷新重置</div>
+  <header class="top"><span class="logo" aria-hidden="true">悟</span><span class="brand">开悟</span><span class="slash">/</span><span class="project-name">kaiwu</span><button class="connection" id="connection">● 模拟已连接</button></header>
+  <nav class="mobile-switch" aria-label="看板与聊天"><button id="show-board">▦ 看板</button><button id="show-chat">◌ 聊天</button></nav>
+  <div class="app">
+    <section class="board-side" aria-label="项目任务看板">
+      <div class="toolbar"><h1>项目看板</h1><span class="running" id="running-summary"></span><button data-action="new-topic">＋ 专题</button><button class="primary" data-action="new-task">＋ 任务</button><select id="mobile-topic" class="mobile-topic" aria-label="当前看板专题"></select></div>
+      <div class="board" id="board"></div>
+      <div class="board-bottom">专题组织任务 · 状态显示在卡片右上角 · 点击卡片进入对应会话</div>
+    </section>
+    <aside class="chat" id="chat" aria-label="项目或任务聊天">
+      <header class="chat-head" id="chat-heading"></header>
+      <div class="scope" id="scope-note"></div>
+      <div class="messages" id="messages" aria-label="当前会话消息"></div>
+      <div class="composer"><div class="context-label" id="composer-target"></div><div class="editor"><textarea id="draft" aria-label="当前会话草稿" maxlength="5000" placeholder="聊聊你的想法……"></textarea><div class="row"><small>pi <span id="send-state">· 模拟会话</span></small><button class="primary" id="send">发送 ↑</button></div></div><div class="composer-tip">Enter 换行 · Ctrl / ⌘ + Enter 发送 · 各会话草稿独立保留</div></div>
+      <div class="demo-controls" id="demo-controls" hidden><label for="demo-status">演示卡片状态</label><select id="demo-status" aria-label="演示卡片状态"></select></div>
+    </aside>
+  </div>
+  <dialog id="modal" aria-labelledby="dialog-title"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="web-prototype-state.js"></script>
+  <script>
+    'use strict';
+    const $ = id => document.getElementById(id);
+    const html = text => String(text).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const api=KaiwuPrototypeState;
+    let state=api.createDemoState(), online=true, mobileTopic='topic1', toastTimer, dialogTrigger;
+    const pending=new Map(), unread=new Set(), scrollPositions=new Map();
+    const statuses={idle:['○','未开始'],running:['◐','执行中'],needs_confirmation:['!','需要确认'],completed:['✓','执行完成 · 查看结果'],failed:['×','执行失败']};
+    const errors={invalid_name:'专题名需为 1–40 个字，不能为空。',duplicate_name:'已有同名专题，请换一个名字。',protected_topic:'“其他”是默认收纳列，不能删除。',not_found:'目标已不存在，请重新选择。',invalid_input:'请检查输入内容和长度。',invalid_status:'此状态不可用。'};
+    const currentId=()=>api.currentConversationId(state);
+    const selected=()=>state.tasks.find(task=>task.id===state.selectedTaskId);
+    function dispatch(action) { const result=api.dispatch(state,action);if(!result.error)state=result.state;return result; }
+    function notify(text) { $('toast').textContent=text;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').textContent='',4500); }
+    function saveScroll() {
+      // Hidden chat panels report scrollTop=0; preserve their last visible reading position.
+      if($('messages').clientHeight>0)scrollPositions.set(currentId(),$('messages').scrollTop);
+    }
+    function switchTask(id) {
+      if(state.selectedTaskId===id){
+        if(innerWidth<1024){document.body.classList.add('chat-visible');renderMessages(true);}
+        return;
+      }
+      saveScroll();
+      const result=dispatch({type:'select_task',taskId:id});
+      if(result.error){notify(errors[result.error]);return;}
+      unread.delete(currentId());
+      // Restore scroll only after the destination panel has visible layout dimensions.
+      if(innerWidth<1024)document.body.classList.add('chat-visible');
+      renderBoard();renderChat(true);
+    }
+    function renderBoard() {
+      if(!state.topics.some(topic=>topic.id===mobileTopic))mobileTopic='other';
+      const scroll=$('board').scrollLeft;
+      const columnScrolls=new Map([...document.querySelectorAll('.column-cards')].map(el=>[el.dataset.topicid,el.scrollTop]));
+      $('board').innerHTML=state.topics.map(topic=>{
+        const tasks=state.tasks.filter(task=>task.topicId===topic.id);
+        return `<section class="column ${topic.id===mobileTopic?'':'mobile-hidden'}" data-topicid="${topic.id}" aria-label="${html(topic.name)}"><header class="column-head"><span class="column-dot" aria-hidden="true"></span><h2>${html(topic.name)}</h2><span class="count">${tasks.length}</span><div class="column-actions">${topic.id!=='other'?`<button class="icon" data-action="delete-topic" data-topicid="${topic.id}" aria-label="删除专题 ${html(topic.name)}" title="删除专题，任务移入其他">⋯</button>`:''}<button class="icon" data-action="new-task" data-topicid="${topic.id}" aria-label="在 ${html(topic.name)} 新建任务">＋</button></div></header><div class="column-cards" data-topicid="${topic.id}">${tasks.length?tasks.map(task=>{
+          const [icon,label]=statuses[task.status];
+          return `<button class="task-card ${state.selectedTaskId===task.id?'selected':''}" data-taskid="${task.id}" aria-pressed="${state.selectedTaskId===task.id}" aria-label="任务 ${task.id} ${html(task.title)}，${label}"><div class="task-top"><span class="task-number">KW-${task.id.slice(1)}${unread.has('task:kaiwu:'+task.id)?'<span class="unread" aria-label="有未读回复"></span>':''}</span><span class="task-status" data-status="${task.status}"><span aria-hidden="true">${icon}</span>${label}</span></div><h3>${html(task.title)}</h3><div class="task-bottom"><span class="owner"><span class="avatar" aria-hidden="true">π</span>${html(task.owner)}</span><span>${html(task.updated)}</span></div></button>`;
+        }).join(''):'<div class="empty">暂无任务<br>点击上方 ＋ 添加第一张卡片</div>'}</div></section>`;
+      }).join('');
+      $('board').scrollLeft=scroll;
+      document.querySelectorAll('.column-cards').forEach(el=>el.scrollTop=columnScrolls.get(el.dataset.topicid)||0);
+      $('mobile-topic').innerHTML=state.topics.map(topic=>`<option value="${topic.id}"${topic.id===mobileTopic?' selected':''}>${html(topic.name)} · ${state.tasks.filter(task=>task.topicId===topic.id).length}</option>`).join('');
+      $('running-summary').textContent=`◐ ${state.tasks.filter(task=>task.status==='running').length} 个任务执行中`;
+      document.querySelectorAll('[data-action=new-topic],[data-action=new-task],[data-action=delete-topic]').forEach(button=>button.disabled=!online);
+    }
+    function renderMessages(reset=false) {
+      const task=selected(), id=currentId(), messages=state.conversations[id].messages;
+      const oldScroll=$('messages').scrollTop, wasBottom=$('messages').scrollHeight-$('messages').clientHeight-oldScroll<50;
+      $('messages').dataset.conversation=id;
+      $('messages').innerHTML=messages.map(message=>`<article class="message ${message.role}" data-messageid="${html(message.id)}"><div class="author"><span class="avatar" aria-hidden="true">${message.role==='user'?'我':'π'}</span><strong>${message.role==='user'?'你':'pi · '+(task?'任务 Agent':'项目 Agent')}</strong><span>${message.role==='user'?'模拟已接受':'模拟回复'}</span></div><div class="text">${html(message.text)}</div></article>`).join('')+(task?`<section class="context-card"><div class="row between"><strong>${statuses[task.status][1]}</strong><small>KW-${task.id.slice(1)}</small></div><p>${html(task.result&&['completed','failed'].includes(task.status)?task.result:task.status==='needs_confirmation'?'模拟待确认：请讨论本任务的需求或限制。本界面没有真实工具审批执行。':task.request)}</p></section>`:`<div class="context-card"><strong>从一个想法开始</strong><p>项目会话处理整体安排。需要独立推进的工作，可以创建为左侧的任务卡片。</p><button class="quick-create" data-action="new-task"${online?'':' disabled'}>＋ 创建任务卡片</button></div>`);
+      if(reset)$('messages').scrollTop=scrollPositions.get(id)||0;
+      else $('messages').scrollTop=wasBottom?$('messages').scrollHeight:oldScroll;
+    }
+    function updateSend() {
+      const id=currentId(), waiting=pending.has(id);
+      $('send').disabled=!online||waiting||!state.conversations[id].draft.trim();
+      $('send').textContent=waiting?'提交中…':selected()?.status==='running'?'排入下一轮 ↑':'发送 ↑';
+      $('send-state').textContent=!online?'· 离线，草稿保留':waiting?'· 正在模拟提交':'· 模拟会话';
+    }
+    function renderChat(reset=false) {
+      const task=selected(),id=currentId();
+      $('chat-heading').innerHTML=`<div class="row"><span class="avatar" aria-hidden="true">π</span><div><h2 id="chat-title">${task?'任务对话 · '+html(task.title):'项目对话 · kaiwu'}</h2><small id="chat-session">pi 独立会话 · 模拟 ${html(id)}</small></div></div>${task?'<button class="return" data-action="project">← 返回项目对话</button>':''}`;
+      $('scope-note').textContent=online?(task?`当前只与任务 KW-${task.id.slice(1)} 沟通，其他会话继续执行。`:'项目级沟通：讨论需求、创建卡片、协调工作。'):'模拟离线 · 当前为最后已知内容，写操作已禁用。';
+      $('composer-target').textContent=task?`发送至 KW-${task.id.slice(1)} · ${task.title}`:'发送至项目 kaiwu';
+      $('draft').value=state.conversations[id].draft;
+      $('draft').placeholder=task?'补充这个任务的要求……':'提出项目想法，或讨论接下来做什么……';
+      renderMessages(reset);updateSend();
+      $('demo-controls').hidden=!task;
+      $('demo-controls').style.display=task?'flex':'none';
+      $('demo-status').innerHTML=Object.entries(statuses).map(([key,[icon,label]])=>`<option value="${key}"${task?.status===key?' selected':''}>${icon} ${label}</option>`).join('');
+      $('demo-status').disabled=!online;
+    }
+    function openDialog(content,trigger) { dialogTrigger=trigger||document.activeElement;$('modal').innerHTML=content;$('modal').showModal(); }
+    function closeDialog() { $('modal').close(); }
+    $('modal').addEventListener('close',()=>{if(dialogTrigger?.isConnected)dialogTrigger.focus();else document.querySelector('[data-action=new-topic]').focus();});
+    function newTaskDialog(topicId='other',trigger) {
+      openDialog(`<h2 id="dialog-title">创建任务卡片</h2><p>每张卡片对应独立任务与 pi 会话。此处只创建模拟卡片，不执行代码。</p><form id="task-form"><label><span>功能专题</span><select name="topicId">${state.topics.map(topic=>`<option value="${topic.id}"${topic.id===topicId?' selected':''}>${html(topic.name)}</option>`).join('')}</select></label><label><span>任务标题（可选）</span><input id="task-title" name="title" maxlength="80" placeholder="简短描述任务"></label><label><span>需求</span><textarea id="task-request" name="request" required maxlength="5000" placeholder="你希望完成什么？"></textarea></label><p>配置：日常开发 · pi 主 Agent＋执行 Agent（模拟）</p><div class="error" id="form-error" role="alert"></div><div class="dialog-actions"><button type="button" data-action="close">取消</button><button class="primary" type="submit">创建卡片</button></div></form>`,trigger);
+    }
+    document.addEventListener('click',event=>{
+      const button=event.target.closest('button');if(!button||button.disabled)return;
+      if(button.dataset.taskid){switchTask(button.dataset.taskid);return;}
+      const action=button.dataset.action;
+      if(action==='project'){switchTask(null);return;}
+      if(action==='close'){closeDialog();return;}
+      if(!online&&action){notify('模拟离线，恢复连接后再操作。');return;}
+      if(action==='new-topic')openDialog('<h2 id="dialog-title">添加功能专题</h2><p>专题是一列相关任务，任务状态仍显示在各卡片右上角。</p><form id="topic-form"><label><span>专题名称</span><input id="topic-name" name="name" required placeholder="例如：用户体验"></label><div class="error" id="form-error" role="alert"></div><div class="dialog-actions"><button type="button" data-action="close">取消</button><button class="primary" type="submit">添加专题</button></div></form>',button);
+      if(action==='new-task')newTaskDialog(button.dataset.topicid||'other',button);
+      if(action==='delete-topic'){
+        const topic=state.topics.find(item=>item.id===button.dataset.topicid);if(!topic)return;
+        const count=state.tasks.filter(item=>item.topicId===topic.id).length;
+        openDialog(`<h2 id="dialog-title">删除「${html(topic.name)}」专题？</h2><p>其中 ${count} 个任务将移入“其他”。任务、对话、草稿和结果都会保留，执行不会停止。</p><div class="error" id="form-error" role="alert"></div><div class="dialog-actions"><button data-action="close">取消</button><button class="danger" id="confirm-delete" data-topicid="${topic.id}">删除专题，保留任务</button></div>`,button);
+      }
+    });
+    document.addEventListener('submit',event=>{
+      if(!['topic-form','task-form'].includes(event.target.id))return;
+      event.preventDefault();if(!online)return;
+      const data=new FormData(event.target);
+      if(event.target.id==='task-form')saveScroll();
+      const result=event.target.id==='topic-form'?dispatch({type:'add_topic',name:data.get('name')}):dispatch({type:'add_task',topicId:data.get('topicId'),title:data.get('title'),request:data.get('request')});
+      if(result.error){$('form-error').textContent=errors[result.error];return;}
+      if(event.target.id==='task-form'){mobileTopic=state.tasks.find(task=>task.id===result.createdId).topicId;if(innerWidth<1024)document.body.classList.add('chat-visible');renderChat(true);}
+      else mobileTopic=result.createdId;
+      closeDialog();renderBoard();notify(result.notice||'已保存至本页面模拟数据。');
+    });
+    $('modal').addEventListener('click',event=>{
+      if(event.target.id!=='confirm-delete'||!online)return;
+      const result=dispatch({type:'delete_topic',topicId:event.target.dataset.topicid});
+      if(result.error){$('form-error').textContent=errors[result.error];return;}
+      closeDialog();renderBoard();notify('专题已删除，任务及独立会话全部保留。');
+    });
+    $('draft').addEventListener('input',()=>{dispatch({type:'set_draft',conversationId:currentId(),text:$('draft').value});updateSend();});
+    function sendMessage() {
+      const id=currentId(),conversation=state.conversations[id];
+      if(!online||pending.has(id)||!conversation.draft.trim())return;
+      const captured={conversationId:id,text:conversation.draft,draftRevision:conversation.draftRevision};
+      pending.set(id,true);updateSend();
+      setTimeout(()=>{
+        const result=dispatch({type:'send_message',...captured});pending.delete(id);
+        if(result.error){notify(errors[result.error]);if(currentId()===id)updateSend();return;}
+        if(currentId()===id){const draft=$('draft'),start=draft.selectionStart,end=draft.selectionEnd;draft.value=state.conversations[id].draft;draft.setSelectionRange(Math.min(start,draft.value.length),Math.min(end,draft.value.length));renderMessages();updateSend();}
+        setTimeout(()=>{
+          dispatch({type:'receive_reply',conversationId:id,messageId:'reply:'+result.createdId,text:`已收到：${captured.text.trim()}\n\n这条模拟回复只属于当前绑定的独立 pi 会话。真实 Agent 尚未接入。`});
+          if(currentId()===id)renderMessages();else{unread.add(id);renderBoard();}
+        },800);
+      },300);
+    }
+    $('send').addEventListener('click',sendMessage);
+    $('draft').addEventListener('keydown',event=>{if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)&&!event.isComposing){event.preventDefault();sendMessage();}});
+    $('demo-status').addEventListener('change',()=>{if(!online||!selected())return;dispatch({type:'set_task_status',taskId:selected().id,status:$('demo-status').value});renderBoard();renderMessages();updateSend();});
+    $('connection').addEventListener('click',()=>{online=!online;if($('modal').open)closeDialog();$('connection').textContent=online?'● 模拟已连接':'○ 模拟离线 · 点击恢复';$('connection').classList.toggle('off',!online);renderBoard();renderChat();notify(online?'模拟连接恢复，未启动真实 CLI。':'模拟离线，草稿与会话保留。');});
+    $('mobile-topic').addEventListener('change',()=>{mobileTopic=$('mobile-topic').value;renderBoard();});
+    $('show-board').addEventListener('click',()=>{saveScroll();document.body.classList.remove('chat-visible');});
+    $('show-chat').addEventListener('click',()=>{if(document.body.classList.contains('chat-visible'))return;document.body.classList.add('chat-visible');renderMessages(true);});
+    window.addEventListener('beforeunload',event=>{if(Object.values(state.conversations).some(item=>item.draft.trim())){event.preventDefault();event.returnValue='';}});
+    renderBoard();renderChat(true);
+  </script>
+</body>
+</html>

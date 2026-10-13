@@ -1,0 +1,142 @@
+package agent
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/SatoriTours/kaiwu/server/internal/pirpc"
+	"github.com/SatoriTours/kaiwu/server/internal/workbench"
+)
+
+func executionFor(st workbench.State, id string) (workbench.Task, workbench.Execution, bool) {
+	c := st.Conversations[id]
+	t, ok := st.Tasks[c.TaskID]
+	if !ok || t.ExecutionID == "" {
+		return t, workbench.Execution{}, false
+	}
+	x, ok := st.Executions[t.ExecutionID]
+	return t, x, ok
+}
+
+func setExecutionPhase(st *workbench.State, id, phase, message string) {
+	t, x, ok := executionFor(*st, id)
+	if !ok {
+		return
+	}
+	x.Phase = phase
+	x.Error = message
+	switch phase {
+	case "failed":
+		t.Status = "failed"
+		x.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	case "interrupted":
+		t.Status = "needs_confirmation"
+	default:
+		t.Status = "running"
+	}
+	st.Executions[x.ID] = x
+	st.Tasks[t.ID] = t
+}
+
+func settleExecution(st *workbench.State, id, responseID string, resumed bool) {
+	t, x, ok := executionFor(*st, id)
+	if !ok {
+		return
+	}
+	x.Phase = "awaiting_review"
+	x.Error = ""
+	t.Status = "needs_confirmation"
+	if resumed && x.Summary == "" && len(x.Tools) == 0 {
+		messages := st.Conversations[id].Messages
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].Role == "user" {
+				if messages[i].Delivery == "not_sent" && workbench.IsStartRequest(messages[i].Text) {
+					x.Phase = "ready"
+					t.Status = "idle"
+				}
+				break
+			}
+		}
+	}
+	if !resumed {
+		for _, msg := range st.Conversations[id].Messages {
+			if msg.ID == responseID {
+				x.Summary = msg.Text
+			}
+		}
+		if x.Summary == "" {
+			x.Summary = "本轮执行已结束，未收到文字摘要；请检查任务结果。"
+		}
+		x.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	st.Executions[x.ID] = x
+	st.Tasks[t.ID] = t
+}
+
+// Called only by the reserved conversation writer. Stop and drain the old
+// consumer before reusing the original session file with broader tools.
+func (m *Manager) prepareDevelopment(c workbench.Conversation, entry *instance) error {
+	t, x, ok := executionFor(m.store.Snapshot(), c.ID)
+	if !ok {
+		return nil
+	}
+	if !pirpc.ProcessGroupsSupported() {
+		return errors.New("当前平台尚不支持开发进程组管理")
+	}
+	if e := m.store.Update(func(st *workbench.State) error { setExecutionPhase(st, c.ID, "preparing", ""); return nil }); e != nil {
+		return e
+	}
+	prepared, e := m.prepareWorkspace(m.ctx, t, x)
+	if e != nil {
+		return e
+	}
+	if e = m.store.Update(func(st *workbench.State) error {
+		prepared.Phase = "starting"
+		st.Executions[prepared.ID] = prepared
+		return nil
+	}); e != nil {
+		return e
+	}
+	m.mu.Lock()
+	if entry.lease == nil {
+		lease, err := acquireExecutionLease(prepared.Workspace)
+		if err != nil {
+			m.mu.Unlock()
+			return err
+		}
+		entry.lease = lease
+	}
+	old := entry.client
+	changed := old != nil && entry.workspace != prepared.Workspace
+	done := entry.consumerDone
+	if changed {
+		entry.dead = true
+	}
+	m.mu.Unlock()
+	if changed {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		err := old.Close(ctx)
+		result, waitErr := old.Wait(ctx)
+		cancel()
+		if err != nil || waitErr != nil || !result.Reaped || result.CleanupError != nil {
+			return errors.New("原进程尚未可靠回收，未启动开发进程")
+		}
+		if done != nil {
+			select {
+			case <-done:
+			case <-m.ctx.Done():
+				return m.ctx.Err()
+			}
+		}
+		m.mu.Lock()
+		entry.client = nil
+		entry.consumerDone = nil
+		entry.dead = false
+		m.mu.Unlock()
+	}
+	m.mu.Lock()
+	entry.workspace = prepared.Workspace
+	m.mu.Unlock()
+	return nil
+}
