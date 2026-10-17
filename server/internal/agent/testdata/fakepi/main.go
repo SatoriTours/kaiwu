@@ -54,6 +54,9 @@ func main() {
 		if json.Unmarshal(scan.Bytes(), &c) != nil {
 			os.Exit(2)
 		}
+		if c["type"] == "prompt" {
+			c["message"] = strings.Split(fmt.Sprint(c["message"]), "\n\n<kaiwu-reply-requirements>")[0]
+		}
 		data := map[string]any{"sessionId": session, "sessionFile": file, "isStreaming": false, "isCompacting": false, "pendingMessageCount": 0}
 		if c["type"] == "prompt" {
 			data = map[string]any{"disposition": "started"}
@@ -68,6 +71,9 @@ func main() {
 		_ = out.Encode(map[string]any{"type": "response", "id": c["id"], "command": c["type"], "success": true, "data": data})
 		if c["type"] == "prompt" {
 			time.Sleep(150 * time.Millisecond)
+			if c["message"] == "__DISCONNECT_FIXTURE__" {
+				os.Exit(0)
+			}
 			if development {
 				_ = out.Encode(map[string]any{"type": "tool_execution_start", "toolCallId": "fixture-write", "toolName": "write", "args": map[string]string{"path": "kaiwu-fixture-result.txt"}})
 				err := os.WriteFile("kaiwu-fixture-result.txt", []byte(fmt.Sprint(c["message"])), 0600)
@@ -76,6 +82,11 @@ func main() {
 			chunks := []string{fmt.Sprintf("[隔离协议测试] 已收到：%v", c["message"])}
 			if c["message"] == "__MARKDOWN_STREAM_FIXTURE__" {
 				chunks = []string{"## 流式格式\n\n```go\npackage main\n", "func main() { println(\"ready\") }\n", "```\n\n**完成**"}
+			}
+			if strings.Contains(fmt.Sprint(c["message"]), "结构化登录恢复") {
+				_ = out.Encode(map[string]any{"type": "tool_execution_start", "toolCallId": "fixture-check", "toolName": "bash", "args": map[string]string{"command": "fixture check"}})
+				_ = out.Encode(map[string]any{"type": "tool_execution_end", "toolCallId": "fixture-check", "toolName": "bash", "result": map[string]string{"text": "PASS fixture"}, "isError": false})
+				chunks = []string{`刷新恢复已实现，结果已整理。<kaiwu-report>{"summary":"登录恢复已实现，等待确认","stage":"awaiting_review","plan":["保存登录","验证恢复"],"results":["刷新自动恢复","退出撤销凭证"],"checks":[{"title":"登录恢复检查","claim":"passed","toolId":"fixture-check"}],"blockers":[],"next":["确认使用效果"],"question":""}</kaiwu-report>`}
 			}
 			for i, chunk := range chunks {
 				if i > 0 {

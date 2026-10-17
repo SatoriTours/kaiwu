@@ -32,6 +32,8 @@ export interface Task {
   executionId?: string;
 }
 export interface Execution {
+  startedAt?:string;
+  finishedAt?:string;
   id: string;
   workspace?: string;
   phase: string;
@@ -46,12 +48,15 @@ export interface Execution {
   }[];
 }
 export interface Message {
+ kind?:string;
+ displayText?:string;
   id: string;
   role: string;
   text: string;
   delivery: string;
 }
 export interface Conversation {
+ rounds?:Round[];
   sessionFile?: string;
   id: string;
   projectId: string;
@@ -122,4 +127,21 @@ export interface MergeOperation {
   taskAfterSHA: string;
   mainAfterSHA: string;
   preview: MergePreview;
+}
+
+export interface ToolRecord {id:string;name:string;input?:string;result?:string;failed:boolean}
+export interface ReportCheck {title:string;claim:string;toolId?:string}
+export interface Report {summary:string;stage:string;plan:string[];results:string[];checks:ReportCheck[];blockers:string[];next:string[];question:string}
+export interface Round {id:string;phase:string;startedAt:string;finishedAt?:string;reportError?:string;report?:Report;tools:ToolRecord[]}
+
+export interface TaskPreview {
+ taskId: string;
+ roundId: string;
+ state: 'unavailable' | 'stopped' | 'starting' | 'running' | 'failed';
+ manifestId?: string;
+ message: string;
+ command?: string[];
+ path?: string;
+ url?: string;
+ logs?: string;
 }

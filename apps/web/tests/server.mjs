@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 const dir = mkdtempSync(join(tmpdir(), "kaiwu-web-service-"));
@@ -39,6 +39,7 @@ try {
   );
   const project = join(dir, "project");
   execFileSync("git", ["init", project], { stdio: "ignore" });
+  mkdirSync(join(root, ".superpowers/sdd/2026-10-11-web-service"), { recursive: true });
   writeFileSync(
     join(root, ".superpowers/sdd/2026-10-11-web-service/browser-project.txt"),
     project,

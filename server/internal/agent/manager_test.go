@@ -30,6 +30,15 @@ func TestFakePi(t *testing.T) {
 			response["data"] = map[string]any{"disposition": "started"}
 		}
 		if c["type"] == "prompt" {
+			if capture := os.Getenv("KAIWU_AGENT_PROMPT_CAPTURE"); capture != "" {
+				f, err := os.OpenFile(capture, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+				if err != nil {
+					os.Exit(10)
+				}
+				_ = json.NewEncoder(f).Encode(map[string]any{"message": c["message"], "pid": os.Getpid(), "session": session})
+				_ = f.Close()
+			}
+			c["message"] = strings.Split(c["message"].(string), "\n\n<kaiwu-reply-requirements>")[0]
 			writeFixtureSession(session, file)
 			if fixtureArg("--tools") == "read,write,edit,bash,grep,find,ls" {
 				if os.Getenv("KAIWU_AGENT_LEAK") == "1" {
@@ -55,6 +64,13 @@ func TestFakePi(t *testing.T) {
 		}
 		originalResponse := string(b)
 		if c["type"] == "prompt" {
+			if c["message"] == "review-stale" {
+				for _, delta := range []string{`safe summary<kaiwu-report>{"summary":"success","stage":"awaiting_review"}</kaiwu-report>`, "IMPORTANT FAILURE<kaiwu-report>{"} {
+					b, _ := json.Marshal(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "text_delta", "delta": delta}})
+					fmt.Println(string(b))
+				}
+			}
+
 			if c["message"] == "overflow" {
 				for i := 0; i < 2; i++ {
 					b, _ := json.Marshal(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "text_delta", "delta": strings.Repeat("x", 600000)}})

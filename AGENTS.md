@@ -19,14 +19,17 @@
 - 技术：开悟自有后端代码全部使用 Go，不新增 TypeScript/JavaScript 宿主或 pi 扩展；pi 作为第三方 CLI 运行，其运行时不属于自有后端实现。PC 使用用户自己的 Nim + Leaf；Android 使用 Kotlin 原生 + KMP + Compose Multiplatform。
 - PC 首版目标 Windows、macOS、Linux；Android 仍是首版目标，不能擅自取消。
 - Web 已确认为主要开发入口，优先打磨完整任务流程；具体设计见 `docs/superpowers/specs/2026-10-11-web-workbench-design.md`，Vue 3＋TypeScript＋Vite、Go 同源托管、SQLite 和令牌方案已确认并实现，不以假进程验证代替真实模型联调。
-- 主工作台按功能专题分列，用户可手动添加／删除专题；不是固定状态列。每张任务卡片右上角显示未开始／执行中／需要确认／执行完成查看结果／执行失败角标，专题归属与状态独立。右侧常驻聊天；不选卡片为整个项目对话，选中卡片为该任务对话。选择不控制 Agent 生命周期；`docs/design/web-prototype.html` 已改为该布局的内存模拟原型，实际验证见 `docs/development/web-kanban-prototype-verification.md`，不代表真实 pi 接入。
+- 主工作台按功能专题分列，用户可手动添加／删除专题；不是固定状态列。每张任务卡片右上角显示未开始／执行中／需要确认／执行完成查看结果／执行失败／已中断角标，专题归属与状态独立。右侧常驻聊天；不选卡片为整个项目对话，选中卡片为该任务对话。选择不控制 Agent 生命周期；`docs/design/web-prototype.html` 已改为该布局的内存模拟原型，实际验证见 `docs/development/web-kanban-prototype-verification.md`，不代表真实 pi 接入。
 - Web、PC、Android 均不做源码/diff 展示、代码编辑器或完整 IDE。
-- 项目对话及每张卡片的任务对话分别绑定独立代码 CLI 会话，当前均为独立 pi 会话；切卡片切换聊天连接目标，历史与模型上下文隔离。首批首次发送启动、切范围不停、重启显式恢复已实现；最多 8 个驻留会话，暂不自动空闲回收。
+- 项目对话及每张卡片的任务对话分别绑定独立代码 CLI 会话，当前均为独立 pi 会话；切卡片切换聊天连接目标，历史与模型上下文隔离。首次发送启动、切范围不停；2026-10-15 用户要求自动处理，重启／中断后发送新消息或继续开发时自动接回原会话；最多 8 个驻留会话，暂不自动空闲回收。
 - 首条闭环是 pi 主 Agent＋pi 执行 Agent，执行任务使用独立 Git worktree，同工作区单写入者。
 - 用户已批准卡片／任务聊天“开始开发”双入口：同一卡片的原 pi 上下文切入任务 worktree，不能另建第二个执行会话；执行结束为需要确认。Linux 进程组与持久归属防重已实现，真实模型尚未联调；见 `docs/development/web-task-start-verification.md`。用户要求全页更小、更轻、更简洁，当前 48px 紧凑顶栏与轻量卡片；开始开发使用播放图标，悬停提示，不显示文字按钮。
 - 用户已确认并实现卡片主分支集成：自动识别并冻结默认主分支，高级覆盖可选；新任务从主分支建独立 worktree。卡片／聊天展示实际 Git 状态，图标或明确“合并到主分支”先审核再显式提交并普通合并；保留原分支／工作区／pi 会话，不推送、重放或自动解决冲突。外部 Git／AI 操作同样按实际祖先关系核查；见 `docs/development/web-task-merge-verification.md`。用户于 2026-10-13 明确授权本次本地代码基线提交；不据此授权后续提交、合并或推送。
 - 用户已确认聊天完整格式方案：消息／结果摘要支持 Markdown、表格及代码高亮／复制，输入框可切换预览，沿用已有 WebSocket 和会话隔离；已实现并验证局域网 HTTP 复制。见 `docs/development/web-chat-markdown-verification.md`。这是聊天内容展示，不扩大为源码浏览／编辑器或 Codex 接入。
 - 用户已确认自动检测服务器 pi 和 Web 模型选择；服务从 PATH 查找 pi，真实 RPC 查询已登录／已配置提供商的可用模型。顶栏保存默认模型，聊天为未启动空会话补选；默认设置持久化，已有快照不追溯。选择窗口说明沿用服务器 pi 登录，仅复制所选提供商凭据到隔离会话，不加载个人扩展。7331 已更新，真实模型请求仍未测试；见 `docs/development/web-pi-model-selection-verification.md`。
+- 用户批准的结构化进展与双向 WebSocket 已实现：方案／成果／验证／记录与历史轮次，简短回复、展开原文，AI 报告与实际工具依据分开；仅显式确认最新已结束结果可标记任务完成，Git 状态独立。业务通道 `/api/socket`，初次认证快照及会话失效检查保留 HTTP；有界增量与分块快照恢复不重放操作。验收及 7331 更新状态见 `docs/development/web-progress-socket-verification.md`。
+- 任务中断与结果确认已区分：旧 `interrupted` 执行规范化，不显示需要确认；恢复 CLI 不生成完成结果。完成结果独立于连接，空闲断开／恢复失败保留其确认状态。详情优先显示要求／最近回复／真实执行和修改，结果确认在首屏，中断后发送新消息自动接回；无报告及手机默认收起详情。见 `docs/development/web-task-state-clarity-verification.md`。
+- 用户已要求自动处理会话恢复：新消息或中断任务的继续开发图标自动接回原 pi／worktree，不再先点恢复；无新用户意图不启动、不重发旧指令。原文件／身份／写入锁核验与 operationId 保留，旧 resume API 兼容。见 `docs/development/web-auto-reconnect-verification.md`。
 - 选择整套配置启动任务，保存配置快照；任务内改模型不回写模板，模板变化不追溯已有任务。
 - 运行中不要求切换 Agent 类型；模型变更从下一轮调用生效，不中断当前请求。具体能力与准确边界必须验证。
 - Go 服务与 Agent/代码同机，客户端经局域网或已有 VPN 直连，远程必须认证；不自建公网中继或云账号系统。

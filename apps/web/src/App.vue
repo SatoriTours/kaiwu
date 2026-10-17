@@ -9,12 +9,18 @@ import {
   nextTick,
 } from "vue";
 import KanbanBoard from "./KanbanBoard.vue";
+import ProjectMenu from "./ProjectMenu.vue";
 import ChatPanel from "./ChatPanel.vue";
+import ResultPreview from "./ResultPreview.vue";
+import {safePreviewURL} from "./preview.ts";
 import TaskDialog from "./TaskDialog.vue";
 import MergeDialog from "./MergeDialog.vue";
 import ModelDialog from "./ModelDialog.vue";
 import { isMergeRequest } from "./git.ts";
-import { api, APIError } from "./api.ts";
+import {taskState} from "./task-state.ts";
+import { SocketClient } from "./socket.ts";
+import { applyPatch } from "./sync.ts";
+import { api, httpAPI, APIError, setSocketRequest } from "./api.ts";
 import type {
   Snapshot,
   Task,
@@ -23,6 +29,7 @@ import type {
   MergeOperation,
   Conversation,
   Profile,
+  TaskPreview,
 } from "./types.ts";
 import {
   createLocalState,
@@ -50,6 +57,11 @@ const authenticated = ref(false),
   dialogTopic = ref(""),
   formError = ref(""),
   saving = ref(false);
+const chatPanel=ref<InstanceType<typeof ChatPanel>>();
+const resultTarget=ref<{projectId:string;taskId:string;roundId:string}>();
+const taskPreview=ref<TaskPreview>();
+const previewBusy=ref(false),previewError=ref('');
+let previewEpoch=0,previewTimer:ReturnType<typeof setTimeout>|undefined;
 const mergePreview = ref<MergePreview>();
 const modelTarget = ref<{ scope: string; projectId?: string; conversationId?: string; taskId?: string; profile?: Profile }>();
 const modelSaving = ref(false), modelError = ref("");
@@ -86,10 +98,11 @@ const tasks = computed(() =>
 const task = computed(() => state.value?.tasks[taskID.value]);
 const conversation = computed(() => state.value?.conversations[local.current]);
 const draft = computed(() => local.drafts[local.current]?.text ?? "");
-let ws: WebSocket | undefined,
+let ws: SocketClient | undefined,
   retry: ReturnType<typeof setTimeout> | undefined,
   stopped = false,
   authEpoch = 0;
+let streamID="";
 const width = ref(innerWidth);
 const operations = reactive(
   new Map<string, { id: string; signature: string; draftRevision?: number }>(),
@@ -126,7 +139,9 @@ function chooseProject(id: string) {
   chatVisible.value = false;
 }
 function clearIdentity() {
+  closeResult();
   authEpoch++;
+ streamID="";
   authenticated.value = false;
   online.value = false;
   loginBusy.value = false;
@@ -144,6 +159,7 @@ function clearIdentity() {
   clearTimeout(gitTimer);
   formError.value = "";
   ws?.close();
+  ws=undefined;setSocketRequest(undefined);
   clearTimeout(retry);
   local.snapshot = null;
   local.drafts = {};
@@ -156,14 +172,7 @@ function clearIdentity() {
   projectID.value = "";
   taskID.value = "";
 }
-const refresh = createRefreshQueue(async () => {
-  const epoch = authEpoch;
-  try {
-    const data = await api<{
-      state: Snapshot;
-      capabilities: { agent: boolean };
-    }>("snapshot");
-    if (epoch !== authEpoch) return;
+function applyData(data:{state:Snapshot;capabilities:{agent:boolean}}){
     for (const c of Object.values(data.state.conversations)) {
       const length = c.messages.reduce(
           (n, m) => n + (m.role === "assistant" ? m.text.length : 0),
@@ -201,6 +210,17 @@ const refresh = createRefreshQueue(async () => {
     if (!topics.value.some((t) => t.id === mobileTopic.value))
       mobileTopic.value = topics.value[0]?.id ?? "";
     online.value = true;
+}
+const refresh = createRefreshQueue(async () => {
+  const epoch = authEpoch;
+  try {
+    if(ws?.open){await ws.request("sync",{after:streamID?(state.value?.revision??0):0});return}
+    const data = await api<{
+      state: Snapshot;
+      capabilities: { agent: boolean };
+    }>("snapshot");
+    if (epoch !== authEpoch) return;
+    applyData(data);
   } catch (e) {
     if (epoch === authEpoch) {
       report(e);
@@ -215,29 +235,33 @@ function report(e: unknown) {
   if (e instanceof APIError && e.status === 401) clearIdentity();
 }
 function connect() {
-  if (stopped || !authenticated.value) return;
-  ws?.close();
-  const socket = new WebSocket(
-    (location.protocol === "https:" ? "wss:" : "ws:") +
-      "//" +
-      location.host +
-      "/api/events",
-  );
-  ws = socket;
-  socket.onopen = () => {
-    online.value = true;
-    void reconcile();
-  };
-  socket.onmessage = () => void refresh();
-  socket.onclose = () => {
-    if (ws !== socket || stopped || !authenticated.value) return;
-    online.value = false;
-    retry = setTimeout(async () => {
-      await refresh();
-      connect();
-    }, 1500);
-  };
-  socket.onerror = () => socket.close();
+ if(stopped||!authenticated.value)return;
+ ws?.close();const epoch=authEpoch;
+ let client:SocketClient;
+ client=new SocketClient((location.protocol==="https:"?"wss:":"ws:")+"//"+location.host+"/api/socket",frame=>{
+  if(ws!==client||epoch!==authEpoch||!authenticated.value)return;
+  try{
+   if(frame.type==="snapshot"){if(streamID!==frame.streamId)local.snapshot=null;streamID=frame.streamId;applyData({state:frame.state,capabilities:frame.capabilities})}
+   if(frame.type==="patch"&&state.value){
+ if(streamID!==frame.streamId){void client.request("sync",{after:0});return}
+    if(frame.revision<=state.value.revision)return;
+    applyData({state:applyPatch(state.value,frame),capabilities:{agent:agentAvailable.value}});
+   }
+  }catch{void refresh()}
+ },()=>{if(ws!==client||epoch!==authEpoch)return;online.value=true;void reconcile();void updateWatch()},event=>{
+  if(ws!==client||stopped||!authenticated.value||epoch!==authEpoch)return;
+  if(event.code===1008){clearIdentity();error.value="登录已失效，请重新输入令牌";return}
+  online.value=false;
+  void (async()=>{
+   try{await httpAPI('session')}catch(e){
+    if(ws!==client||stopped||epoch!==authEpoch)return;
+    if(e instanceof APIError&&e.status===401){clearIdentity();error.value="登录已失效，请重新输入令牌";return}
+   }
+   if(ws===client&&!stopped&&authenticated.value&&epoch===authEpoch)retry=setTimeout(connect,1500);
+  })();
+ });
+ ws=client;
+ setSocketRequest((path,body)=>client.request(path,body));
 }
 async function login() {
   const epoch = ++authEpoch;
@@ -449,7 +473,7 @@ async function send() {
     !agentAvailable.value ||
     !conv.profile.provider ||
     !conv.profile.model ||
-    conv.runState !== "idle"
+    ["starting", "running"].includes(conv.runState)
   )
     return;
   const text = d.text,
@@ -479,8 +503,8 @@ async function start(target: Task, sent?: { text: string; revision: number }) {
     !c ||
     !online.value ||
     local.pending[id] ||
-    !["idle", "failed"].includes(target.status) ||
-    ["starting", "running", "interrupted"].includes(c.runState)
+    !["idle", "failed", "interrupted"].includes(taskState(target,c,state.value?.executions?.[target.executionId??'']).status) ||
+    ["starting", "running"].includes(c.runState)
   )
     return;
   navigate(target);
@@ -527,50 +551,19 @@ async function resume() {
     if (epoch === authEpoch) local.pending[c.id] = false;
   }
 }
-async function pollGit(manual = false) {
-  if (
-    !authenticated.value ||
-    !projectID.value ||
-    document.hidden ||
-    gitChecking ||
-    stopped
-  )
-    return;
-  const epoch = authEpoch,
-    id = projectID.value;
-  gitChecking = true;
-  clearTimeout(gitTimer);
-  try {
-    await api("git/refresh", { projectId: id });
-    if (epoch === authEpoch && id === projectID.value) await refresh();
-  } catch (e) {
-    if (epoch === authEpoch && manual) report(e);
-  } finally {
-    gitChecking = false;
-    if (authenticated.value && !document.hidden && !stopped) {
-      clearTimeout(gitTimer);
-      gitTimer = setTimeout(
-        () => void pollGit(),
-        id === projectID.value ? 3000 : 0,
-      );
-    }
-  }
+async function updateWatch(){
+ if(!ws?.open||!authenticated.value)return;
+ try{await ws.request("watch",{projectId:projectID.value,visible:!document.hidden})}catch(e){if(e instanceof APIError&&e.status===401)report(e)}
 }
-function visibility() {
-  clearTimeout(gitTimer);
-  if (!document.hidden) void pollGit();
+async function pollGit(manual=false){
+ if(!authenticated.value||!projectID.value||document.hidden||gitChecking||stopped||!ws?.open)return;
+ const epoch=authEpoch;gitChecking=true;
+ try{await api("git/refresh",{projectId:projectID.value});if(epoch===authEpoch)await refresh()}
+ catch(e){if(epoch===authEpoch&&manual)report(e)}finally{gitChecking=false}
 }
-watch(
-  [
-    authenticated,
-    projectID,
-    () => tasks.value.map((t) => t.id + ":" + t.status).join(","),
-  ],
-  () => {
-    clearTimeout(gitTimer);
-    void pollGit();
-  },
-);
+function visibility(){void updateWatch()}
+watch([authenticated,projectID],()=>void updateWatch());
+watch(()=>tasks.value.map(t=>t.id+":"+t.status).join(","),()=>void pollGit());
 async function openMerge(
   target: Task,
   sent?: { conversationId: string; revision: number },
@@ -703,6 +696,56 @@ async function confirmMerge(message: string) {
     if (epoch === authEpoch) mergeSaving.value = false;
   }
 }
+function closeResult(){previewEpoch++;clearTimeout(previewTimer);resultTarget.value=undefined;taskPreview.value=undefined;previewBusy.value=false;previewError.value=''}
+watch([projectID,taskID,()=>conversation.value?.rounds?.at(-1)?.id],(next,previous)=>{
+ if(resultTarget.value&&(resultTarget.value.taskId!==taskID.value||resultTarget.value.projectId!==projectID.value||(next[2]!==previous[2]&&next[2]!==resultTarget.value.roundId)))closeResult();
+});
+function resultChat(){chatVisible.value=true;nextTick(()=>chatPanel.value?.focusEditor())}
+function reviseResult(){closeResult();resultChat()}
+function previewInstructions(){
+ if(!task.value||resultTarget.value?.taskId!==task.value.id)return;
+ const previous=local.drafts[local.current]?.text??'';
+ setDraft(local,previous+(previous.trim()?'\n\n':'')+'请补充本任务的预览说明：网页任务请在当前独立工作区提供 kaiwu-preview.json，使用 {port} 和 127.0.0.1，说明启动命令及访问路径；非网页任务请提供使用方法和实际验证输出。不要自动启动服务。');
+ closeResult();resultChat();
+}
+async function openResult(roundID:string){
+ const selected=task.value;if(!selected)return;
+ closeResult();resultTarget.value={projectId:selected.projectId,taskId:selected.id,roundId:roundID};
+ chatVisible.value=false;
+ await loadTaskPreview('status',true);
+}
+async function loadTaskPreview(action:'status'|'start'|'stop'='status',forceOpen=false){
+ const target=resultTarget.value;if(!target||previewBusy.value||!online.value)return;
+ clearTimeout(previewTimer);const epoch=previewEpoch;previewBusy.value=true;previewError.value='';
+ try{
+  const previousURL=taskPreview.value?.state==='running'?taskPreview.value.url:undefined;
+  const manifestId=action==='start'?taskPreview.value?.manifestId:undefined;
+  if(action==='start'&&!manifestId)throw new Error('预览配置缺少确认指纹，请先刷新状态并核对命令。');
+  const result=await api<TaskPreview>('previews/'+action,{...target,...(action==='status'?{}:{operationId:createOperationID()}),...(action==='start'?{manifestId}:{})});
+  if(epoch!==previewEpoch)return;
+  if(result.taskId!==target.taskId||result.roundId!==target.roundId)throw new Error('成果目标已变化，请重新打开任务结果。');
+  if(result.state==='running'){
+   if(!forceOpen&&safePreviewURL(previousURL))result.url=previousURL;
+   else{
+    const opened=await api<TaskPreview>('previews/open',target);
+    if(epoch!==previewEpoch)return;
+    if(opened.taskId!==target.taskId||opened.roundId!==target.roundId)throw new Error('预览入口与当前成果不匹配。');
+    if(opened.state==='running'&&!safePreviewURL(opened.url))throw new Error('服务器未提供有效的受限预览入口。');
+    Object.assign(result,opened);
+   }
+  }
+  taskPreview.value=result;
+ }catch(e){if(epoch===previewEpoch)previewError.value=e instanceof Error?e.message:'未能读取预览状态'}
+ finally{
+  if(epoch===previewEpoch){previewBusy.value=false;if(resultTarget.value&&online.value&&document.visibilityState==='visible')previewTimer=setTimeout(()=>void loadTaskPreview(),3000)}
+ }
+}
+watch(online,value=>{if(value&&resultTarget.value)void loadTaskPreview()});
+function previewVisibility(){if(document.visibilityState==='visible'&&resultTarget.value)void loadTaskPreview();else clearTimeout(previewTimer)}
+async function confirmResult(roundID:string){
+ const target=task.value;if(!target)return;
+ try{await command({type:"confirm_result",projectId:target.projectId,taskId:target.id,conversationId:target.conversationId,roundId:roundID})}catch(e){report(e)}
+}
 function beforeUnload(event: BeforeUnloadEvent) {
   if (Object.values(local.drafts).some((d) => d.text.trim())) {
     event.preventDefault();
@@ -718,6 +761,7 @@ function pop() {
 }
 onMounted(async () => {
   readLocation();
+  document.addEventListener("visibilitychange",previewVisibility);
   window.addEventListener("beforeunload", beforeUnload);
   window.addEventListener("resize", resize);
   window.addEventListener("popstate", pop);
@@ -727,10 +771,12 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   stopped = true;
+  setSocketRequest(undefined);
   clearTimeout(retry);
   clearTimeout(gitTimer);
   document.removeEventListener("visibilitychange", visibility);
   ws?.close();
+  closeResult();document.removeEventListener("visibilitychange",previewVisibility);
   window.removeEventListener("beforeunload", beforeUnload);
   window.removeEventListener("resize", resize);
   window.removeEventListener("popstate", pop);
@@ -765,37 +811,21 @@ onBeforeUnmount(() => {
     ><header class="top">
       <span class="logo">悟</span><span class="brand">开悟</span
       ><span class="slash">/</span
-      ><select
-        v-if="state && Object.keys(state.projects).length"
-        aria-label="当前项目"
-        :value="projectID"
-        @change="chooseProject(($event.target as HTMLSelectElement).value)"
-      >
-        <option v-for="p in state.projects" :key="p.id" :value="p.id">
-          {{ p.name }}
-        </option></select
-      ><button aria-label="添加项目" @click="open('project')">＋ 项目</button
-      ><button
-        v-if="project"
-        class="icon project-git-settings"
-        aria-label="项目 Git 设置"
-        title="项目 Git 设置"
-        @click="open('git')"
-      >
-        ⚙</button
-      ><button
-        v-if="project"
-        class="icon"
-        aria-label="刷新 Git 状态"
-        title="刷新 Git 状态"
-        @click="pollGit(true)"
-      >
-        ↻</button
-      ><button aria-label="默认模型" title="为新项目和任务选择默认模型" @click="openModels()">默认模型</button
-      ><span class="connection" :class="{ off: !online }">{{
-        online ? "● 已连接" : "○ 正在重连"
-      }}</span
-      ><button @click="logout">退出</button>
+      ><ProjectMenu
+        :projects="Object.values(state?.projects ?? {})"
+        :current-id="projectID"
+        @choose="chooseProject"
+        @add="open('project')"
+        @git="open('git')"
+        @refresh="pollGit(true)"
+      />
+      <div class="global-actions" role="group" aria-label="全局操作">
+        <button aria-label="默认模型" title="为新项目和任务选择默认模型" @click="openModels()">默认模型</button>
+        <span class="connection" :class="{ off: !online }" role="status">{{
+          online ? "● 已连接" : "○ 正在重连"
+        }}</span>
+        <button class="logout" @click="logout">退出</button>
+      </div>
     </header>
     <div v-if="error || operations.size" class="global-error" role="alert">
       {{ error || "正在确认操作结果"
@@ -822,8 +852,10 @@ onBeforeUnmount(() => {
           ◌ 聊天
         </button>
       </nav>
-      <div class="app" :class="{ 'chat-visible': chatVisible }">
-        <KanbanBoard
+      <div class="app" :class="{ 'chat-visible': chatVisible, 'result-visible': !!resultTarget }">
+        <ResultPreview v-if="resultTarget&&task&&conversation" :task="task" :conversation="conversation" :execution="task.executionId?state?.executions?.[task.executionId]:undefined" :round-id="resultTarget.roundId" :preview="taskPreview" :busy="previewBusy" :error="previewError" :online="online" @back="closeResult();chatVisible=false" @chat="resultChat" @refresh="loadTaskPreview('status',true)" @start="loadTaskPreview('start',true)" @stop="loadTaskPreview('stop')" @revise="reviseResult" @instructions="previewInstructions"/>
+        <KanbanBoard v-else
+          :executions="state?.executions??{}"
           :git="state?.taskGit ?? {}"
           :topics="topics"
           :tasks="tasks"
@@ -843,6 +875,7 @@ onBeforeUnmount(() => {
         /><ChatPanel
           v-if="conversation"
           :key="'chat-panel'"
+          ref="chatPanel"
           :conversation="conversation"
           :task="task"
           :git="task ? state?.taskGit?.[task.id] : undefined"
@@ -869,6 +902,9 @@ onBeforeUnmount(() => {
           @resume="resume"
           @start="task && start(task)"
           @merge="task && openMerge(task)"
+          :tasks="tasks"
+          @confirm-result="confirmResult"
+          @preview-result="openResult"
           @model="openModels(conversation)"
         />
         <aside v-else class="chat">

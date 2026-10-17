@@ -2,9 +2,14 @@
 
 package agent
 
-import "errors"
+import (
+	"errors"
+	"os"
+)
 
 type executionLease struct{}
+
+func (*executionLease) inheritedFile() *os.File { return nil }
 
 func acquireExecutionLease(string) (*executionLease, error) {
 	return nil, errors.New("execution is unsupported")

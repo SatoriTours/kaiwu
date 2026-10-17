@@ -25,10 +25,16 @@
 - [x] 按用户反馈收紧 Web 顶栏、字号、按钮、专题列与卡片，桌面／手机浏览器回归通过。
 - [x] 聊天 Markdown、表格／清单、代码高亮与复制、输入草稿预览和工具 JSON 展示；沿用 WebSocket，Chromium 15/15 及实际局域网 HTTP 验证通过，见 [验证记录](development/web-chat-markdown-verification.md)。
 - [x] pi 程序 PATH 自动检测、真实可用模型查询、Web 默认／空会话模型选择和重启保留；7331 已更新，真实 43 项模型元数据及 Chromium 20/20 验证通过，未发送模型请求。[验证](development/web-pi-model-selection-verification.md)。
+- [x] 结构化方案／成果／验证／记录、历史轮次、用户确认结果；双向 WebSocket 业务及增量补发／分块快照、身份失效恢复已实现，验证见 [本批记录](development/web-progress-socket-verification.md)。
+- [x] 修正任务中断／确认状态、旧数据兼容、恢复失败结果保留及手机详情关键内容／恢复入口，见 [验证](development/web-task-state-clarity-verification.md)。
+- [x] 中断后在新消息／继续开发时自动接回原会话和工作区，去掉手动恢复前置步骤，保留防重放和身份核验；[验证](development/web-auto-reconnect-verification.md)。
+- [x] 项目／任务回复统一使用当前系统语言（简体中文），覆盖过程更新与报告，7331 已更新；协议回归通过，真实模型输出尚未验证。[验证](development/web-reply-language-verification.md)。
+- [x] 用户评审设计后已要求开始实现：任务成果／受控 HTTP 效果预览、确认完成后的持久反馈与后续入口，含原 pi／执行锁交接、配置指纹与能力网关；[实现与验收记录](development/web-task-result-preview-verification.md)区分本机验证、独立审查和 7331 更新状态。
+- [x] 顶栏项目切换改为轻量菜单，集中 Git 设置／刷新与添加项目，全局操作靠右；支持键盘、保留任务／草稿及窄屏长名称。7331 已更新，前端 16/16、Chromium 32/32、Go 全量与实际页面只读烟测通过；[验证记录](development/web-project-menu-verification.md)。
 - [ ] pi 真实模型调用、自动主协调编排、完整任务验收与更多故障验证。
 - [ ] 提交构建与版本 Tag/Release 流水线设计、初始化和实际运行验证。
 
-Go 服务基础阶段 32 项顶层测试及历史信号烟测通过，详见 [基础验证](development/go-foundation-verification.md)。纯 Go RPC 包已实现并自测，当前 84 项顶层测试通过；独立首轮发现的 2 项 Important、1 项 Minor 已修正并复验通过，见 [RPC 验证](development/go-pi-rpc-verification.md) 与 [审查](development/go-pi-rpc-review.md)。原生客户端和 integrations/pi 仍是说明入口；Web／HTTP 已接独立 pi RPC 及卡片 worktree 执行，隔离假进程验证通过，真实模型与自动编排未验收；用户已要求运行局域网预览服务（指定私网 IP＋令牌）；2026-10-13 按用户本次明确授权建立本地代码基线提交，尚未推送。初始化授权本身不包含后续提交／推送、Tag、Release 或修改 Leaf。
+Go 服务基础阶段 32 项顶层测试及历史信号烟测通过，详见 [基础验证](development/go-foundation-verification.md)。纯 Go RPC 包已实现并自测，当前 84 项顶层测试通过；独立首轮发现的 2 项 Important、1 项 Minor 已修正并复验通过，见 [RPC 验证](development/go-pi-rpc-verification.md) 与 [审查](development/go-pi-rpc-review.md)。原生客户端和 integrations/pi 仍是说明入口；Web／HTTP 已接独立 pi RPC 及卡片 worktree 执行，隔离假进程验证通过，真实模型与自动编排未验收；用户已要求运行局域网预览服务（指定私网 IP＋令牌）；2026-10-13 按用户明确授权建立本地代码基线提交；2026-10-17 用户另行授权提交当前已完成代码并推送 GitHub 的 main 分支。本次授权不自动包含未来批次提交／推送、Tag、Release 或修改 Leaf。
 
 ## 推荐推进次序（具体实施待审核）
 

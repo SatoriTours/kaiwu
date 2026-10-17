@@ -9,6 +9,21 @@ func IsStartRequest(text string) bool {
 	return strings.TrimRight(strings.TrimSpace(text), "。！!.") == "开始开发"
 }
 
+// Older restore-only code could mark an unfinished execution awaiting_review.
+// A persisted finished round is evidence; a phase label alone is not.
+func unfinishedExecution(st State, t Task) bool {
+	x, ok := st.Executions[t.ExecutionID]
+	if !ok {
+		return false
+	}
+	if x.Phase == "interrupted" {
+		return true
+	}
+	rounds := st.Conversations[t.ConversationID].Rounds
+	finished := len(rounds) > 0 && (rounds[len(rounds)-1].Phase == "finished" || rounds[len(rounds)-1].Phase == "confirmed")
+	return x.Phase == "awaiting_review" && x.FinishedAt == "" && !finished
+}
+
 func startTask(st *State, c Command) (Receipt, error) {
 	if c.TaskID == "" {
 		return Receipt{}, Invalid("请先选择一张任务卡片，再开始开发")
@@ -21,10 +36,8 @@ func startTask(st *State, c Command) (Receipt, error) {
 	if conv.RunState == "starting" || conv.RunState == "running" {
 		return Receipt{}, Conflict("任务会话正在运行，请等待当前轮次结束")
 	}
-	if conv.RunState == "interrupted" {
-		return Receipt{}, Conflict("原执行结果待确认，请先恢复原会话")
-	}
-	if t.ExecutionID != "" && t.Status != "failed" && !(t.Status == "idle" && st.Executions[t.ExecutionID].Phase == "ready") {
+	continuing := t.ExecutionID != "" && (t.Status == "interrupted" || (t.Status == "needs_confirmation" && unfinishedExecution(*st, t)))
+	if t.ExecutionID != "" && t.Status != "failed" && !continuing && !(t.Status == "idle" && st.Executions[t.ExecutionID].Phase == "ready") {
 		return Receipt{}, Conflict("该任务已开始；可在原对话继续沟通或查看执行结果")
 	}
 	if conv.Profile.Model == "" && len(conv.Messages) == 0 {
@@ -50,6 +63,16 @@ func startTask(st *State, c Command) (Receipt, error) {
 		x.Workspace = old.Workspace
 		x.Branch = old.Branch
 		x.BaseSHA = old.BaseSHA
+	}
+
+	// An explicit continue action reconnects the same execution; preserve all
+	// earlier tools and workspace identity, but never resend the old user message.
+	if continuing {
+		x = st.Executions[t.ExecutionID]
+		key = x.ID
+		x.Phase = "queued"
+		x.Error = ""
+		x.FinishedAt = ""
 	}
 	if st.Executions == nil {
 		st.Executions = map[string]Execution{}

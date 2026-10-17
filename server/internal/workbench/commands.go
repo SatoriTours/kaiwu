@@ -173,6 +173,8 @@ func apply(st *State, c Command) (Receipt, error) {
 		}
 		st.Tasks[key] = Task{ID: key, ProjectID: project.ID, TopicID: topic, Title: title, Request: strings.TrimSpace(c.Request), Status: "idle", ConversationID: conversation.ID, Profile: st.Profile}
 		r.CreatedID = key
+	case "confirm_result":
+		return ConfirmResult(st, c)
 	case "start_task":
 		return startTask(st, c)
 	case "send_message", "resume":
@@ -184,14 +186,11 @@ func apply(st *State, c Command) (Receipt, error) {
 			return r, Conflict("会话正在运行，草稿已保留")
 		}
 		if c.Type == "send_message" {
-			if conversation.RunState == "interrupted" || conversation.RunState == "failed" {
-				return r, Conflict("请先明确恢复会话")
-			}
 			if !validText(c.Text, 5000) || len(conversation.Messages) >= 2000 {
 				return r, Invalid("消息为空／过长，或会话消息已达上限")
 			}
 			key := id()
-			conversation.Messages = append(conversation.Messages, Message{key, "user", c.Text, "pending"})
+			conversation.Messages = append(conversation.Messages, Message{ID: key, Role: "user", Text: c.Text, Delivery: "pending"})
 			r.CreatedID = key
 		}
 		conversation.RunState = "starting"

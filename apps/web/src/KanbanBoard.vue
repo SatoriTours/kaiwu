@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import type { Topic, Task, Conversation, GitStatus } from "./types.ts";
+import type { Topic, Task, Conversation, GitStatus, Execution } from "./types.ts";
+import {taskState} from "./task-state.ts";
 import GitStatusView from "./GitStatus.vue";
 import MergeIcon from "./MergeIcon.vue";
 import TaskActionIcon from "./TaskActionIcon.vue";
 const props = defineProps<{
   topics: Topic[];
+  executions:Record<string,Execution>;
   git: Record<string, GitStatus>;
   tasks: Task[];
   unread: Record<string, number>;
@@ -23,14 +25,9 @@ const emit = defineEmits<{
   addTask: [string];
   deleteTopic: [Topic];
 }>();
-const labels: Record<string, string> = {
-  idle: "○ 未开始",
-  running: "◐ 执行中",
-  needs_confirmation: "! 需要确认",
-  completed: "✓ 执行完成 · 查看结果",
-  failed: "× 执行失败",
-};
+function presentation(task:Task){return taskState(task,props.conversations[task.conversationId],props.executions[task.executionId??''])}
 function actionLabel(task: Task) {
+ if(presentation(task).status==='interrupted')return '继续开发';
   return props.pending[task.conversationId]
     ? "启动中…"
     : task.status === "running"
@@ -123,8 +120,8 @@ function actionLabel(task: Task) {
             >
               <div class="task-top">
                 <span class="task-number">KW-{{ task.id.slice(0, 6) }}</span
-                ><span class="task-status" :data-status="task.status">{{
-                  labels[task.status] ?? task.status
+                ><span class="task-status" :data-status="presentation(task).status">{{
+                  presentation(task).label
                 }}</span>
               </div>
               <h3>
@@ -158,19 +155,19 @@ function actionLabel(task: Task) {
                   !online ||
                   pending[task.conversationId] ||
                   task.status === 'running' ||
-                  (['idle', 'failed'].includes(task.status) &&
-                    ['starting', 'running', 'interrupted'].includes(
+                  (['idle', 'failed', 'interrupted'].includes(presentation(task).status) &&
+                    ['starting', 'running'].includes(
                       conversations[task.conversationId]?.runState ?? '',
                     ))
                 "
                 @click.stop="
-                  ['idle', 'failed'].includes(task.status)
+                  ['idle', 'failed', 'interrupted'].includes(presentation(task).status)
                     ? emit('start', task)
                     : emit('select', task)
                 "
               >
                 <TaskActionIcon
-                  :status="task.status"
+                  :status="presentation(task).status"
                   :pending="pending[task.conversationId]"
                 />
               </button>

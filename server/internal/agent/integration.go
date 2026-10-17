@@ -271,6 +271,10 @@ func (m *Manager) runMerge(op workbench.MergeOperation) {
 	if e = phase("preparing", nil); e != nil {
 		return
 	}
+	if e = m.stopTaskPreview(ctx, op.TaskID); e != nil {
+		fail(e)
+		return
+	}
 	release, e := m.reserveTask(ctx, op.TaskID)
 	if e != nil {
 		fail(e)

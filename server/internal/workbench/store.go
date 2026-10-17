@@ -10,7 +10,9 @@ import (
 	_ "modernc.org/sqlite"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 )
 
 type Store struct {
@@ -19,6 +21,8 @@ type Store struct {
 	state       State
 	subscribers map[chan uint64]struct{}
 	closed      bool
+	syncEvents  []SyncEvent
+	syncBytes   int
 }
 
 func id() string {
@@ -101,16 +105,33 @@ func Open(path string, profile Profile) (*Store, error) {
 				st.Executions[id] = x
 				t := st.Tasks[x.TaskID]
 				if t.ExecutionID == id {
-					t.Status = "needs_confirmation"
+					t.Status = "interrupted"
 					st.Tasks[t.ID] = t
 				}
 			}
 		}
+		// Normalize legacy records where an interrupted execution was called "needs confirmation".
+		for id, t := range st.Tasks {
+			if unfinishedExecution(*st, t) && (t.Status == "running" || t.Status == "needs_confirmation") {
+				x := st.Executions[t.ExecutionID]
+				x.Phase = "interrupted"
+				st.Executions[x.ID] = x
+				t.Status = "interrupted"
+				st.Tasks[id] = t
+			}
+		}
+
 		for key, c := range st.Conversations {
+			for i := range c.Rounds {
+				if c.Rounds[i].Phase == "running" {
+					c.Rounds[i].Phase = "interrupted"
+					c.Rounds[i].FinishedAt = time.Now().UTC().Format(time.RFC3339)
+				}
+			}
 			if c.RunState == "starting" || c.RunState == "running" || (c.SessionFile != "" && c.RunState == "idle") {
 				neverSent := c.RunState == "starting"
 				c.RunState = "interrupted"
-				c.Error = "服务已重启，请明确恢复会话；未自动重发消息"
+				c.Error = "服务已重启，发送时自动接回原会话；未重发旧消息"
 				for i := range c.Messages {
 					if c.Messages[i].Delivery == "pending" || c.Messages[i].Delivery == "accepted" {
 						c.Messages[i].Delivery = "uncertain"
@@ -119,8 +140,11 @@ func Open(path string, profile Profile) (*Store, error) {
 						}
 					}
 				}
-				st.Conversations[key] = c
 			}
+			if c.RunState == "interrupted" {
+				c.Error = strings.ReplaceAll(c.Error, "请明确恢复", "发送时自动接回")
+			}
+			st.Conversations[key] = c
 		}
 		return nil
 	}); err != nil {
@@ -167,6 +191,7 @@ func (s *Store) persist(next State, operationID, fingerprint string, receipt Rec
 	if err = tx.Commit(); err != nil {
 		return err
 	}
+	s.recordSync(s.state, next)
 	s.state = next
 	for ch := range s.subscribers {
 		select {
@@ -249,6 +274,9 @@ func (s *Store) PreparedCommand(c Command, prepare func() error) (Receipt, error
 	r, err := apply(&next, c)
 	if err != nil {
 		return Receipt{}, err
+	}
+	if (c.Type == "send_message" || c.Type == "start_task") && r.CreatedID != "" {
+		BeginRound(&next, r.ConversationID, r.CreatedID)
 	}
 	if prepare != nil {
 		if err = prepare(); err != nil {

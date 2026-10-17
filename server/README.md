@@ -48,7 +48,7 @@ KAIWU_LISTEN_ADDR=127.0.0.1:7331 ./bin/kaiwu-server
 - 默认数值回环；用户明确选择私网 IP 时要求有效令牌认证工作台，1–65535 端口。
 - 主机名、IPv4-mapped IPv6、IPv6 zone、未认证私网地址、公网／通配地址、空值、端口 0 均拒绝。
 - 设置 `KAIWU_WEB_TOKEN`（至少 32 字节随机值）启用本机认证工作台；未设置时仅健康检查。用户现已授权指定私网 IP 的局域网监听，必须启用令牌认证；公网／通配监听仍拒绝，TLS／设备配对另行设计。
-- GET/HEAD `/healthz`；Web 模式增加 `/api/login`、`/api/logout`、`/api/snapshot`、`/api/commands`、`/api/operations/:id`、`/api/events`；不放行跨域。
+- GET/HEAD `/healthz`；Web 模式增加 `/api/login`、`/api/logout`、`/api/snapshot`、`/api/commands`、`/api/operations/:id`、`/api/events`、`/api/socket`、`/api/session`；不放行跨域。
 - 日志写 stderr，记录方法、路径、状态、耗时和生命周期；不记录请求内容、查询参数、Authorization 或 panic 原值。
 
 ## 停止与错误
@@ -90,3 +90,12 @@ RPC 基础批次仅用隔离 Go 假进程测试，不依赖 pi 安装；当前 W
 生产构建先运行仓库根目录的 `npm --prefix apps/web run build`，再构建 Go；静态资源通过 `internal/webui` 嵌入。仅有 `.gitkeep` 时 Go 仍可编译，但页面返回“请先构建”说明；健康检查不证明 UI 已构建。令牌、数据库和 pi 日志不能提交。
 
 服务停机先取消会话所有权、关闭 WebSocket、回收 pi 及开发进程组，再关闭存储。任务 OS 锁和持久进程组归属记录阻止跨宿主双写；强杀后恢复必须确认旧组已无活动进程，启动窗口归属未知时拒绝执行，不根据保存的 PID 直接 kill。未确认回收／清理出错向 Run/main 返回失败，不把 HTTP Shutdown 成功当作任务完成。
+
+
+## 受控任务效果预览
+
+Go `internal/preview` 管理用户显式启动的任务 HTTP 进程，与 pi/Git 共享执行锁。HTTP／WebSocket `previews/status,start,stop,open` 接口使用现有登录、同源及 CSRF 校验；参数为 projectId/taskId/roundId，start/stop 另需 operationId，start 必须携带 status 展示的 manifestId（原配置 SHA256）。只执行最新已结束或已确认轮次、核验归属的任务 worktree 配置，不自动运行报告中的 URL／shell 命令。
+
+`/preview/<随机短时能力>/...` 仅转发受控进程组的 IPv4 回环 GET/HEAD。每请求复核登录、工作区、轮次、配置及监听 socket 归属，不转发工作台凭据，不允许任务设置 Cookie／外部重定向；opaque iframe 资源只在该能力路径允许 Origin:null，其他 API 不放宽来源规则。限制与配置示例见 [Web 运行说明](../apps/web/README.md)。
+
+预览关闭复用 Linux Waitid(WNOWAIT) 保留 leader 身份，先清理后代再 reap；子进程继承 flock 防止服务器异常退出后重复写入。能力链接过期或跨客户端停止／重启后需手动刷新，当前不自动续签。真实模型联调与跨平台进程保证未验收。[实现与验证](../docs/development/web-task-result-preview-verification.md)。

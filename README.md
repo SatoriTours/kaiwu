@@ -6,15 +6,16 @@
 
 ## 当前状态
 
-- 已创建本地 Git 仓库、GitHub 公开仓库与 Paseo 项目入口；2026-10-13 按用户授权建立首个本地代码提交，尚未推送。
+- 已创建本地 Git 仓库、GitHub 公开仓库与 Paseo 项目入口；2026-10-13 按用户授权建立首个本地代码提交；2026-10-17 用户明确授权提交当前已完成代码并推送 GitHub 的 `main` 分支。
 - **Go 服务基础已实现，通过本机与独立验收；3 项边界修正也已通过独立核对**：回环配置、HTTP 健康检查、结构化日志、优雅停止和故障测试。
 - Go 基础阶段的 32 项顶层 Go 测试、race、vet、格式、依赖校验、构建及 SIGINT/SIGTERM 烟测通过。详见 [验证记录](docs/development/go-foundation-verification.md)、[初次独立验收](docs/development/go-foundation-review.md) 与 [边界修正记录](docs/development/go-foundation-polish.md)。本机使用非稳定 Go 工具链，不代表稳定工具链或其他系统验收。
 - 电脑端、安卓端和产品协议目录目前仍为说明入口；Web 正式工程、数据库、认证与 WebSocket 已实现；卡片启动独立工作区开发已接通，真实模型联调与主协调编排仍待验收。
 - **纯 Go RPC 基础包已实现并通过本机及独立验收**：`server/internal/pirpc/` 提供显式启动、握手、JSONL、请求关联、取消分类、有界事件/stderr 和直接子进程回收。RPC 基础批次 84 项顶层测试通过（助手入口另有 1 项预期 Skip），race/vet/格式/依赖校验/构建及关键故障重复测试通过；首轮 2 Important/1 Minor 已修正并复验通过，详见 [RPC 验证](docs/development/go-pi-rpc-verification.md) 与 [审查记录](docs/development/go-pi-rpc-review.md)。[规格](docs/superpowers/specs/2026-10-11-go-pi-rpc-design.md) 与 [计划](docs/superpowers/plans/2026-10-11-go-pi-rpc.md) 均已批准；RPC 基础阶段仅健康检查；当前 Web 服务已接独立 pi 会话管理。
+- 聊天交互已按反馈调整：Enter 发送、Shift + Enter 换行；连续过程更新合并并显示摘要，展开查看原文，Markdown 排版与完整网址链接保留。每轮消息附中文及格式要求，已有英文历史保留原文。[验证记录](docs/development/web-task-result-preview-verification.md)。
 - 当前优先 **把 pi 接入做精**；Codex 后续接入。用户已要求启动预览服务，当前后台监听 `192.168.2.122:7331`，令牌认证有效；pi 路径已自动检测，模型可在 Web 自选；详见 [运行说明](apps/web/README.md)。
 - **Web 作为主要开发入口，优先打磨完整流程**；PC 三平台与 Android 保留首版目标。[看板＋右侧聊天原型](docs/design/web-prototype.html) 已实现：专题增删、删除后任务归入“其他”、任务创建与五种角标、项目／任务独立历史和草稿。直接用浏览器打开，无需启动服务。
 - 当前原型 15 项纯状态测试、44 项 Chromium 交互检查通过，独立验收无 Critical／Important（保留 1 项焦点 Minor），覆盖 1440/1024/768/360px；[桌面预览](docs/design/web-desktop.png)、[手机预览](docs/design/web-mobile.png) 与 [本批验证记录](docs/development/web-kanban-prototype-verification.md)。此前聊天居中布局的 20 项结果仅见 [历史记录](docs/development/web-design-verification.md)。
-- **正式 Web 服务首批已实现**：Vue 3＋TypeScript＋Vite，Go 同源托管，SQLite 保存项目／专题／任务／消息，本机令牌登录，WebSocket 更新与断线回执确认。项目／每张卡片分别按首次发送启动独立 pi RPC 会话，切卡片不停；服务重启后显式恢复原会话。
+- **正式 Web 服务首批已实现**：Vue 3＋TypeScript＋Vite，Go 同源托管，SQLite 保存项目／专题／任务／消息，本机令牌登录，WebSocket 更新与断线回执确认。项目／每张卡片分别按首次发送启动独立 pi RPC 会话，切卡片不停；服务重启后在新消息或继续开发时自动接回原会话，不重发旧指令。
 - 添加项目只需服务器目录，保存时自动创建目录／初始化 Git，无需勾选；远程地址可选，填写时仅配置 `origin`。登录状态持久保留 30 天，刷新和服务重启后恢复，退出会撤销。已有文件和远程配置保留，不自动提交／克隆／推送。[初始化验证](docs/development/web-project-initialization-verification.md) · [登录与自动初始化修正](docs/development/web-login-and-auto-init-verification.md)。
 - 正式页面 7 项 Chromium 场景、3 项前端状态检查通过；该首批 Go 94 项顶层测试通过，race／vet／构建通过。验证使用实际 Go 服务与隔离假 pi，不调用模型；此前首批仅开放只读对话；现已新增卡片／聊天启动任务、独立 worktree 与结果待确认，通用编排工具桥仍未实现。[启动说明](apps/web/README.md) · [桌面预览](docs/design/web-service/desktop.png) · [手机预览](docs/design/web-service/mobile.png) · [本批验证](docs/development/web-service-verification.md)。
 
@@ -24,6 +25,18 @@
 - **卡片主分支集成已实现（2026-10-12）**：默认自动识别并记住主分支，新卡片 worktree 从该分支创建；卡片／聊天显示实际 Git 状态，合并图标或任务聊天“合并到主分支”打开审核。确认后可提交任务修改并普通合并，保留分支／worktree／原 pi 会话；冲突、过期审核和遗留写入者阻止集成，断线不终止、重启不重放。高级设置可选覆盖主分支及提交身份。当前 Go 151 项顶层测试、race／vet、前端 6/6、Chromium 18/18 通过；7331 已更新并验证旧登录／数据保留，真实模型仍未调用。[设计](docs/superpowers/specs/2026-10-12-task-merge-design.md) · [计划](docs/superpowers/plans/2026-10-12-task-merge.md) · [验证与限制](docs/development/web-task-merge-verification.md)。
 
 - **pi 自动检测与 Web 模型选择已实现（2026-10-13）**：服务自动从 PATH 查找 pi，真实 RPC 查询当前可用模型；顶栏可保存默认模型，聊天可为未启动的空会话补选，默认配置重启后保留，已有快照不追溯。7331 已更新并验证旧登录／看板数据保留；真实 pi 查询到 43 个可用模型，Chromium 20/20、前端 6/6、Go race／vet／构建通过，未发送真实模型请求。[操作与验证](docs/development/web-pi-model-selection-verification.md)。
+
+- **结构化进展与双向 WebSocket 已实现（2026-10-14）**：聊天顶部提供方案／成果／验证／记录，支持历史轮次、简短回复与展开原文；AI 成果声明与本轮实际工具依据分开，最新结果由用户明确确认，Git 合并状态独立。正式页面业务改用 `/api/socket` 请求／回执和增量同步，断线不重发副作用；事件缺口回退分块权威快照。使用假 pi 验证，不增加额外总结调用；7331 已按用户确认重启并验证旧登录／数据保留，中断会话在新消息／继续开发时自动接回；详见 [本批验证](docs/development/web-progress-socket-verification.md)。
+
+- **任务状态与详情可读性已修正（2026-10-14）**：列表／详情统一区分中断与结果确认；恢复不代表完成，已有结果可离线确认，恢复失败也保留结果。旧任务显示原始要求、最近回复和实际工具／Git 信息，结果确认在首屏，中断时直接发送或继续开发，手机默认收起详细报告以保留聊天空间。7331 已更新，旧任务实机检查通过，Chromium 23/23。[本批验证](docs/development/web-task-state-clarity-verification.md)。
+
+- **会话自动接回已实现（2026-10-15）**：中断后直接发消息或点继续开发，系统检查并接回原 pi／工作区，保留执行身份和记录；去掉手动恢复前置步骤，不自动重放中断指令。7331 已更新，Chromium 24/24 和实际页面只读烟测通过。[验证](docs/development/web-auto-reconnect-verification.md)。
+
+- **回复语言修正（2026-10-16）**：项目／任务 pi 启动与恢复统一追加系统语言要求，当前界面为简体中文，正文、过程更新、摘要和报告自然语言均要求使用简体中文；代码及协议值保留原样。7331 已更新，会话／存储回归及构建通过，未调用真实模型验证。[验证记录](docs/development/web-reply-language-verification.md)。用户反馈确认结果后缺少实际效果与操作反馈，已另提供[任务结果与效果预览设计](docs/superpowers/specs/2026-10-16-task-result-preview-design.md)及[可点击原型](docs/design/task-result-preview.html)。后续正式实现见下一项。
+
+- **任务成果与效果预览已实现（2026-10-17）**：开发结束先查看任务工作区的真实 HTTP 效果或运行结果，再“确认完成”；确认后持续显示已完成并保留效果／修改／合并审核入口。Go 管理用户显式启动的预览进程、配置指纹、执行锁及受限网关，原 pi 会话与结果保留；无配置时明确暂无网页预览，不自动调用模型。桌面保留右侧聊天，手机提供返回入口。7331 已更新并核对旧数据保留，27 项浏览器／13 项前端状态、完整 Go／race／vet 与独立验收通过；未调用真实模型。详细边界见[本批记录](docs/development/web-task-result-preview-verification.md)，[桌面](docs/design/web-service/task-result-desktop.png)／[手机](docs/design/web-service/task-result-mobile.png)为合成项目的实际服务截图。
+
+- **顶栏项目菜单已优化（2026-10-17）**：项目切换、Git 设置／刷新与添加项目集中到轻量菜单；默认模型、连接状态和退出统一靠右，支持键盘及窄屏长名称。7331 已更新并通过实际桌面／手机只读烟测，原数据与登录凭证数量保留；前端状态 16/16、Chromium 32/32、Go 全量与构建通过，未调用真实模型。[本批验证](docs/development/web-project-menu-verification.md)。
 
 ## 模块划分
 

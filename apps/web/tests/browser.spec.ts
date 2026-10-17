@@ -3,6 +3,38 @@ import type { Page, BrowserContext, Cookie } from "@playwright/test";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
+// Intercept real WebSocket frames; all business requests still reach the real Go server.
+const socketProbes = new WeakMap<Page, {calls:any[];received:any[];held:(()=>void)[];holdMethod:string;holdType:string;dropMethod:string;modelMode:string;transform?:(v:any)=>void}>();
+test.beforeEach(async({page})=>{
+ const probe={calls:[] as any[],received:[] as any[],held:[] as (()=>void)[],holdMethod:'',holdType:'',dropMethod:'',modelMode:''};socketProbes.set(page,probe);
+ await page.routeWebSocket('**/api/socket',client=>{
+  const server=client.connectToServer(),methods=new Map<string,string>();
+  client.onMessage(raw=>{const v=JSON.parse(String(raw));probe.calls.push(v);methods.set(v.id,v.method);server.send(raw)});
+  server.onMessage(raw=>{
+   const v=JSON.parse(String(raw)),method=methods.get(v.id);probe.received.push(v);
+   const transform=(probe as {transform?:(v:any)=>void}).transform;
+   if(v.type==='snapshot'&&transform){transform(v);client.send(JSON.stringify(v));return}
+   if(v.type==='reply'&&method===probe.dropMethod){probe.dropMethod='';void client.close({code:1012,reason:'fixture response lost'});return}
+   if((v.type==='reply'&&method===probe.holdMethod)||(v.type===probe.holdType)){probe.held.push(()=>{try{client.send(raw)}catch{}});return}
+   if(v.type==='reply'&&method?.startsWith('models')&&probe.modelMode){v.status=probe.modelMode==='error'?503:200;v.data=probe.modelMode==='error'?{error:{code:'models_unavailable',message:'pi 检测暂时失败'}}:{models:[]};client.send(JSON.stringify(v));return}
+   client.send(raw);
+  });
+ });
+});
+async function chooseMenuProject(page: Page, target: { label: string } | { id: string }) {
+  await page.getByRole('button', { name: '当前项目', exact: true }).click();
+  const menu = page.getByRole('menu', { name: '项目菜单' });
+  const item = 'label' in target
+    ? menu.getByRole('menuitemradio', { name: target.label, exact: true })
+    : menu.locator('[role=menuitemradio][data-project-id="' + target.id + '"]');
+  await item.click();
+}
+async function openAddProject(page: Page) {
+  await page.getByRole('button', { name: '当前项目', exact: true }).click();
+  await page.getByRole('menuitem', { name: '添加项目', exact: true }).click();
+}
+function probeFor(page:Page){return socketProbes.get(page)!}
+function releaseFrames(page:Page){const p=probeFor(page);p.holdMethod='';p.holdType='';for(const release of p.held.splice(0))release()}
 test("real build: login, persistent board, isolated sessions, refresh and responsive views", async ({
   page,
 }) => {
@@ -13,6 +45,12 @@ test("real build: login, persistent board, isolated sessions, refresh and respon
     .getByLabel("本机访问令牌")
     .fill("kaiwu-browser-test-token-00000000");
   await page.getByRole("button", { name: "进入工作台", exact: true }).click();
+  await page.getByRole('button', { name: '当前项目', exact: true }).click();
+  const emptyMenu = page.getByRole('menu', { name: '项目菜单' });
+  await expect(emptyMenu).toContainText('还没有项目');
+  await expect(emptyMenu.getByRole('menuitemradio')).toHaveCount(0);
+  await expect(emptyMenu.getByRole('menuitem', { name: 'Git 设置', exact: true })).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await page.getByRole("button", { name: "＋ 添加项目", exact: true }).click();
   await page.locator("input[name=name]").fill("开悟验收项目");
   await page
@@ -161,22 +199,16 @@ test("late snapshot cannot undo logout", async ({ page }) => {
     .fill("kaiwu-browser-test-token-00000000");
   await page.getByRole("button", { name: "进入工作台", exact: true }).click();
   await expect(page.locator("#chat-title")).toBeVisible();
-  let unblock!: () => void;
-  let captured!: () => void;
-  const arrived = new Promise<void>((resolve) => (captured = resolve));
-  const gate = new Promise<void>((resolve) => (unblock = resolve));
-  await page.route("**/api/snapshot", async (route) => {
-    const response = await route.fetch();
-    captured();
-    await gate;
-    await route.fulfill({ response });
-  });
-  await page.evaluate(() => dispatchEvent(new PopStateEvent("popstate")));
-  await arrived;
-  await page.getByRole("button", { name: "退出", exact: true }).click();
-  await expect(page.getByLabel("本机访问令牌")).toBeVisible();
-  unblock();
-  await page.unrouteAll({ behavior: "wait" });
+  const probe=probeFor(page);
+  await expect.poll(()=>probe.received.some(v=>v.type==='reply'&&probe.calls.some(c=>c.id===v.id&&c.method==='sync'))).toBe(true);
+  probe.holdType='patch';
+  const st=(await (await page.request.get('/api/snapshot')).json()).state;
+  const projectId=Object.keys(st.projects)[0];
+  await page.request.post('/api/commands',{data:{operationId:'held-update',type:'add_topic',revision:st.revision,structureRevision:st.structureRevision,projectId,name:'晚到更新'},headers:{Origin:'http://127.0.0.1:17331','X-Kaiwu-Client':'web'}});
+  await expect.poll(()=>probe.held.length).toBeGreaterThan(0);
+  await page.getByRole('button',{name:'退出',exact:true}).click();
+  await expect(page.getByLabel('本机访问令牌')).toBeVisible();
+  releaseFrames(page);
   await expect(page.locator("#chat-title")).toHaveCount(0);
 });
 
@@ -189,20 +221,14 @@ test("lost send response is confirmed by receipt without duplicate prompt", asyn
     .fill("kaiwu-browser-test-token-00000000");
   await page.getByRole("button", { name: "进入工作台", exact: true }).click();
   await expect(page.locator("#chat-title")).toBeVisible();
-  let requests = 0;
-  await page.route("**/api/commands", async (route) => {
-    requests++;
-    await route.fetch();
-    await route.abort("failed");
-  });
+  const probe=probeFor(page);probe.dropMethod='commands';
   await page.locator("#draft").fill("回执丢失仍只发送一次");
   await page.locator("#send").click();
   await expect(page.locator("#messages")).toContainText(
     "[隔离协议测试] 已收到：回执丢失仍只发送一次",
   );
   await expect(page.locator("#draft")).toHaveValue("");
-  expect(requests).toBe(1);
-  await page.unrouteAll({ behavior: "wait" });
+  expect(probe.calls.filter(r=>r.method==='commands')).toHaveLength(1);
   await page.locator("#draft").fill("确认后可以新发");
   await page.locator("#send").click();
   await expect(page.locator("#messages")).toContainText(
@@ -219,18 +245,10 @@ test("old login generation cannot clear a new draft through late send receipt", 
     .fill("kaiwu-browser-test-token-00000000");
   await page.getByRole("button", { name: "进入工作台", exact: true }).click();
   await expect(page.locator("#chat-title")).toBeVisible();
-  let unblock!: () => void, arrived!: () => void;
-  const captured = new Promise<void>((resolve) => (arrived = resolve)),
-    gate = new Promise<void>((resolve) => (unblock = resolve));
-  await page.route("**/api/commands", async (route) => {
-    const response = await route.fetch();
-    arrived();
-    await gate;
-    await route.fulfill({ response });
-  });
+  const probe=probeFor(page);probe.holdMethod='commands';
   await page.locator("#draft").fill("旧身份的消息");
   await page.locator("#send").click();
-  await captured;
+  await expect.poll(()=>probe.held.length).toBeGreaterThan(0);
   await page.getByRole("button", { name: "退出", exact: true }).click();
   await page
     .getByLabel("本机访问令牌")
@@ -238,21 +256,14 @@ test("old login generation cannot clear a new draft through late send receipt", 
   await page.getByRole("button", { name: "进入工作台", exact: true }).click();
   await expect(page.locator("#chat-title")).toBeVisible();
   await page.locator("#draft").fill("新身份的新草稿");
-  unblock();
-  await page.unrouteAll({ behavior: "wait" });
+  releaseFrames(page);
   await expect(page.locator("#draft")).toHaveValue("新身份的新草稿");
 });
 
 test("switching back to a long conversation restores reading position", async ({
   page,
 }) => {
-  await page.route("**/api/snapshot", async (route) => {
-    const response = await route.fetch(),
-      data = await response.json();
-    if (!data.state) {
-      await route.fulfill({ response });
-      return;
-    }
+  probeFor(page).transform = (data:any) => {
     const task = Object.values(data.state.tasks).find(
       (t: any) => t.title === "任务 A",
     ) as any;
@@ -267,17 +278,17 @@ test("switching back to a long conversation restores reading position", async ({
         }),
       );
     }
-    await route.fulfill({ response, json: data });
-  });
+  };
   await page.goto("/");
   await page
     .getByLabel("本机访问令牌")
     .fill("kaiwu-browser-test-token-00000000");
   await page.getByRole("button", { name: "进入工作台", exact: true }).click();
   const card = page.locator(".task-card").filter({
-    has: page.getByRole("heading", { name: "任务 A", exact: true }),
+    has: page.getByRole("button", { name: "选择任务 任务 A", exact: true }),
   });
   await card.click();
+  await expect(page.locator("#messages")).toContainText("阅读位置 79");
   await page.locator("#messages").evaluate((el) => {
     el.scrollTop = 300;
     el.dispatchEvent(new Event("scroll"));
@@ -289,7 +300,7 @@ test("switching back to a long conversation restores reading position", async ({
     .toBe(300);
 });
 
-test("composition and plain Enter preserve input; keyboard shortcut sends once", async ({
+test("Enter sends once, Shift+Enter adds a newline, and IME confirmation preserves the draft", async ({
   page,
 }) => {
   await page.goto("/");
@@ -298,10 +309,7 @@ test("composition and plain Enter preserve input; keyboard shortcut sends once",
     .fill("kaiwu-browser-test-token-00000000");
   await page.getByRole("button", { name: "进入工作台", exact: true }).click();
   await expect(page.locator("#chat-title")).toBeVisible();
-  let commands = 0;
-  page.on("request", (request) => {
-    if (request.url().endsWith("/api/commands")) commands++;
-  });
+  const count=()=>probeFor(page).calls.filter(r=>r.method==='commands'&&r.body.type==='send_message').length;
   const draft = page.locator("#draft");
   await draft.fill("组合输入");
   await draft.dispatchEvent("keydown", {
@@ -309,14 +317,61 @@ test("composition and plain Enter preserve input; keyboard shortcut sends once",
     ctrlKey: true,
     isComposing: true,
   });
-  await draft.press("Enter");
-  expect(commands).toBe(0);
+  await draft.dispatchEvent("keydown", {key:"Enter",isComposing:true});
+  await draft.dispatchEvent("keydown", {key:"Enter",keyCode:229});
+  expect(count()).toBe(0);
+  await expect(draft).toHaveValue("组合输入");
+  await draft.press("Shift+Enter");
   await expect(draft).toHaveValue("组合输入\n");
-  await draft.press("Control+Enter");
+  expect(count()).toBe(0);
+  await draft.press("Enter");
   await expect(page.locator("#messages")).toContainText(
     "[隔离协议测试] 已收到：组合输入",
   );
-  expect(commands).toBe(1);
+  expect(count()).toBe(1);
+});
+
+test("consecutive progress updates show one useful summary and expand without losing history", async ({page,context})=>{
+ await enterStart(page,context);
+ const state=(await(await page.request.get('/api/snapshot')).json()).state;
+ const project=Object.values(state.projects)[0] as any;
+ const lastReply='## 接口已完成\n\n- 返回 hello world\n- 已核对局域网访问\n\n访问地址：http://192.168.2.122:8000/hello\n\n'+('详细记录：接口返回 hello world。\n'.repeat(80));
+ const transform=(data:any)=>{const c=data.state?.conversations[project.conversationId];if(!c)return;c.runState='idle';c.rounds=[];c.messages=[
+  {id:'summary-user',role:'user',text:'开发一个 hello world 接口',delivery:'complete'},
+  {id:'summary-progress-1',role:'assistant',kind:'progress',text:'先检查当前服务的启动方式。',delivery:'complete'},
+  {id:'summary-progress-2',role:'assistant',kind:'progress',text:'已添加接口，准备验证响应。',delivery:'complete'},
+  {id:'summary-progress-3',role:'assistant',kind:'progress',text:'<kaiwu-report>'+JSON.stringify({summary:'正在核对 /hello 接口的返回内容。',stage:'verifying',plan:[],results:[],checks:[],blockers:[],next:[],question:''})+'</kaiwu-report>',displayText:'',delivery:'complete'},
+  {id:'summary-reply',role:'assistant',text:lastReply,delivery:'complete'},
+  {id:'summary-user-2',role:'user',text:'继续检查边界',delivery:'complete'},
+  {id:'summary-progress-4',role:'assistant',kind:'progress',text:'<kaiwu-report>'+JSON.stringify({version:1,summary:'正在检查空路径和错误请求。',stage:'developing',plan:[],results:[],checks:[],blockers:[],next:[],question:''})+'</kaiwu-report>',displayText:'',delivery:'complete'}
+ ]};
+ probeFor(page).transform=transform;
+ await page.route('**/api/snapshot',async route=>{const response=await route.fetch(),data=await response.json();transform(data);await route.fulfill({response,json:data})});
+ await page.goto('/projects/'+project.id);
+ const replies=page.locator('.message.assistant');
+ await expect(replies).toHaveCount(3);
+ const progress=replies.first();
+ await expect(progress.locator('.assistant-summary')).toHaveText('正在核对 /hello 接口的返回内容。');
+ await expect(progress).toContainText('3 条更新');
+ await expect(progress.getByText('先检查当前服务的启动方式。',{exact:true})).toBeHidden();
+ await progress.locator('summary').first().click();
+ await expect(progress.getByText('先检查当前服务的启动方式。',{exact:true})).toBeVisible();
+ await expect(progress.getByText('已添加接口，准备验证响应。',{exact:true})).toBeVisible();
+ const reply=replies.nth(1);
+ await expect(reply.locator('.assistant-summary')).toContainText('接口已完成');
+ await expect(reply.locator('.assistant-summary li')).toHaveCount(2);
+ await expect(reply.getByRole('link',{name:'http://192.168.2.122:8000/hello',exact:true}).first()).toHaveAttribute('href','http://192.168.2.122:8000/hello');
+ await expect(reply.getByRole('link',{name:'http://192.168.2.122:8000/hello',exact:true}).first()).toHaveAttribute('target','_blank');
+ await expect(reply.locator('.assistant-detail > .markdown-content')).toBeHidden();
+ await reply.locator('summary').first().click();
+ await expect(reply.locator('.assistant-detail > .markdown-content')).toContainText('详细记录');
+ await expect(replies.last().locator('.assistant-summary')).toHaveText('正在检查空路径和错误请求。');
+ await progress.locator('summary').first().click();
+ await reply.locator('summary').first().click();
+ await page.setViewportSize({width:390,height:844});
+ await page.getByRole('button',{name:'◌ 聊天',exact:true}).click();
+ await expect(replies.last().locator('.assistant-summary')).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
 
 test("project form initializes a new directory with optional origin", async ({
@@ -334,7 +389,7 @@ test("project form initializes a new directory with optional origin", async ({
     .fill("kaiwu-browser-test-token-00000000");
   await page.getByRole("button", { name: "进入工作台", exact: true }).click();
   for (const remote of ["", "git@example.com:team/project.git"]) {
-    await page.getByRole("button", { name: "添加项目", exact: true }).click();
+    await openAddProject(page);
     const dir = seed + (remote ? "-with-origin" : "-without-origin");
     await page
       .getByLabel("项目名称", { exact: true })
@@ -350,7 +405,7 @@ test("project form initializes a new directory with optional origin", async ({
     expect(git("remote")).toBe(remote ? "origin" : "");
     if (remote) expect(git("remote", "get-url", "origin")).toBe(remote);
     await page.reload();
-    await expect(page.locator(".top select option:checked")).toHaveText(
+    await expect(page.getByRole('button', { name: '当前项目', exact: true })).toHaveText(
       remote ? "带远程地址" : "从零开始",
     );
     await expect(page.locator("#chat-title")).toContainText("项目对话");
@@ -412,9 +467,7 @@ async function enterStart(page: Page, context: BrowserContext) {
     startCookies = await context.cookies();
     writeFileSync(cookieFile, JSON.stringify(startCookies), { mode: 0o600 });
   }
-  await page
-    .getByLabel("当前项目", { exact: true })
-    .selectOption({ label: "开悟验收项目" });
+  await chooseMenuProject(page, { label: '开悟验收项目' });
   await expect(page.locator("#chat-title")).toContainText("项目对话");
 }
 
@@ -435,21 +488,15 @@ test("card starts original task in a worktree and preserves the draft", async ({
     "[隔离协议测试] 已收到：不要开始开发",
   );
   await expect(card).toContainText("未开始");
-  await expect(page.locator(".scope")).toContainText("就绪");
+  await expect(page.locator(".progress-state")).toContainText("未开始");
   await page.locator("#draft").fill("保留这份草稿");
-  let starts = 0;
-  page.on("request", (request) => {
-    if (
-      request.url().endsWith("/api/commands") &&
-      request.postDataJSON().type === "start_task"
-    )
-      starts++;
-  });
   await card.getByRole("button", { name: "开始开发", exact: true }).click();
-  await expect(card).toContainText("需要确认");
+  await expect(card).toContainText("待验收");
   await expect(page.locator("#draft")).toHaveValue("保留这份草稿");
-  await expect(page.locator(".execution-result")).toContainText("未执行验证");
-  expect(starts).toBe(1);
+  if(await page.getByRole("button",{name:"收起或展开进展卡"}).getAttribute("aria-expanded")==="false")await page.getByRole("button",{name:"收起或展开进展卡"}).click();
+  await page.getByRole("tab",{name:"验证",exact:true}).click();
+  await expect(page.locator(".progress-card")).toContainText("尚未提供可核对的验证报告");
+  expect(probeFor(page).calls.filter(r=>r.method==='commands'&&r.body.type==='start_task')).toHaveLength(1);
   const st = (await (await page.request.get("/api/snapshot")).json()).state;
   const task = Object.values(st.tasks).find(
     (t: any) => t.title === "任务 A",
@@ -493,7 +540,7 @@ test("task chat starts development and project chat requires a task", async ({
     .click();
   await page.locator("#draft").fill(" 开始开发！ ");
   await page.locator("#send").click();
-  await expect(card).toContainText("需要确认");
+  await expect(card).toContainText("待验收");
   await expect(page.locator("#draft")).toHaveValue("");
   await page.getByRole("button", { name: "← 返回项目对话" }).click();
   await expect(page.locator("#draft")).toHaveValue("开始开发");
@@ -503,13 +550,7 @@ test("start without a model opens selection and preserves the draft", async ({
   page,
   context,
 }) => {
-  await page.route("**/api/snapshot", async (route) => {
-    const response = await route.fetch(),
-      data = await response.json();
-    if (!data.state) {
-      await route.fulfill({ response });
-      return;
-    }
+  const transform=(data:any)=>{
     data.capabilities.agent = false;
     for (const task of Object.values(data.state.tasks) as any[]) {
       task.status = "idle";
@@ -520,8 +561,9 @@ test("start without a model opens selection and preserves the draft", async ({
       c.messages = [];
       c.sessionFile = undefined;
     }
-    await route.fulfill({ response, json: data });
-  });
+  };
+  probeFor(page).transform=transform;
+  await page.route("**/api/snapshot",async route=>{const response=await route.fetch(),data=await response.json();if(data.state)transform(data);await route.fulfill({response,json:data})});
   let dispatched = 0;
   await page.route("**/api/commands", async route => { dispatched++; await route.continue(); });
   await enterStart(page, context);
@@ -684,9 +726,7 @@ test("Markdown draft preview preserves source and stays in its conversation", as
   ).toHaveText('{"name": "kaiwu"}');
   const snapshot = (await (await page.request.get("/api/snapshot")).json())
     .state;
-  const projectID = await page
-    .getByLabel("当前项目", { exact: true })
-    .inputValue();
+  const projectID = (await page.getByRole('button', { name: '当前项目', exact: true }).getAttribute('data-project-id'))!;
   expect(
     snapshot.conversations[snapshot.projects[projectID].conversationId].messages
       .filter((m: any) => m.role === "user")
@@ -715,7 +755,7 @@ test("merge icon and chat approve real Git integration and track later edits", a
   context,
 }) => {
   await enterStart(page, context);
-  await page.getByRole("button", { name: "添加项目", exact: true }).click();
+  await openAddProject(page);
   const seed = readFileSync(
     resolve(
       "../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt",
@@ -735,7 +775,7 @@ test("merge icon and chat approve real Git integration and track later edits", a
     has: page.getByRole("heading", { name: "集成功能", exact: true }),
   });
   await card.getByRole("button", { name: "开始开发", exact: true }).click();
-  await expect(card).toContainText("需要确认");
+  await expect(card).toContainText("待验收");
   await expect(card).toContainText("待提交");
   await card.getByRole("button", { name: "合并到主分支", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("Kaiwu");
@@ -771,9 +811,7 @@ test("late merge preview cannot reopen over another conversation", async ({
   context,
 }) => {
   await enterStart(page, context);
-  await page
-    .getByLabel("当前项目", { exact: true })
-    .selectOption({ label: "合并验收" });
+  await chooseMenuProject(page, { label: '合并验收' });
   const card = page
     .locator(".task-card")
     .filter({
@@ -782,23 +820,11 @@ test("late merge preview cannot reopen over another conversation", async ({
   await card
     .getByRole("button", { name: "选择任务 集成功能", exact: true })
     .click();
-  let unblock!: () => void;
-  const gate = new Promise<void>((r) => (unblock = r));
-  let held = false;
-  await page.route("**/api/git/preview", async (route) => {
-    const response = await route.fetch();
-    held = true;
-    await gate;
-    await route.fulfill({ response });
-  });
+  const probe=probeFor(page);probe.holdMethod='git/preview';
   await card.getByRole("button", { name: "合并到主分支", exact: true }).click();
-  await expect.poll(() => held).toBe(true);
+  await expect.poll(() => probe.held.length).toBeGreaterThan(0);
   await page.getByRole("button", { name: "← 返回项目对话" }).click();
-  const received = page.waitForResponse((r) =>
-    r.url().endsWith("/api/git/preview"),
-  );
-  unblock();
-  await received;
+  releaseFrames(page);
   await page.evaluate(
     () =>
       new Promise<void>((resolve) =>
@@ -814,43 +840,20 @@ test("lost merge response and missing receipt retry the same operation", async (
   context,
 }) => {
   await enterStart(page, context);
-  await page
-    .getByLabel("当前项目", { exact: true })
-    .selectOption({ label: "合并验收" });
+  await chooseMenuProject(page, { label: '合并验收' });
   const card = page
     .locator(".task-card")
     .filter({
       has: page.getByRole("heading", { name: "集成功能", exact: true }),
     });
   await card.getByRole("button", { name: "合并到主分支", exact: true }).click();
-  let drop = true,
-    miss = true;
-  const ids: string[] = [];
-  await page.route("**/api/git/merge", async (route) => {
-    ids.push(route.request().postDataJSON().operationId);
-    if (drop) {
-      drop = false;
-      await route.fetch();
-      await route.abort("failed");
-    } else await route.continue();
-  });
-  await page.route("**/api/git/operations/*", async (route) => {
-    if (miss) {
-      miss = false;
-      await route.fulfill({
-        status: 404,
-        contentType: "application/json",
-        body: JSON.stringify({
-          error: { code: "not_found", message: "尚未查到回执" },
-        }),
-      });
-    } else await route.continue();
-  });
+  const probe=probeFor(page);probe.dropMethod='git/merge';
   await page.getByRole("button", { name: "提交并合并", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("回执");
+  await expect(page.locator('.connection')).toContainText('已连接');
   await page.getByRole("button", { name: "提交并合并", exact: true }).click();
-  await expect.poll(() => ids.length).toBe(2);
-  expect(ids[1]).toBe(ids[0]);
+  await expect.poll(()=>probe.calls.filter(r=>r.method==='git/merge').length).toBe(2);
+  const ids=probe.calls.filter(r=>r.method==='git/merge').map(r=>r.body.operationId);expect(ids[1]).toBe(ids[0]);
   await expect(page.getByRole("dialog")).toContainText("合并完成");
 });
 
@@ -872,7 +875,7 @@ test("pi models: discover, filter, save defaults and choose an existing empty co
     const result = await (await fetch('/api/commands', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Kaiwu-Client': 'web' }, body: JSON.stringify({ type: 'add_project', operationId: crypto.randomUUID(), revision: snap.state.revision, name: '模型选择验证', path }) })).json();
     return result.createdId as string;
   }, modelProjectPath);
-  await page.getByLabel('当前项目').selectOption(created);
+  await chooseMenuProject(page, { id: created });
   await page.locator('#draft').fill('选择模型时保留的草稿');
   await page.getByRole('button', { name: '选择会话模型', exact: true }).click();
   const scoped = page.getByRole('dialog', { name: '选择会话模型', exact: true });
@@ -897,16 +900,15 @@ test("pi models: discover, filter, save defaults and choose an existing empty co
 test("pi models: errors, empty catalog and mobile selection retain draft", async ({ page, context }) => {
   await enterStart(page, context);
   await page.setViewportSize({ width: 360, height: 900 });
-  await page.route('**/api/models*', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'models_unavailable', message: 'pi 检测暂时失败' } }) }));
+  probeFor(page).modelMode='error';
   await page.getByRole('button', { name: '默认模型', exact: true }).click();
   const picker = page.getByRole('dialog', { name: '默认模型', exact: true });
   await expect(picker).toContainText('pi 检测暂时失败');
   await expect(picker.getByRole('button', { name: '保存模型' })).toBeDisabled();
-  await page.unroute('**/api/models*');
-  await page.route('**/api/models*', route => route.fulfill({ contentType: 'application/json', body: '{"models":[]}' }));
+  probeFor(page).modelMode='empty';
   await picker.getByRole('button', { name: '重新检测' }).click();
   await expect(picker).toContainText('pi 尚无可用模型');
-  await page.unroute('**/api/models*');
+  probeFor(page).modelMode='';
   await picker.getByRole('button', { name: '重新检测' }).click();
   await expect(picker).toContainText('检测到 3 个可用模型');
   await picker.getByLabel('提供商', { exact: true }).selectOption('fixture');
@@ -918,3 +920,415 @@ test("pi models: errors, empty catalog and mobile selection retain draft", async
   const snap = await page.evaluate(async () => (await (await fetch('/api/snapshot')).json()).state);
   expect(snap.profile.thinking).toBe('medium');
 });
+
+test('structured progress uses bidirectional socket and keeps verification evidence separate', async ({page,context})=>{
+ const fixturePath=readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'),'utf8');
+ const cookieFile=resolve(fixturePath,'..','browser-session.json');
+ if(existsSync(cookieFile))await context.addCookies(JSON.parse(readFileSync(cookieFile,'utf8')));
+ else await authenticateResultTest(page);
+ const snapshot=(await (await page.request.get('/api/snapshot')).json()).state;
+ if(!Object.keys(snapshot.projects).length){
+  const path=readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'),'utf8');
+  await page.request.post('/api/commands',{data:{type:'add_project',operationId:'progress-fixture-project',revision:snapshot.revision,name:'进度测试',path},headers:{Origin:'http://127.0.0.1:17331','X-Kaiwu-Client':'web'}});
+ }
+ await page.goto('/');await expect(page.locator('#chat-title')).toBeVisible();
+ const requests:string[]=[];page.on('request',r=>{if(r.url().includes('/api/commands'))requests.push(r.url())});
+ await page.locator('[data-action=new-task]').click();
+ await page.locator('input[name=title]').fill('结构化进展验收');
+ await page.locator('textarea[name=request]').fill('结构化登录恢复');
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ const card=page.locator('.task-card').filter({has:page.getByRole('heading',{name:'结构化进展验收',exact:true})});
+ await card.getByRole('button',{name:'开始开发',exact:true}).click();
+ await expect(page.getByRole('tab',{name:/成果/})).toBeVisible();
+ await expect(page.locator('.progress-card')).toContainText('刷新自动恢复');
+ await page.getByRole('tab',{name:'验证',exact:true}).click();
+ await expect(page.locator('.progress-card')).toContainText('AI 报告通过');
+ await expect(page.locator('.progress-card')).toContainText('命令完成');
+ await page.getByRole('tab',{name:'记录',exact:true}).click();
+ await expect(page.locator('.progress-card')).toContainText('bash');
+ await page.getByRole('tab',{name:/成果/}).click();
+ await expect(page.getByRole('button',{name:'确认完成',exact:true})).toBeVisible();
+ await page.setViewportSize({width:1440,height:900});
+ await page.screenshot({path:resolve('../../docs/design/web-service/progress-desktop.png')});
+ await page.setViewportSize({width:390,height:844});
+ await page.getByRole('button',{name:'◌ 聊天',exact:true}).click();
+ await expect(page.locator('#draft')).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:resolve('../../docs/design/web-service/progress-mobile.png')});
+ await page.setViewportSize({width:1440,height:900});
+ const before=(await (await page.request.get('/api/snapshot')).json()).state;
+ const t=Object.values(before.tasks).find((t:any)=>t.title==='结构化进展验收') as any;
+ await page.getByRole('button',{name:'确认完成',exact:true}).click();
+ await expect(page.locator('.progress-card')).toContainText('已完成');
+ const after=(await (await page.request.get('/api/snapshot')).json()).state;
+ expect(after.tasks[t.id].status).toBe('completed');
+ expect(after.taskGit?.[t.id]?.state).toBe(before.taskGit?.[t.id]?.state);
+ await page.locator('#draft').fill('继续改进结构化登录恢复');await page.locator('#send').click();
+ await expect(page.getByLabel('查看历史轮次')).toBeVisible();
+ await expect(page.getByRole('button',{name:'确认完成',exact:true})).toBeVisible();
+ await page.getByLabel('查看历史轮次').selectOption(before.conversations[t.conversationId].rounds[0].id);
+ await expect(page.locator('.progress-card')).toContainText('历史轮次');
+ await expect(page.getByRole('button',{name:'确认完成',exact:true})).toHaveCount(0);
+ expect(requests).toEqual([]);
+});
+
+test('new messages and continue icon restore interrupted task automatically without a resume command',async({page,context})=>{
+ const fixturePath=readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'),'utf8');
+ const cookieFile=resolve(fixturePath,'..','browser-session.json');
+ if(existsSync(cookieFile))await context.addCookies(JSON.parse(readFileSync(cookieFile,'utf8')));
+ else await authenticateResultTest(page);
+ const fixtureCommand=async(body:any)=>{const st=(await (await page.request.get('/api/snapshot')).json()).state;const response=await page.request.post('/api/commands',{data:{...body,revision:st.revision},headers:{Origin:'http://127.0.0.1:17331','X-Kaiwu-Client':'web'}});expect(response.ok()).toBe(true);return response.json()};
+ let st=(await (await page.request.get('/api/snapshot')).json()).state;
+ if(!Object.keys(st.projects).length)await fixtureCommand({operationId:'auto-ui-project',type:'add_project',name:'自动接回验证',path:fixturePath});
+ st=(await (await page.request.get('/api/snapshot')).json()).state;const projectId=Object.keys(st.projects)[0];
+ const taskID=(await fixtureCommand({operationId:'auto-ui-task',type:'add_task',projectId,title:'自动接回会话',request:'固定协议测试文件'})).createdId;
+ await page.goto('/');await chooseMenuProject(page, { id: projectId });
+ const card=page.locator('.task-card[data-taskid="'+taskID+'"]');await card.getByRole('button',{name:'开始开发',exact:true}).click();await expect(card).toContainText('待验收');
+ await page.locator('#draft').fill('__DISCONNECT_FIXTURE__');await page.locator('#send').click();await expect(card).toContainText('已中断');
+ const before=(await (await page.request.get('/api/snapshot')).json()).state,t=before.tasks[taskID],c=before.conversations[t.conversationId],x=before.executions[t.executionId];
+ await expect(page.getByRole('button',{name:'恢复原会话',exact:true})).toHaveCount(0);
+ await page.locator('#draft').fill('接着执行新的明确要求');await expect(page.locator('#send')).toBeEnabled();await page.locator('#send').click();
+ await expect(page.locator('#messages')).toContainText('[隔离协议测试] 已收到：接着执行新的明确要求');await expect(card).toContainText('待验收');
+ let after=(await (await page.request.get('/api/snapshot')).json()).state;
+ expect(after.tasks[taskID].executionId).toBe(t.executionId);expect(after.executions[t.executionId].workspace).toBe(x.workspace);expect(after.conversations[c.id].sessionFile).toBe(c.sessionFile);expect(after.conversations[c.id].sessionId).toBe(c.sessionId);
+ expect(after.conversations[c.id].messages.filter((m:any)=>m.role==='user'&&m.text==='接着执行新的明确要求')).toHaveLength(1);
+ await page.locator('#draft').fill('__DISCONNECT_FIXTURE__');await page.locator('#send').click();await expect(card).toContainText('已中断');
+ await card.getByRole('button',{name:'继续开发',exact:true}).click();await expect(card).toContainText('待验收');
+ after=(await (await page.request.get('/api/snapshot')).json()).state;
+ expect(after.tasks[taskID].executionId).toBe(t.executionId);expect(after.conversations[c.id].messages.filter((m:any)=>m.role==='user'&&m.text==='__DISCONNECT_FIXTURE__')).toHaveLength(2);
+ expect(probeFor(page).calls.filter(r=>r.method==='commands'&&r.body.type==='resume')).toHaveLength(0);
+});
+
+test('legacy interrupted tasks explain automatic recovery and preserve useful mobile facts',async({page,context})=>{
+ const fixturePath=readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'),'utf8');
+ const cookieFile=resolve(fixturePath,'..','browser-session.json');
+ if(existsSync(cookieFile))await context.addCookies(JSON.parse(readFileSync(cookieFile,'utf8')));
+ else await authenticateResultTest(page);
+ const fixtureCommand=async(body:any)=>{
+  const st=(await (await page.request.get('/api/snapshot')).json()).state;
+  const response=await page.request.post('/api/commands',{data:{...body,revision:st.revision},headers:{Origin:'http://127.0.0.1:17331','X-Kaiwu-Client':'web'}});
+  expect(response.ok()).toBe(true);return response.json();
+ };
+ let st=(await (await page.request.get('/api/snapshot')).json()).state;
+ if(!Object.keys(st.projects).length)await fixtureCommand({operationId:'clarity-project',type:'add_project',name:'界面核对',path:fixturePath});
+ st=(await (await page.request.get('/api/snapshot')).json()).state;const projectId=Object.keys(st.projects)[0];
+ const receipt=await fixtureCommand({operationId:'clarity-task',type:'add_task',projectId,title:'中断任务核对',request:'实现 /hello 接口，返回 hello world'});
+ const id=receipt.createdId;
+ const transform=(data:any)=>{
+  const t=data.state.tasks[id];if(!t)return;t.status='needs_confirmation';t.executionId='legacy-clarity';
+  const c=data.state.conversations[t.conversationId];c.runState='interrupted';c.error='pi 会话已中断，请明确恢复；历史已保留';c.rounds=[];
+  c.messages=[{id:'legacy-user',role:'user',text:'开始开发',delivery:'uncertain'},{id:'legacy-assistant',role:'assistant',text:'已创建 /hello 接口，正在验证启动，尚未收到完整结果。',delivery:'uncertain'}];
+  data.state.executions??={};data.state.executions[t.executionId]={id:t.executionId,phase:'awaiting_review',tools:[{id:'write',name:'write',result:'saved'},{id:'bash',name:'bash'}]};
+  data.state.taskGit??={};data.state.taskGit[id]={taskId:id,state:'uncommitted',mainBranch:'main',dirtyFiles:[{path:'main.go',status:'M'}],canMerge:false};
+ };
+ probeFor(page).transform=transform;
+ // This view-only legacy fixture stays stable while the real server observes its own Git state.
+ probeFor(page).holdType='patch';
+ await page.route('**/api/snapshot',async route=>{const response=await route.fetch(),data=await response.json();if(data.state)transform(data);await route.fulfill({response,json:data})});
+ await page.setViewportSize({width:390,height:844});await page.goto('/?project='+projectId);
+ await chooseMenuProject(page, { id: projectId });
+ // The fixture task may be in the protected topic on a narrow screen.
+ const fresh=(await (await page.request.get('/api/snapshot')).json()).state;
+ await page.getByLabel('当前看板专题').selectOption(fresh.tasks[id].topicId);
+ const card=page.locator('.task-card[data-taskid="'+id+'"]');await expect(card).toContainText('已中断');
+ await card.getByRole('button',{name:'选择任务 中断任务核对',exact:true}).click();
+ await expect(page.getByRole('button',{name:'恢复原会话',exact:true})).toHaveCount(0);
+ await expect(page.locator('.auto-recovery')).toContainText('尝试接回原会话');
+ await expect(page.getByRole('button',{name:'确认完成',exact:true})).toHaveCount(0);
+ await expect(page.locator('.chat-head').getByRole('button',{name:'继续开发',exact:true})).toBeVisible();
+ await expect(page.locator('.progress-panel')).toContainText('实现 /hello 接口');
+ await expect(page.locator('.progress-panel')).toContainText('已创建 /hello 接口');
+ await expect(page.locator('.progress-panel')).toContainText('1 条已返回');
+ await expect(page.locator('.progress-panel')).toContainText('1 条未结束');
+ await expect(page.locator('.progress-panel')).toContainText('1 个文件待提交');
+ await expect(page.locator('.progress-panel')).not.toContainText('开始任务后');
+ expect(await page.locator('#messages').evaluate(el=>el.clientHeight)).toBeGreaterThanOrEqual(140);
+ await page.locator('#draft').fill('继续处理新的要求');await expect(page.locator('#send')).toBeEnabled();
+ await page.screenshot({path:resolve('../../docs/design/web-service/task-recovery-mobile.png')});
+ await page.getByRole('button',{name:'收起或展开进展卡'}).click();
+ await page.getByRole('tab',{name:'记录',exact:true}).click();
+ await expect(page.locator('.progress-card')).toContainText('write');
+ expect(probeFor(page).calls.filter(r=>r.method==='commands')).toHaveLength(0);
+});
+
+test('result review opens a result view and completion remains visible after refresh',async({page})=>{
+ const headers={Origin:'http://127.0.0.1:17331','X-Kaiwu-Client':'web'};
+ await authenticateResultTest(page);
+ const command=async(body:any)=>{const state=(await(await page.request.get('/api/snapshot')).json()).state;const response=await page.request.post('/api/commands',{headers,data:{...body,revision:state.revision}});expect(response.ok()).toBe(true);return response.json()};
+ let state=(await(await page.request.get('/api/snapshot')).json()).state;
+ let projectId=Object.keys(state.projects)[0];
+ if(!projectId){projectId=(await command({type:'add_project',operationId:'review-project',name:'成果验收',path:readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'),'utf8')})).createdId}
+ const taskId=(await command({type:'add_task',operationId:'review-task',projectId,title:'成果预览验收',request:'结构化成果预览验收'})).createdId;
+ await command({type:'start_task',operationId:'review-start',projectId,taskId});
+ await page.goto('/projects/'+projectId+'/tasks/'+taskId);
+ await expect(page.getByRole('button',{name:'查看效果',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'查看效果',exact:true}).click();
+ await expect(page.getByRole('region',{name:'任务成果与效果'})).toBeVisible();
+ await page.getByRole('button',{name:'确认完成',exact:true}).click();
+ await expect(page.locator('.task-completed')).toContainText('你已确认本轮结果');
+ await expect(page.getByRole('region',{name:'任务成果与效果'})).toBeVisible();
+ await expect(page.getByRole('button',{name:'确认完成',exact:true})).toHaveCount(0);
+ const disconnected=(data:any)=>{const t=data.state?.tasks[taskId];if(t){const c=data.state.conversations[t.conversationId];c.runState='interrupted';c.error='pi 会话已中断，发送下一条消息时自动接回；历史已保留'}};
+ probeFor(page).transform=disconnected;
+ await page.route('**/api/snapshot',async route=>{const response=await route.fetch(),data=await response.json();disconnected(data);await route.fulfill({response,json:data})});
+ await page.reload();
+ await expect(page.locator('.task-completed')).toBeVisible();
+ await expect(page.locator('.auto-recovery')).toHaveCount(0);
+ await expect(page.locator('.task-completed')).toContainText('合并到主分支');
+ await page.getByRole('button',{name:'继续修改',exact:true}).click();
+ await expect(page.locator('#draft')).toBeFocused();
+ await page.setViewportSize({width:390,height:844});
+ await page.getByRole('button',{name:'◌ 聊天',exact:true}).click();
+ await page.getByRole('button',{name:'查看效果',exact:true}).click();
+ await expect(page.getByRole('region',{name:'任务成果与效果'})).toBeVisible();
+ await page.getByRole('button',{name:'返回任务对话',exact:true}).click();
+ await expect(page.locator('#draft')).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+
+async function resultFixture(page:Page, label:string, webpage=false, run=true){
+ const headers={Origin:'http://127.0.0.1:17331','X-Kaiwu-Client':'web'};
+ const base=readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'),'utf8');
+ const path=resolve(base,'..','preview-'+label);
+ mkdirSync(path,{recursive:true});
+ if(webpage){
+  writeFileSync(resolve(path,'kaiwu-preview.json'),JSON.stringify({version:1,command:['python3','preview.py','--port','{port}'],path:'/'}));
+  writeFileSync(resolve(path,'preview.py'),`
+import argparse
+from http.server import BaseHTTPRequestHandler, HTTPServer
+p=argparse.ArgumentParser();p.add_argument('--port',type=int);a=p.parse_args()
+class Handler(BaseHTTPRequestHandler):
+ def do_GET(self):
+  if self.path.startswith('/api/hello'):
+   body=b'API OK';content='text/plain'
+  else:
+   body="""<!doctype html><meta charset=utf-8><h1>真实任务预览</h1><button id=ping>测试接口</button><p id=result></p><script>document.getElementById('ping').onclick=async()=>{document.getElementById('result').textContent=await(await fetch('api/hello')).text()};try{parent.document.body;document.body.dataset.parentAccess='allowed'}catch{document.body.dataset.parentAccess='blocked'}</script>""".encode();content='text/html; charset=utf-8'
+  self.send_response(200);self.send_header('Content-Type',content);self.end_headers();self.wfile.write(body)
+HTTPServer(('127.0.0.1',a.port),Handler).serve_forever()
+`);
+ }
+ const command=async(body:any)=>{const st=(await(await page.request.get('/api/snapshot')).json()).state;const response=await page.request.post('/api/commands',{headers,data:{...body,revision:st.revision}});expect(response.ok()).toBe(true);return response.json()};
+ const projectId=(await command({type:'add_project',operationId:'preview-project-'+label,name:'预览项目 '+label,path})).createdId;
+ const taskId=(await command({type:'add_task',operationId:'preview-task-'+label,projectId,title:'预览任务 '+label,request:'结构化效果预览验收'})).createdId;
+ if(run)await command({type:'start_task',operationId:'preview-run-'+label,projectId,taskId});
+ return {projectId,taskId};
+}
+
+test('a real task HTTP preview is isolated, remains after acceptance, and stops explicitly',async({page})=>{
+ await authenticateResultTest(page);
+ const {projectId,taskId}=await resultFixture(page,'http',true);
+ await page.goto('/projects/'+projectId+'/tasks/'+taskId);
+ await page.getByRole('button',{name:'查看效果',exact:true}).click();
+ const pane=page.getByRole('region',{name:'任务成果与效果'});
+ await expect(pane.getByRole('button',{name:'启动预览',exact:true})).toBeVisible();
+ await expect(pane).toContainText('preview.py');
+ // External edits after display must not turn this click into approval of a
+ // different command. The changed command has a visible filesystem side effect.
+ const state=(await(await page.request.get('/api/snapshot')).json()).state;
+ const tree=state.executions[state.tasks[taskId].executionId].workspace;
+ const manifestFile=resolve(tree,'kaiwu-preview.json'),shown=readFileSync(manifestFile,'utf8');
+ writeFileSync(resolve(tree,'unapproved.py'),"from pathlib import Path\nPath('preview-unapproved').touch()\n");
+ writeFileSync(manifestFile,JSON.stringify({version:1,command:['python3','unapproved.py','{port}'],path:'/'}));
+ await pane.getByRole('button',{name:'启动预览',exact:true}).click();
+ await expect(pane.getByRole('alert')).toContainText(/配置|指纹|刷新/);
+ expect(existsSync(resolve(tree,'preview-unapproved'))).toBe(false);
+ writeFileSync(manifestFile,shown);
+ await pane.getByRole('button',{name:'刷新状态',exact:true}).click();
+ await pane.getByRole('button',{name:'启动预览',exact:true}).click();
+ const frame=page.frameLocator('iframe[title="任务效果"]');
+ await expect(frame.getByRole('heading',{name:'真实任务预览'})).toBeVisible();
+ await expect(page.locator('iframe[title="任务效果"]')).toHaveAttribute('sandbox','allow-scripts');
+ expect(await frame.locator('body').getAttribute('data-parent-access')).toBe('blocked');
+ await frame.getByRole('button',{name:'测试接口'}).click();
+ await expect(frame.locator('#result')).toHaveText('API OK');
+ await page.getByRole('button',{name:'确认完成',exact:true}).click();
+ await expect(page.locator('.task-completed')).toBeVisible();
+ await expect(frame.getByRole('heading',{name:'真实任务预览'})).toBeVisible();
+ await page.screenshot({path:resolve('../../docs/design/web-service/task-result-desktop.png')});
+ await page.setViewportSize({width:390,height:844});
+ await expect(pane).toBeVisible();
+ await pane.getByRole('button',{name:'返回任务对话'}).click();
+ await expect(page.locator('#draft')).toBeVisible();
+ await page.screenshot({path:resolve('../../docs/design/web-service/task-result-mobile.png')});
+ await page.getByRole('button',{name:'查看效果',exact:true}).click();
+ await pane.getByRole('button',{name:'停止预览',exact:true}).click();
+ await expect(pane).toContainText('服务已停止');
+ await expect(page.locator('iframe[title="任务效果"]')).toHaveCount(0);
+ expect(probeFor(page).calls.filter(r=>r.method==='previews/start')).toHaveLength(2);
+});
+
+test('late preview responses stay with their original task and absent previews do not start a model',async({page})=>{
+ await authenticateResultTest(page);
+ const a=await resultFixture(page,'late-a');const b=await resultFixture(page,'late-b',false,false);
+ await page.goto('/projects/'+a.projectId+'/tasks/'+a.taskId);
+ await expect(page.getByRole('button',{name:'查看效果',exact:true})).toBeVisible();
+ probeFor(page).holdMethod='previews/status';
+ await page.getByRole('button',{name:'查看效果',exact:true}).click();
+ await expect.poll(()=>probeFor(page).held.length).toBeGreaterThan(0);
+ await chooseMenuProject(page, { id: b.projectId });
+ await page.locator('.task-card[data-taskid="'+b.taskId+'"]').click();
+ releaseFrames(page);
+ await expect(page.getByRole('region',{name:'任务成果与效果'})).toHaveCount(0);
+ await expect(page.locator('#chat-title')).toContainText('预览任务 late-b');
+ await chooseMenuProject(page, { id: a.projectId });
+ await page.locator('.task-card[data-taskid="'+a.taskId+'"]').click();
+ await page.getByRole('button',{name:'查看效果',exact:true}).click();
+ await expect(page.getByRole('region',{name:'任务成果与效果'})).toContainText('暂无网页预览');
+ const sendsBefore=probeFor(page).calls.filter(r=>r.method==='commands'&&r.body?.type==='send_message').length;
+ await page.getByRole('button',{name:'补充预览说明',exact:true}).click();
+ await expect(page.locator('#draft')).toHaveValue(/kaiwu-preview.json/);
+ expect(probeFor(page).calls.filter(r=>r.method==='previews/start')).toHaveLength(0);
+ expect(probeFor(page).calls.filter(r=>r.method==='commands'&&r.body?.type==='send_message')).toHaveLength(sendsBefore);
+});
+
+
+
+async function projectMenuFixture(page: Page) {
+  await authenticateResultTest(page);
+  const seed = readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'), 'utf8');
+  const ids: string[] = [];
+  for (const name of ['abc', '这是一个名称很长的项目用于验证窄屏省略与菜单完整名称']) {
+    const state = (await (await page.request.get('/api/snapshot')).json()).state;
+    const existing = Object.values(state.projects).find((p: any) => p.name === name) as any;
+    if (existing) { ids.push(existing.id); continue; }
+    const response = await page.request.post('/api/commands', {
+      data: { type: 'add_project', operationId: crypto.randomUUID(), revision: state.revision, name, path: seed + '-menu-' + crypto.randomUUID() },
+      headers: { Origin: 'http://127.0.0.1:17331', 'X-Kaiwu-Client': 'web' },
+    });
+    expect(response.ok(), await response.text()).toBe(true);
+    ids.push((await response.json()).createdId);
+  }
+  await page.goto('/projects/' + ids[0]);
+  return ids;
+}
+
+test('project menu keeps project actions together and opens the existing dialogs', async ({ page }) => {
+  await projectMenuFixture(page);
+  const trigger = page.getByRole('button', { name: '当前项目', exact: true });
+  await expect(trigger).toContainText('abc');
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await trigger.click();
+  const menu = page.getByRole('menu', { name: '项目菜单' });
+  await expect(menu.getByRole('menuitemradio', { name: 'abc', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await menu.getByRole('menuitem', { name: 'Git 设置', exact: true }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toContainText('主分支');
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await trigger.click();
+  const refreshCount = probeFor(page).calls.filter(c => c.method === 'git/refresh').length;
+  await menu.getByRole('menuitem', { name: '刷新 Git 状态', exact: true }).click();
+  await expect(menu).toHaveCount(0);
+  await expect.poll(() => probeFor(page).calls.filter(c => c.method === 'git/refresh').length).toBeGreaterThan(refreshCount);
+  await trigger.click();
+  await menu.getByRole('menuitem', { name: '添加项目', exact: true }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toContainText('项目绝对路径');
+});
+
+test('project menu keyboard selection preserves scope drafts and dismisses predictably', async ({ page }) => {
+  const ids = await projectMenuFixture(page);
+  const trigger = page.getByRole('button', { name: '当前项目', exact: true });
+  const menu = page.getByRole('menu', { name: '项目菜单' });
+  await page.locator('#draft').fill('第一个项目的草稿');
+  await trigger.focus();
+  await trigger.press('ArrowDown');
+  await expect(menu.getByRole('menuitemradio', { name: 'abc', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await trigger.press('Enter');
+  await expect(menu).toBeVisible();
+  const options = menu.getByRole('menuitemradio');
+  const targetIndex = await options.evaluateAll((els, id) => els.findIndex(el => el.getAttribute('data-project-id') === id), ids[1]);
+  await page.keyboard.press('Home');
+  for (let i = 0; i < targetIndex; i++) await page.keyboard.press('ArrowDown');
+  await expect(options.nth(targetIndex)).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(trigger).toHaveAttribute('data-project-id', ids[1]);
+  await expect(page.locator('#draft')).toHaveValue('');
+  await trigger.click();
+  await menu.getByRole('menuitemradio', { name: 'abc', exact: true }).click();
+  await expect(page.locator('#draft')).toHaveValue('第一个项目的草稿');
+  await trigger.click();
+  await page.locator('.toolbar h1').click();
+  await expect(menu).toHaveCount(0);
+  await trigger.focus();
+  await trigger.press('ArrowUp');
+  await expect(menu.getByRole('menuitem', { name: '添加项目', exact: true })).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(menu.getByRole('menuitemradio').first()).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(menu.getByRole('menuitem', { name: '添加项目', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(menu).toHaveCount(0);
+});
+
+test('project menu reselecting the current project retains its task and draft', async ({ page }) => {
+  const ids = await projectMenuFixture(page);
+  const state = (await (await page.request.get('/api/snapshot')).json()).state;
+  const response = await page.request.post('/api/commands', {
+    data: { type: 'add_task', projectId: ids[0], title: '菜单任务上下文', request: '不执行模型', operationId: crypto.randomUUID(), revision: state.revision },
+    headers: { Origin: 'http://127.0.0.1:17331', 'X-Kaiwu-Client': 'web' },
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+  const taskId = (await response.json()).createdId;
+  await page.goto('/projects/' + ids[0] + '/tasks/' + taskId);
+  await page.locator('#draft').fill('保留当前任务的草稿');
+  await chooseMenuProject(page, { id: ids[0]! });
+  await expect(page).toHaveURL(new RegExp('/tasks/' + taskId + '$'));
+  await expect(page.locator('#chat-title')).toContainText('菜单任务上下文');
+  await expect(page.locator('#draft')).toHaveValue('保留当前任务的草稿');
+});
+
+test('project menu stays usable with long names on desktop and mobile', async ({ page }) => {
+  const ids = await projectMenuFixture(page);
+  await page.goto('/projects/' + ids[1]);
+  const trigger = page.getByRole('button', { name: '当前项目', exact: true });
+  for (const width of [1440, 768, 390, 360, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(trigger).toHaveAttribute('data-project-id', ids[1]);
+    const header = await page.locator('.top').boundingBox();
+    const model = await page.getByRole('button', { name: '默认模型', exact: true }).boundingBox();
+    expect(model!.x).toBeGreaterThan(width / 2);
+    expect(header!.height).toBeLessThanOrEqual(52);
+    await trigger.click();
+    const menu = page.getByRole('menu', { name: '项目菜单' });
+    await expect(menu).toBeVisible();
+    const box = await menu.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(8);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width - 8);
+    await expect(menu.getByRole('menuitem', { name: '添加项目', exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    if (width === 1440 || width === 390) await page.screenshot({ path: resolve('../../docs/design/web-service/project-menu-' + (width === 1440 ? 'desktop' : 'mobile') + '.png') });
+    await page.keyboard.press('Escape');
+  }
+});
+
+test('revoked login during socket disconnection returns to login after failed upgrade',async({browser})=>{
+ const fixturePath=readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'),'utf8');
+ const context=await browser.newContext({storageState:{cookies:JSON.parse(readFileSync(resolve(fixturePath,'..','browser-session.json'),'utf8')),origins:[]}});
+ await context.addInitScript(()=>{
+  const Native=window.WebSocket;
+  (window as any).kaiwuSockets=[];
+  window.WebSocket=class extends Native{constructor(url:string|URL,protocols?:string|string[]){super(url,protocols);(window as any).kaiwuSockets.push(this)}};
+ });
+ const page=await context.newPage();await page.goto('http://127.0.0.1:17331/');await expect(page.locator('#chat-title')).toBeVisible();
+ await expect.poll(()=>page.evaluate(()=>(window as any).kaiwuSockets.some((s:WebSocket)=>s.readyState===1))).toBe(true);
+ // Close without the server's 1008 frame, after another client revokes the cookie.
+ await page.request.post('/api/logout',{data:{},headers:{Origin:'http://127.0.0.1:17331','X-Kaiwu-Client':'web'}});
+ await page.evaluate(()=>(window as any).kaiwuSockets.forEach((s:WebSocket)=>s.close()));
+ await expect(page.getByLabel('本机访问令牌')).toBeVisible();
+ await expect(page.getByText('登录已失效，请重新输入令牌')).toBeVisible();
+ await context.close();
+});
+
+async function authenticateResultTest(page:Page){
+ const fixture=readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'),'utf8');
+ const cookies=resolve(fixture,'..','browser-session.json');
+ if(existsSync(cookies))await page.context().addCookies(JSON.parse(readFileSync(cookies,'utf8')));
+ if(!(await page.request.get('/api/session')).ok()){
+  const login=await page.request.post('/api/login',{data:{token:'kaiwu-browser-test-token-00000000'},headers:{Origin:'http://127.0.0.1:17331','X-Kaiwu-Client':'web'}});
+  expect(login.ok(),await login.text()).toBe(true);
+ }
+}

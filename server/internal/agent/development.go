@@ -31,7 +31,7 @@ func setExecutionPhase(st *workbench.State, id, phase, message string) {
 		t.Status = "failed"
 		x.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 	case "interrupted":
-		t.Status = "needs_confirmation"
+		t.Status = "interrupted"
 	default:
 		t.Status = "running"
 	}
@@ -47,18 +47,6 @@ func settleExecution(st *workbench.State, id, responseID string, resumed bool) {
 	x.Phase = "awaiting_review"
 	x.Error = ""
 	t.Status = "needs_confirmation"
-	if resumed && x.Summary == "" && len(x.Tools) == 0 {
-		messages := st.Conversations[id].Messages
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Role == "user" {
-				if messages[i].Delivery == "not_sent" && workbench.IsStartRequest(messages[i].Text) {
-					x.Phase = "ready"
-					t.Status = "idle"
-				}
-				break
-			}
-		}
-	}
 	if !resumed {
 		for _, msg := range st.Conversations[id].Messages {
 			if msg.ID == responseID {
@@ -76,7 +64,7 @@ func settleExecution(st *workbench.State, id, responseID string, resumed bool) {
 
 // Called only by the reserved conversation writer. Stop and drain the old
 // consumer before reusing the original session file with broader tools.
-func (m *Manager) prepareDevelopment(c workbench.Conversation, entry *instance) error {
+func (m *Manager) prepareDevelopment(c workbench.Conversation, entry *instance, restoring bool) error {
 	t, x, ok := executionFor(m.store.Snapshot(), c.ID)
 	if !ok {
 		return nil
@@ -84,15 +72,19 @@ func (m *Manager) prepareDevelopment(c workbench.Conversation, entry *instance) 
 	if !pirpc.ProcessGroupsSupported() {
 		return errors.New("当前平台尚不支持开发进程组管理")
 	}
-	if e := m.store.Update(func(st *workbench.State) error { setExecutionPhase(st, c.ID, "preparing", ""); return nil }); e != nil {
-		return e
+	if !restoring {
+		if e := m.store.Update(func(st *workbench.State) error { setExecutionPhase(st, c.ID, "preparing", ""); return nil }); e != nil {
+			return e
+		}
 	}
 	prepared, e := m.prepareWorkspace(m.ctx, t, x)
 	if e != nil {
 		return e
 	}
 	if e = m.store.Update(func(st *workbench.State) error {
-		prepared.Phase = "starting"
+		if !restoring {
+			prepared.Phase = "starting"
+		}
 		st.Executions[prepared.ID] = prepared
 		return nil
 	}); e != nil {
@@ -139,4 +131,37 @@ func (m *Manager) prepareDevelopment(c workbench.Conversation, entry *instance) 
 	entry.workspace = prepared.Workspace
 	m.mu.Unlock()
 	return nil
+}
+
+func restoreExecution(st *workbench.State, id string, previous workbench.Execution) {
+	t, x, ok := executionFor(*st, id)
+	if !ok {
+		return
+	}
+	x.Error = ""
+	switch {
+	case previous.Phase == "confirmed":
+		x.Phase = "confirmed"
+		t.Status = "completed"
+	case previous.Phase == "awaiting_review" && previous.FinishedAt != "":
+		x.Phase = "awaiting_review"
+		t.Status = "needs_confirmation"
+	default:
+		x.Phase = "interrupted"
+		t.Status = "interrupted"
+		if previous.Summary == "" && len(previous.Tools) == 0 {
+			messages := st.Conversations[id].Messages
+			for i := len(messages) - 1; i >= 0; i-- {
+				if messages[i].Role == "user" {
+					if messages[i].Delivery == "not_sent" && workbench.IsStartRequest(messages[i].Text) {
+						x.Phase = "ready"
+						t.Status = "idle"
+					}
+					break
+				}
+			}
+		}
+	}
+	st.Executions[x.ID] = x
+	st.Tasks[t.ID] = t
 }

@@ -60,12 +60,15 @@ type Execution struct {
 	Tools          []ToolRecord `json:"tools"`
 }
 type Message struct {
-	ID       string `json:"id"`
-	Role     string `json:"role"`
-	Text     string `json:"text"`
-	Delivery string `json:"delivery"`
+	Kind        string  `json:"kind,omitempty"`
+	DisplayText *string `json:"displayText,omitempty"`
+	ID          string  `json:"id"`
+	Role        string  `json:"role"`
+	Text        string  `json:"text"`
+	Delivery    string  `json:"delivery"`
 }
 type Conversation struct {
+	Rounds      []Round   `json:"rounds,omitempty"`
 	ID          string    `json:"id"`
 	ProjectID   string    `json:"projectId"`
 	TaskID      string    `json:"taskId,omitempty"`
@@ -90,6 +93,7 @@ type State struct {
 	Executions        map[string]Execution      `json:"executions"`
 }
 type Command struct {
+	RoundID            string  `json:"roundId,omitempty"`
 	Provider           string  `json:"provider,omitempty"`
 	Model              string  `json:"model,omitempty"`
 	Thinking           string  `json:"thinking,omitempty"`

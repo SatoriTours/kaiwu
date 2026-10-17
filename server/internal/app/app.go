@@ -15,6 +15,7 @@ import (
 	"github.com/SatoriTours/kaiwu/server/internal/config"
 	"github.com/SatoriTours/kaiwu/server/internal/httpapi"
 	"github.com/SatoriTours/kaiwu/server/internal/pimodel"
+	"github.com/SatoriTours/kaiwu/server/internal/preview"
 	"github.com/SatoriTours/kaiwu/server/internal/webapi"
 	"github.com/SatoriTours/kaiwu/server/internal/webui"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
@@ -61,11 +62,19 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 		defer func() { result = errors.Join(result, store.Close()) }()
 		manager := agent.New(ctx, store, agent.Config{Program: wb.Program, DataDir: wb.DataDir, PiAgentDir: wb.PiAgentDir})
 		defer func() { result = errors.Join(result, manager.Close()) }()
+		previews := preview.New(ctx, store, preview.Config{DataDir: wb.DataDir, Reserve: manager.AcquirePreviewLease})
+		manager.SetPreviewStopper(previews.StopTask)
+		defer func() { result = errors.Join(result, previews.Close()) }()
 		if err := manager.RecoverMerges(ctx); err != nil {
 			return err
 		}
 		catalog := &pimodel.Catalog{Program: wb.Program, SourceDir: wb.PiAgentDir, DataDir: filepath.Join(wb.DataDir, "probes")}
-		handler = webapi.New(webapi.Config{Models: catalog, Git: manager, Context: ctx, Host: ln.Addr().String(), Token: wb.Token, Assets: webui.Files(), Health: handler, AgentAvailable: wb.Program != ""}, store, manager)
+		handler = webapi.New(webapi.Config{Previews: previews, Models: catalog, Git: manager, Context: ctx, Host: ln.Addr().String(), Token: wb.Token, Assets: webui.Files(), Health: handler, AgentAvailable: wb.Program != ""}, store, manager)
+		defer func() {
+			if closer, ok := handler.(interface{ Close() error }); ok {
+				result = errors.Join(result, closer.Close())
+			}
+		}()
 	}
 	logger.Info("server started", "listen_addr", ln.Addr().String())
 	result = serve(ctx, newServer(handler), ln, 5*time.Second, logger)

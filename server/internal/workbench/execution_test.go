@@ -140,10 +140,16 @@ func TestQueuedDevelopmentRestartIsInterruptedWithoutReplay(t *testing.T) {
 	}
 	defer s.Close()
 	after := s.Snapshot()
-	if after.Executions[execution].Phase != "interrupted" || after.Tasks[id].Status != "needs_confirmation" || after.Conversations[conv].Messages[0].Delivery != "not_sent" {
+	if after.Executions[execution].Phase != "interrupted" || after.Tasks[id].Status != "interrupted" || after.Conversations[conv].Messages[0].Delivery != "not_sent" {
 		t.Fatal("restart replayed or forgot execution")
 	}
-	if _, e = s.Command(Command{OperationID: "again", Type: "start_task", ProjectID: p, TaskID: id}); e == nil {
-		t.Fatal("unknown delivery allowed replay")
+
+	if _, e = s.Command(Command{OperationID: "again", Type: "start_task", ProjectID: p, TaskID: id}); e != nil {
+		t.Fatal("new explicit intent could not reopen task", e)
 	}
+	continued := s.Snapshot()
+	if len(continued.Conversations[conv].Messages) != 2 || continued.Conversations[conv].Messages[0].Delivery != "not_sent" || continued.Tasks[id].ExecutionID != execution {
+		t.Fatal("old intent was replayed or task identity changed")
+	}
+
 }

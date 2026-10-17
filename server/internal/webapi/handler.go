@@ -21,6 +21,7 @@ import (
 
 	"github.com/SatoriTours/kaiwu/server/internal/pimodel"
 	"github.com/SatoriTours/kaiwu/server/internal/pirpc"
+	"github.com/SatoriTours/kaiwu/server/internal/preview"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
 	"github.com/coder/websocket"
 )
@@ -30,7 +31,8 @@ type Commander interface {
 	Resume(string) error
 }
 type Config struct {
-	Models interface {
+	Previews *preview.Manager
+	Models   interface {
 		List(context.Context) ([]pimodel.Model, error)
 	}
 	Git            GitCommander
@@ -47,13 +49,23 @@ type handler struct {
 	mu            sync.Mutex
 	attempts      int
 	attemptWindow time.Time
+	socketWG      sync.WaitGroup
+	socketClosed  bool
+	cancel        context.CancelFunc
+	streamID      string
 }
 
 func New(cfg Config, store *workbench.Store, agent Commander) http.Handler {
 	if cfg.Context == nil {
 		cfg.Context = context.Background()
 	}
-	return &handler{cfg: cfg, store: store, agent: agent}
+	owned, cancel := context.WithCancel(cfg.Context)
+	cfg.Context = owned
+	b := make([]byte, 16)
+	if _, e := rand.Read(b); e != nil {
+		panic(e)
+	}
+	return &handler{cfg: cfg, store: store, agent: agent, cancel: cancel, streamID: hex.EncodeToString(b)}
 }
 func respond(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -130,7 +142,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	if strings.HasPrefix(r.URL.Path, "/preview/") {
+		h.previewGateway(w, r)
+		return
+	}
 	if !h.allowed(r) {
 		fail(w, 403, "forbidden_origin", "访问来源不受允许")
 		return
@@ -158,6 +174,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/api/previews/"):
+		h.taskPreview(w, r)
 	case r.URL.Path == "/api/models" && r.Method == "GET":
 		if h.cfg.Models == nil {
 			fail(w, 503, "models_unavailable", "服务未找到 pi，请检查服务 PATH 或 KAIWU_PI_PROGRAM")
@@ -176,6 +194,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, map[string]any{"models": models})
 	case strings.HasPrefix(r.URL.Path, "/api/git/"):
 		h.git(w, r)
+	case r.URL.Path == "/api/session" && r.Method == "GET":
+		respond(w, 200, map[string]bool{"ok": true})
 	case r.URL.Path == "/api/snapshot" && r.Method == "GET":
 		respond(w, 200, map[string]any{"state": h.store.Snapshot(), "capabilities": map[string]bool{"git": h.cfg.Git != nil, "merge": h.cfg.Git != nil && pirpc.ProcessGroupsSupported(), "agent": h.cfg.AgentAvailable, "execution": h.cfg.AgentAvailable && pirpc.ProcessGroupsSupported()}})
 	case r.URL.Path == "/api/logout" && r.Method == "POST":
@@ -195,6 +215,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		respond(w, 200, receipt)
+	case r.URL.Path == "/api/socket" && r.Method == "GET":
+		h.socket(w, r)
 	case r.URL.Path == "/api/events" && r.Method == "GET":
 		h.events(w, r)
 	default:
@@ -336,7 +358,7 @@ func (h *handler) command(w http.ResponseWriter, r *http.Request) {
 			_ = h.store.Update(func(st *workbench.State) error {
 				v := st.Conversations[receipt.ConversationID]
 				v.RunState = "failed"
-				v.Error = "会话未启动，请检查配置后明确恢复"
+				v.Error = "会话未启动，请检查配置后再次发送"
 				for i := range v.Messages {
 					if v.Messages[i].ID == receipt.CreatedID {
 						v.Messages[i].Delivery = "failed"

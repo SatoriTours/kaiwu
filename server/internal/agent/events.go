@@ -2,8 +2,10 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/SatoriTours/kaiwu/server/internal/pirpc"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
+	"strings"
 )
 
 func (m *Manager) consume(id string, entry *instance, client *pirpc.Client) {
@@ -19,7 +21,7 @@ func (m *Manager) consume(id string, entry *instance, client *pirpc.Client) {
 				return
 			}
 			m.mu.Unlock()
-			m.stopFailed(id, entry, client, "pi 会话已中断，请明确恢复；历史已保留", true)
+			m.stopFailed(id, entry, client, "pi 会话已中断，发送下一条消息时自动接回；历史已保留", true)
 			return
 		}
 		m.mu.Lock()
@@ -37,7 +39,10 @@ func (m *Manager) consume(id string, entry *instance, client *pirpc.Client) {
 		}
 		switch event.Type {
 		case "tool_execution_start", "tool_execution_end":
-			e = m.recordTool(id, event.Type, event.Raw)
+			m.mu.Lock()
+			roundID := entry.messageID
+			m.mu.Unlock()
+			e = m.recordTool(id, event.Type, event.Raw, roundID)
 			if e != nil {
 				m.stopFailed(id, entry, client, "无法保存执行记录，请检查存储后恢复", true)
 				return
@@ -48,9 +53,14 @@ func (m *Manager) consume(id string, entry *instance, client *pirpc.Client) {
 			}
 			m.mu.Lock()
 			if entry.responseID == "" {
+				entry.responseSequence++
 				entry.responseID = entry.messageID + "_reply"
+				if entry.responseSequence > 1 {
+					entry.responseID += fmt.Sprint("_", entry.responseSequence)
+				}
 			}
 			responseID := entry.responseID
+			roundID := entry.messageID
 			m.mu.Unlock()
 			e = m.store.Update(func(st *workbench.State) error {
 				c := st.Conversations[id]
@@ -71,6 +81,12 @@ func (m *Manager) consume(id string, entry *instance, client *pirpc.Client) {
 					return workbench.Invalid("助手回复超出当前上限")
 				}
 				c.Messages[index].Text += v.AssistantMessageEvent.Delta
+				c.Messages[index].DisplayText = nil
+				if report, visible := workbench.ParseReport(c.Messages[index].Text); report != nil {
+					c.Messages[index].DisplayText = &visible
+					workbench.UpdateRound(st, id, roundID, func(r *workbench.Round) { r.Report = report; r.ReportError = "" })
+					c.Rounds = st.Conversations[id].Rounds
+				}
 				st.Conversations[id] = c
 				return nil
 			})
@@ -82,7 +98,39 @@ func (m *Manager) consume(id string, entry *instance, client *pirpc.Client) {
 			if v.Message.Role == "assistant" {
 				m.mu.Lock()
 				entry.lastError = v.Message.StopReason == "error" || v.Message.StopReason == "aborted"
+				responseID := entry.responseID
+				roundID := entry.messageID
+				if responseID != "" {
+					entry.lastResponseID = responseID
+					entry.responseID = ""
+				}
+				e = m.store.Update(func(st *workbench.State) error {
+					c := st.Conversations[id]
+					for i := range c.Messages {
+						if c.Messages[i].ID == responseID {
+							c.Messages[i].Kind = "progress"
+							c.Messages[i].Delivery = "complete"
+							if strings.Contains(c.Messages[i].Text, "<kaiwu-report>") {
+								if report, _ := workbench.ParseReport(c.Messages[i].Text); report == nil {
+									c.Messages[i].DisplayText = nil
+									for j := range c.Rounds {
+										if c.Rounds[j].ID == roundID {
+											c.Rounds[j].Report = nil
+											c.Rounds[j].ReportError = "本轮最新报告格式无效，完整回复已保留"
+										}
+									}
+								}
+							}
+						}
+					}
+					st.Conversations[id] = c
+					return nil
+				})
 				m.mu.Unlock()
+				if e != nil {
+					m.stopFailed(id, entry, client, "无法保存消息结束状态，请检查存储后恢复", true)
+					return
+				}
 			}
 		case "agent_settled":
 			conversation := m.store.Snapshot().Conversations[id]

@@ -142,7 +142,7 @@ small {
   font-weight: 550;
 }
 .top .connection {
-  margin-left: auto;
+  margin-left: 0;
   font-size: 12px;
   color: #5e7564;
   border: 0;
@@ -806,12 +806,24 @@ dialog textarea {
   justify-content: space-between;
   align-items: center;
 }
-.top select {
-  max-width: 230px;
-}
-.top > .connection {
+.global-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-left: auto;
+  flex-shrink: 0;
 }
+.global-actions button {
+  min-height: 30px;
+  padding: 4px 8px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.global-actions button:hover { background: #f2f4f2; }
+.global-actions .logout { color: var(--muted); }
+.global-actions .connection { white-space: nowrap; }
 .text {
   overflow-wrap: anywhere;
 }
@@ -846,16 +858,8 @@ dialog textarea {
   .top .logo {
     flex-shrink: 0;
   }
-  .top select {
-    flex: 1;
-    min-width: 0;
-    max-width: none;
-  }
-  .top > button {
-    white-space: nowrap;
-    flex-shrink: 0;
-    padding: 7px 9px;
-  }
+  .global-actions { gap: 4px; }
+  .global-actions button { min-height: 32px; padding: 4px 6px; }
   .top {
     min-height: 48px;
   }
@@ -867,28 +871,9 @@ h2,
 h3 {
   font-weight: 550;
 }
-.top select,
-.top > button {
-  min-height: 28px;
-  padding: 3px 8px;
-  font-size: 12px;
-  border-color: transparent;
-  background-color: transparent;
-}
-.top select {
-  max-width: 200px;
-  cursor: pointer;
-}
-.top select:hover,
-.top > button:hover {
-  background-color: #f2f4f2;
-}
 .top .connection {
   font-size: 11px;
   background: transparent;
-}
-.top > button:last-child {
-  color: var(--muted);
 }
 .toolbar h1 {
   font-size: 14px;

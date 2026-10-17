@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onBeforeUnmount } from "vue";
-import type { Conversation, Task, Execution, GitStatus } from "./types.ts";
+import { ref, watch, nextTick, onBeforeUnmount, computed } from "vue";
+import type { Conversation, Task, Execution, GitStatus, Message } from "./types.ts";
 import { isStartRequest } from "./workbench.ts";
-import GitStatusView from "./GitStatus.vue";
+import {taskState} from "./task-state.ts";
 import MergeIcon from "./MergeIcon.vue";
 import { isMergeRequest } from "./git.ts";
 import TaskActionIcon from "./TaskActionIcon.vue";
+import ProgressCard from "./ProgressCard.vue";
+import AssistantReply from "./AssistantReply.vue";
+import {groupChatMessages} from './chat-messages.ts';
 import MarkdownContent from "./MarkdownContent.vue";
 const props = defineProps<{
   conversation: Conversation;
+  tasks:Task[];
   task?: Task;
   git?: GitStatus;
   execution?: Execution;
@@ -29,10 +33,23 @@ const emit = defineEmits<{
   start: [];
   merge: [];
   model: [];
+  confirmResult:[string];
+  previewResult:[string];
 }>();
+const taskStatus=computed(()=>props.task?taskState(props.task,props.conversation,props.execution).status:'idle');
+const chatEntries=computed(()=>groupChatMessages(props.conversation.messages));
 const messages = ref<HTMLElement>();
+async function showLatestReply(messageID?:string){
+ await nextTick();const replies=Array.from(messages.value?.querySelectorAll<HTMLElement>('.message.assistant')??[]);const target=messageID?Array.from(messages.value?.querySelectorAll<HTMLElement>('[data-message-id]')??[]).find(el=>el.dataset.messageId===messageID):undefined;const el=messageID?target?.closest<HTMLElement>('.message.assistant'):replies.at(-1);
+ if(!el||!messages.value)return;
+ const detail=el.querySelector<HTMLDetailsElement>('details.assistant-detail');if(detail)detail.open=true;
+ messages.value.scrollTop+=el.getBoundingClientRect().top-messages.value.getBoundingClientRect().top;
+}
+
 const editor = ref<HTMLTextAreaElement>();
 const previewing = ref(false);
+async function focusEditor(){previewing.value=false;await nextTick();editor.value?.focus()}
+defineExpose({focusEditor});
 watch(
   () => props.conversation.id,
   () => {
@@ -85,10 +102,13 @@ watch(
 );
 onBeforeUnmount(save);
 function keydown(event: KeyboardEvent) {
+  const fromDraft = event.target === editor.value ||
+    (event.target instanceof HTMLElement && event.target.classList.contains("draft-preview"));
   if (
     event.key === "Enter" &&
-    (event.ctrlKey || event.metaKey) &&
-    !event.isComposing
+    (fromDraft || event.ctrlKey || event.metaKey) &&
+    !event.shiftKey &&
+    !event.isComposing && event.keyCode !== 229
   ) {
     event.preventDefault();
     emit("send");
@@ -101,18 +121,23 @@ const states: Record<string, string> = {
   interrupted: "已中断",
   failed: "调用失败",
 };
+function deliveryLabel(message:Message){
+ if(message.delivery==='uncertain')return message.role==='assistant'?'回复中断':'上次执行中断';
+ if(message.role==='user'&&['accepted','complete'].includes(message.delivery))return '已发送';
+ return deliveryLabels[message.delivery];
+}
 const deliveryLabels: Record<string, string> = {
   pending: "待接受",
   accepted: "已接受",
   complete: "轮次结束",
   failed: "失败",
-  uncertain: "结果待确认",
+  uncertain: "发送结果未知",
   not_sent: "未发送",
 };
 </script>
 <template>
   <aside class="chat" id="chat" aria-label="项目或任务聊天">
-    <header class="chat-head">
+    <header class="chat-head" :title="'pi 会话：'+conversation.sessionId">
       <div class="row">
         <span class="avatar">π</span>
         <div>
@@ -139,43 +164,38 @@ const deliveryLabels: Record<string, string> = {
         </button>
         <button class="return" @click="emit('project')">← 返回项目对话</button>
         <button
-          v-if="['idle', 'failed'].includes(task.status)"
+          v-if="['idle', 'failed', 'interrupted'].includes(taskStatus)"
           class="start-task"
           :aria-label="
             pending
               ? '启动中…'
-              : task.status === 'failed'
+              : taskStatus === 'failed'
                 ? '重试开发'
-                : '开始开发'
+                : taskStatus === 'interrupted' ? '继续开发' : '开始开发'
           "
           :title="
             pending
               ? '启动中…'
-              : task.status === 'failed'
+              : taskStatus === 'failed'
                 ? '重试开发'
-                : '开始开发'
+                : taskStatus === 'interrupted' ? '继续开发' : '开始开发'
           "
           :aria-busy="pending"
           :disabled="
             !online ||
             pending ||
-            ['starting', 'running', 'interrupted'].includes(
+            ['starting', 'running'].includes(
               conversation.runState,
             )
           "
           @click="emit('start')"
         >
-          <TaskActionIcon :status="task.status" :pending="pending" />
+          <TaskActionIcon :status="taskStatus" :pending="pending" />
         </button>
       </div>
     </header>
-    <GitStatusView
-      v-if="task?.executionId"
-      :status="git"
-      detail
-      class="chat-git"
-    />
-    <div class="scope">
+
+    <div v-if="!task" class="scope">
       {{
         task
           ? "仅与当前任务沟通，其他会话独立运行。"
@@ -184,6 +204,11 @@ const deliveryLabels: Record<string, string> = {
         · {{ states[conversation.runState] ?? conversation.runState }}</span
       >
     </div>
+      <div v-if="!task&&conversation.error" class="context-card project-recovery" role="status">
+        <p>{{conversation.runState==='failed'?'会话接回失败，请检查原因后再次发送重试。':'发送下一条消息时会尝试自动接回原会话。'}}</p>
+        <details><summary>查看原因</summary><p>{{conversation.error}}</p></details>
+      </div>
+    <div class="progress-panel"><ProgressCard :conversation="conversation" :task="task" :tasks="tasks" :execution="execution" :git="git" :online="online" :pending="pending" :agent-available="agentAvailable" @resume="emit('resume')" @reply="showLatestReply" @confirm="id=>emit('confirmResult',id)" @merge="emit('merge')" @revise="focusEditor" @preview="id=>emit('previewResult',id)"/></div>
     <div
       class="messages"
       id="messages"
@@ -191,24 +216,26 @@ const deliveryLabels: Record<string, string> = {
       aria-label="当前会话消息"
       @scroll="save"
     >
+
       <article
-        v-for="message in conversation.messages"
-        :key="message.id"
+        v-for="entry in chatEntries"
+        :key="entry.id"
         class="message"
-        :class="message.role"
+        :data-message-id="entry.message.id"
+        :class="entry.message.role"
       >
         <div class="author">
-          <span class="avatar">{{ message.role === "user" ? "我" : "π" }}</span
+          <span class="avatar">{{ entry.message.role === "user" ? "我" : "π" }}</span
           ><strong>{{
-            message.role === "user"
+            entry.message.role === "user"
               ? "你"
-              : task
+              : entry.updates ? '执行进展' : task
                 ? "pi · 任务 Agent"
                 : "pi · 项目 Agent"
           }}</strong
-          ><span>{{ deliveryLabels[message.delivery] }}</span>
+          ><span>{{ entry.updates?entry.updates.length+' 条更新':deliveryLabel(entry.message) }}</span>
         </div>
-        <MarkdownContent class="text" :text="message.text" />
+        <AssistantReply v-if="entry.message.role==='assistant'" :message="entry.message" :updates="entry.updates"/><MarkdownContent v-else class="text" :text="entry.message.text" />
       </article>
       <div v-if="!conversation.messages.length" class="context-card">
         <strong>{{ task ? "开始这个任务的沟通" : "从一个想法开始" }}</strong>
@@ -227,69 +254,8 @@ const deliveryLabels: Record<string, string> = {
           ＋ 创建任务卡片
         </button>
       </div>
-      <div v-if="conversation.error" class="context-card error" role="alert">
-        <p>{{ conversation.error }}</p>
-        <button
-          :disabled="!online || pending || !agentAvailable"
-          @click="emit('resume')"
-        >
-          恢复原会话
-        </button>
-        <p class="muted">恢复不会重发结果未知的消息。</p>
-      </div>
-      <details
-        v-if="execution"
-        class="execution-result"
-        :open="execution.phase === 'awaiting_review'"
-      >
-        <summary>
-          {{
-            execution.phase === "awaiting_review"
-              ? "本轮结果 · 待确认"
-              : execution.phase === "failed"
-                ? "执行失败"
-                : execution.phase === "interrupted"
-                  ? "执行中断"
-                  : "开发进度"
-          }}
-        </summary>
-        <p v-if="execution.error">{{ execution.error }}</p>
-        <MarkdownContent
-          v-if="execution.summary"
-          class="result-summary"
-          :text="execution.summary"
-        />
-        <p v-if="execution.workspace" class="muted">
-          工作区：{{ execution.workspace }}
-        </p>
-        <p class="muted">
-          {{
-            execution.tools.some((t) => t.name === "bash" && !!t.result)
-              ? "下方为实际命令记录，请核对验证结果。"
-              : "未执行验证"
-          }}
-        </p>
-        <ul v-if="execution.tools.length" class="tool-records">
-          <li v-for="tool in execution.tools" :key="tool.id">
-            <details>
-              <summary>
-                {{ tool.name }} ·
-                {{ tool.failed ? "失败" : tool.result ? "已返回" : "执行中" }}
-              </summary>
-              <MarkdownContent
-                v-if="tool.input"
-                :text="tool.input"
-                format="json"
-              />
-              <MarkdownContent
-                v-if="tool.result"
-                :text="tool.result"
-                format="json"
-              />
-            </details>
-          </li>
-        </ul>
-      </details>
+
+
     </div>
     <div class="composer">
       <div class="context-label row between">
@@ -361,12 +327,9 @@ const deliveryLabels: Record<string, string> = {
                 !isStartRequest(draft) &&
                 !isMergeRequest(draft)) ||
               pending ||
-              (['starting', 'running', 'interrupted'].includes(
+              (['starting', 'running'].includes(
                 conversation.runState,
               ) &&
-                !isMergeRequest(draft)) ||
-              (conversation.runState === 'failed' &&
-                !isStartRequest(draft) &&
                 !isMergeRequest(draft)) ||
               !draft.trim()
             "
@@ -377,7 +340,7 @@ const deliveryLabels: Record<string, string> = {
         </div>
       </div>
       <div class="composer-tip">
-        Ctrl / ⌘ + Enter 发送{{
+        Enter 发送 · Shift + Enter 换行{{
           task && !task.executionId ? " · 输入“开始开发”启动任务" : ""
         }}
       </div>

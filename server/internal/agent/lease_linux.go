@@ -25,6 +25,8 @@ type processOwner struct {
 	Group int
 }
 
+func (l *executionLease) inheritedFile() *os.File { return l.file }
+
 // The OS lock prevents concurrent hosts. The durable marker survives SIGKILL:
 // a new host must verify the old group is absent before it may acquire a writer.
 // Unknown launch windows fail closed; no stored PID is ever used to kill.

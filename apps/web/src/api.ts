@@ -7,7 +7,13 @@ export class APIError extends Error {
     this.code = code;
   }
 }
+let socketRequest:((path:string,body?:unknown)=>Promise<any>)|undefined;
+export function setSocketRequest(request?:typeof socketRequest){socketRequest=request}
 export async function api<T>(path: string, body?: unknown): Promise<T> {
+  if(socketRequest && !["login","logout"].includes(path)) return socketRequest(path,body) as Promise<T>;
+ return httpAPI<T>(path,body);
+}
+export async function httpAPI<T>(path:string,body?:unknown):Promise<T>{
   let response: Response;
   try {
     response = await fetch("/api/" + path, {

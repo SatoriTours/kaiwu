@@ -17,6 +17,24 @@ type Config struct {
 	BaseArgs, ExtraEnv           []string
 }
 
+// Match the current Web UI (lang="zh-CN"), including restored conversations.
+const replyLanguageInstructions = `
+开悟系统语言为简体中文（zh-CN）。所有面向用户的回复必须使用简体中文，包括普通对话、开发过程更新、问题、阻塞说明、最终结果，以及 <kaiwu-report> 中 summary、plan、results、checks.title、blockers、next、question 的自然语言内容。历史回复或工具输出为英文，不改变回复语言。代码、命令、路径、标识符、产品名、必要的原文引用保持原样；报告 JSON 字段名、stage/claim 枚举值及 toolId 必须保持协议规定的原值，不要翻译。
+`
+
+// Repeat presentation requirements with each explicit user turn so a warm or
+// restored session does not drift back to the language of its earlier history.
+const replyTurnInstructions = `
+
+<kaiwu-reply-requirements>
+本轮所有面向用户的内容使用简体中文，包括过程更新、摘要、问题、最终回复和结构化报告的自然语言字段；不要沿用历史英文叙述。代码、命令、路径、标识符及必要原文引用保留原样。
+使用简短的 Markdown 段落；并列事项用列表，代码与命令用代码块，不把多个事项挤成一长行。真实可访问的 URL 单独一行，以 [查看效果](实际URL) 等明确文字提供可点击链接；保留完整协议、主机、端口和路径，不编造或改写地址，不把未验证的访问描述为已验证。
+</kaiwu-reply-requirements>`
+
+const taskPreviewInstructions = `
+如果任务适合网页或 HTTP 效果验收，请在当前任务 worktree 根目录生成 kaiwu-preview.json：{"version":1,"command":["实际程序","参数","--host","127.0.0.1","--port","{port}"],"path":"/"}。command 是直接执行的 argv，不经 shell，至少一项使用 {port}，服务必须仅监听 127.0.0.1。使用项目实际可执行命令，不编造服务。此配置只声明预览，禁止自行启动常驻预览进程；用户点击“启动预览”后由开悟分配端口并启动。预览支持 GET/HEAD 和相对资源，不支持 WebSocket/HMR、应用登录或跨源资源。CLI/库等非网页任务不强造 manifest，请提供真实运行结果、使用说明和验证情况。
+`
+
 func (m *Manager) launch(c workbench.Conversation) (pirpc.LaunchSpec, error) {
 	root := filepath.Join(m.cfg.DataDir, "sessions", c.ID)
 	for _, dir := range []string{root, filepath.Join(root, "home"), filepath.Join(root, "agent")} {
@@ -37,9 +55,10 @@ func (m *Manager) launch(c workbench.Conversation) (pirpc.LaunchSpec, error) {
 		}
 		dir, tools = x.Workspace, "read,write,edit,bash,grep,find,ls"
 		prompt = "当前任务的独立工作区是 " + dir + "。在此完成任务并说明修改及实际验证；不要自动提交、合并、推送或删除工作区。原项目目录为 " + m.store.Snapshot().Projects[c.ProjectID].Path + "，请保留其内容。"
+		prompt += taskPreviewInstructions
 	}
 	args := append([]string{}, m.cfg.BaseArgs...)
-	args = append(args, "--mode", "rpc", "--session-dir", root, "--name", "开悟独立对话", "--tools", tools, "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", "--offline", "--append-system-prompt", prompt)
+	args = append(args, "--mode", "rpc", "--session-dir", root, "--name", "开悟独立对话", "--tools", tools, "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", "--offline", "--append-system-prompt", prompt+workbench.ReportInstructions+replyLanguageInstructions+replyTurnInstructions)
 	if c.SessionFile != "" && (hasHistory(c) || fileExists(c.SessionFile)) {
 		if e := m.validateSession(c, c.SessionFile); e != nil {
 			return pirpc.LaunchSpec{}, e

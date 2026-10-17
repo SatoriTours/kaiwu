@@ -15,6 +15,8 @@ type instance struct {
 	client                *pirpc.Client
 	busy, dead            bool
 	messageID, responseID string
+	lastResponseID        string
+	responseSequence      int
 	lastError             bool
 	acknowledged, settled bool
 	workspace             string
@@ -22,6 +24,7 @@ type instance struct {
 	lease                 *executionLease
 }
 type Manager struct {
+	previewStop  func(context.Context, string) error
 	mu           sync.Mutex
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -48,6 +51,13 @@ func (m *Manager) Send(conversationID, messageID string) error {
 }
 func (m *Manager) Resume(conversationID string) error { return m.begin(conversationID, "") }
 func (m *Manager) begin(conversationID, messageID string) error {
+	// Store admission publishes starting before this call. A concurrent preview
+	// sees that state and cannot start while this callback drains its process.
+	if c := m.store.Snapshot().Conversations[conversationID]; c.RunState == "starting" {
+		if e := m.stopTaskPreview(m.ctx, c.TaskID); e != nil {
+			return e
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -90,6 +100,8 @@ func (m *Manager) begin(conversationID, messageID string) error {
 	entry.busy = true
 	entry.messageID = messageID
 	entry.responseID = ""
+	entry.lastResponseID = ""
+	entry.responseSequence = 0
 	entry.lastError = false
 	entry.acknowledged = false
 	entry.settled = false
@@ -102,7 +114,8 @@ func (m *Manager) begin(conversationID, messageID string) error {
 }
 func (m *Manager) run(c workbench.Conversation, entry *instance, messageID string) {
 	defer m.wg.Done()
-	if e := m.prepareDevelopment(c, entry); e != nil {
+	_, previousExecution, _ := executionFor(m.store.Snapshot(), c.ID)
+	if e := m.prepareDevelopment(c, entry, messageID == ""); e != nil {
 		m.failed(c.ID, e.Error(), false)
 		m.release(c.ID, entry, false)
 		return
@@ -174,7 +187,7 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 			v.RunState = "idle"
 			v.Error = ""
 			st.Conversations[c.ID] = v
-			settleExecution(st, c.ID, "", true)
+			restoreExecution(st, c.ID, previousExecution)
 			return nil
 		})
 		entry.busy = false
@@ -189,7 +202,7 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 	}
 	if c.TaskID != "" && workbench.IsStartRequest(text) {
 		task := m.store.Snapshot().Tasks[c.TaskID]
-		text = "开始开发当前任务。请在当前独立工作区实施，完成后说明修改和实际验证结果。不要自动提交、合并或推送。\n任务：" + task.Title + "\n要求：" + task.Request
+		text = "开始开发当前任务。请先核对当前独立工作区已有修改，再继续实施；完成后说明修改和实际验证结果。不要自动提交、合并或推送。\n任务：" + task.Title + "\n要求：" + task.Request
 	}
 	if e := m.store.Update(func(st *workbench.State) error {
 		v := st.Conversations[c.ID]
@@ -201,7 +214,7 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 		m.stopFailed(c.ID, entry, client, "无法保存发送状态", false)
 		return
 	}
-	params, _ := json.Marshal(map[string]string{"message": text})
+	params, _ := json.Marshal(map[string]string{"message": text + replyTurnInstructions})
 	response, e := client.Call(m.ctx, pirpc.Command{Type: "prompt", Params: params})
 	if e != nil {
 		var rpc *pirpc.Error
@@ -258,7 +271,19 @@ func (m *Manager) finishLocked(id string, entry *instance) error {
 			}
 		}
 		st.Conversations[id] = c
-		settleExecution(st, id, entry.responseID, false)
+		responseID := entry.responseID
+		if responseID == "" {
+			responseID = entry.lastResponseID
+		}
+		for i := range c.Messages {
+			if c.Messages[i].ID == responseID {
+				c.Messages[i].Kind = "summary"
+				c.Messages[i].Delivery = "complete"
+			}
+		}
+		st.Conversations[id] = c
+		workbench.UpdateRound(st, id, entry.messageID, func(r *workbench.Round) { r.Phase = "finished"; r.FinishedAt = time.Now().UTC().Format(time.RFC3339) })
+		settleExecution(st, id, responseID, false)
 		return nil
 	})
 	if e == nil {
@@ -303,6 +328,8 @@ func (m *Manager) release(id string, entry *instance, dead bool) {
 func (m *Manager) failed(id, message string, uncertain bool) {
 	_ = m.store.Update(func(st *workbench.State) error {
 		c := st.Conversations[id]
+		_, result, hasExecution := executionFor(*st, id)
+		preserveResult := (uncertain && c.RunState == "idle") || (hasExecution && (result.Phase == "awaiting_review" || result.Phase == "confirmed"))
 		c.RunState = "failed"
 		if uncertain {
 			c.RunState = "interrupted"
@@ -321,7 +348,16 @@ func (m *Manager) failed(id, message string, uncertain bool) {
 		if uncertain {
 			phase = "interrupted"
 		}
-		setExecutionPhase(st, id, phase, message)
+		for i := range c.Rounds {
+			if c.Rounds[i].Phase == "running" {
+				c.Rounds[i].Phase = phase
+				c.Rounds[i].FinishedAt = time.Now().UTC().Format(time.RFC3339)
+			}
+		}
+		st.Conversations[id] = c
+		if !preserveResult {
+			setExecutionPhase(st, id, phase, message)
+		}
 		return nil
 	})
 }
