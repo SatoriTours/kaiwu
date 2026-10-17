@@ -163,7 +163,6 @@ function clearIdentity() {
   clearTimeout(retry);
   local.snapshot = null;
   local.drafts = {};
-  local.scroll = {};
   local.pending = {};
   local.current = "";
   operations.clear();
@@ -894,7 +893,6 @@ onBeforeUnmount(() => {
             !!conversation.profile.model
           "
           :visible="width >= 1024 || chatVisible"
-          :scroll="local.scroll"
           @draft="setDraft(local, $event)"
           @send="send"
           @project="navigate()"

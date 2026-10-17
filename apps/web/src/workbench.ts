@@ -13,12 +13,11 @@ export function createOperationID(
 export interface LocalState {
   current: string;
   drafts: Record<string, { text: string; revision: number }>;
-  scroll: Record<string, number>;
   pending: Record<string, boolean>;
   snapshot: Snapshot | null;
 }
 export function createLocalState(): LocalState {
-  return { current: "", drafts: {}, scroll: {}, pending: {}, snapshot: null };
+  return { current: "", drafts: {}, pending: {}, snapshot: null };
 }
 export function selectConversation(local: LocalState, id: string) {
   local.current = id;

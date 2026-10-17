@@ -4,11 +4,12 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 // Intercept real WebSocket frames; all business requests still reach the real Go server.
-const socketProbes = new WeakMap<Page, {calls:any[];received:any[];held:(()=>void)[];holdMethod:string;holdType:string;dropMethod:string;modelMode:string;transform?:(v:any)=>void}>();
+const socketProbes = new WeakMap<Page, {calls:any[];received:any[];held:(()=>void)[];holdMethod:string;holdType:string;dropMethod:string;modelMode:string;transform?:(v:any)=>void;deliver?:(v:any)=>void}>();
 test.beforeEach(async({page})=>{
  const probe={calls:[] as any[],received:[] as any[],held:[] as (()=>void)[],holdMethod:'',holdType:'',dropMethod:'',modelMode:''};socketProbes.set(page,probe);
  await page.routeWebSocket('**/api/socket',client=>{
   const server=client.connectToServer(),methods=new Map<string,string>();
+  (probe as {deliver?:(v:any)=>void}).deliver = frame => client.send(JSON.stringify(frame));
   client.onMessage(raw=>{const v=JSON.parse(String(raw));probe.calls.push(v);methods.set(v.id,v.method);server.send(raw)});
   server.onMessage(raw=>{
    const v=JSON.parse(String(raw)),method=methods.get(v.id);probe.received.push(v);
@@ -260,44 +261,88 @@ test("old login generation cannot clear a new draft through late send receipt", 
   await expect(page.locator("#draft")).toHaveValue("新身份的新草稿");
 });
 
-test("switching back to a long conversation restores reading position", async ({
-  page,
-}) => {
-  probeFor(page).transform = (data:any) => {
-    const task = Object.values(data.state.tasks).find(
-      (t: any) => t.title === "任务 A",
-    ) as any;
-    if (task) {
-      data.state.conversations[task.conversationId].messages = Array.from(
-        { length: 80 },
-        (_, i) => ({
-          id: "long-" + i,
-          role: "assistant",
-          delivery: "complete",
-          text: ("阅读位置 " + i + "\n").repeat(5),
-        }),
-      );
-    }
+test('opening conversations shows latest messages without interrupting manual reading', async ({ page }) => {
+  await authenticateResultTest(page);
+  const headers = { Origin: 'http://127.0.0.1:17331', 'X-Kaiwu-Client': 'web' };
+  const command = async (body: any) => {
+    const state = (await (await page.request.get('/api/snapshot')).json()).state;
+    const response = await page.request.post('/api/commands', { headers, data: { ...body, revision: state.revision, operationId: crypto.randomUUID() } });
+    expect(response.ok(), await response.text()).toBe(true);
+    return response.json();
   };
-  await page.goto("/");
-  await page
-    .getByLabel("本机访问令牌")
-    .fill("kaiwu-browser-test-token-00000000");
-  await page.getByRole("button", { name: "进入工作台", exact: true }).click();
-  const card = page.locator(".task-card").filter({
-    has: page.getByRole("button", { name: "选择任务 任务 A", exact: true }),
+  const seed = readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'), 'utf8');
+  const existing = (await (await page.request.get('/api/snapshot')).json()).state;
+  const existingTask = Object.values(existing.tasks).find((t: any) => t.title === '任务 A') as any;
+  // Reuse the suite's conversation so a view-only test does not add projects that
+  // later tests may accidentally choose as the default and occupy extra sessions.
+  const projectId = existingTask?.projectId ?? (await command({ type: 'add_project', name: '滚动验证', path: seed + '-scroll' })).createdId;
+  const taskId = existingTask?.id ?? (await command({ type: 'add_task', projectId, title: '滚动验证任务', request: '仅使用合成消息，不启动模型' })).createdId;
+  const state = (await (await page.request.get('/api/snapshot')).json()).state;
+  const taskConversationId = state.tasks[taskId].conversationId;
+  const conversationIds = [state.projects[projectId].conversationId, taskConversationId];
+  const history = Array.from({ length: 80 }, (_, i) => ({ id: 'scroll-' + i, role: 'assistant', delivery: 'complete', text: ('历史记录 ' + i + '\n\n').repeat(5) }));
+  let streamId = '', revision = 0;
+  const transform = (data: any) => {
+    for (const id of conversationIds) data.state.conversations[id].messages = history;
+    if (data.streamId) { streamId = data.streamId; revision = data.state.revision; }
+  };
+  probeFor(page).transform = transform;
+  // This view-only fixture owns subsequent message events; the server state is not changed.
+  probeFor(page).holdType = 'patch';
+  await page.route('**/api/snapshot', async route => {
+    const response = await route.fetch(), data = await response.json();
+    transform(data);
+    await route.fulfill({ response, json: data });
   });
-  await card.click();
-  await expect(page.locator("#messages")).toContainText("阅读位置 79");
-  await page.locator("#messages").evaluate((el) => {
-    el.scrollTop = 300;
-    el.dispatchEvent(new Event("scroll"));
-  });
-  await page.getByRole("button", { name: "← 返回项目对话" }).click();
-  await card.click();
-  await expect
-    .poll(() => page.locator("#messages").evaluate((el) => el.scrollTop))
-    .toBe(300);
+  const patch = (ops: any[]) => {
+    const after = revision++;
+    probeFor(page).deliver!({ type: 'patch', streamId, after, revision, ops: [...ops, { op: 'replace', path: ['revision'], value: revision }] });
+  };
+  const messages = page.locator('#messages');
+  const atBottom = () => messages.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop);
+  const expectLatest = async () => {
+    await expect(messages).toBeVisible();
+    expect(await messages.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(1000);
+    await expect.poll(atBottom).toBeLessThan(2);
+  };
+  const readEarlier = () => messages.evaluate(el => { el.scrollTop = 300; el.dispatchEvent(new Event('scroll')); });
+  const path = '/projects/' + projectId + '/tasks/' + taskId;
+  await page.goto(path);
+  await expect(messages).toContainText('历史记录 79');
+  await expectLatest(); // Initial mount with already-loaded history, not an empty chat.
+  await expect.poll(() => !!streamId && !!probeFor(page).deliver).toBe(true);
+  const slightlyAboveBottom = await messages.evaluate(el => { el.scrollTop -= 30; return el.scrollTop; });
+  patch([{ op: 'add', path: ['conversations', taskConversationId, 'messages', '80'], value: { id: 'scroll-new', role: 'assistant', delivery: 'complete', text: '新的回复' } }]);
+  await expect(messages.locator('.message').last()).toContainText('新的回复');
+  await expect.poll(() => messages.evaluate(el => el.scrollTop)).toBe(slightlyAboveBottom);
+  await readEarlier();
+  patch([{ op: 'append', path: ['conversations', taskConversationId, 'messages', '80', 'text'], value: '\n\n' + '上翻时仍在回复\n\n'.repeat(20) }]);
+  await expect(messages.locator('.message').last()).toContainText('上翻时仍在回复');
+  await expect.poll(() => messages.evaluate(el => el.scrollTop)).toBe(300);
+  await messages.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  patch([{ op: 'append', path: ['conversations', taskConversationId, 'messages', '80', 'text'], value: '\n\n' + '流式增加内容\n\n'.repeat(20) }]);
+  await expect(messages.locator('.message').last()).toContainText('流式增加内容');
+  await expectLatest(); // Returning to the bottom enables following again.
+  await readEarlier();
+  await page.getByRole('button', { name: '← 返回项目对话' }).click();
+  await expectLatest();
+  await page.getByRole('button', { name: '选择任务 ' + state.tasks[taskId].title, exact: true }).click();
+  await expectLatest();
+  await readEarlier();
+  await page.reload();
+  await expectLatest();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: '◌ 聊天', exact: true }).click();
+  await expectLatest();
+  await readEarlier();
+  await page.getByRole('button', { name: '▦ 看板', exact: true }).click();
+  patch([{ op: 'add', path: ['conversations', taskConversationId, 'messages', '80'], value: { id: 'scroll-hidden', role: 'assistant', delivery: 'complete', text: '聊天隐藏期间的新回复' } }]);
+  await page.getByRole('button', { name: '◌ 聊天', exact: true }).click();
+  await expect(messages.locator('.message').last()).toContainText('聊天隐藏期间的新回复');
+  await expectLatest();
+  await page.reload();
+  await page.getByRole('button', { name: '◌ 聊天', exact: true }).click();
+  await expectLatest();
 });
 
 test("Enter sends once, Shift+Enter adds a newline, and IME confirmation preserves the draft", async ({

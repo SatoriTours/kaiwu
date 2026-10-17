@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onBeforeUnmount, computed } from "vue";
+import { ref, watch, nextTick, computed } from "vue";
 import type { Conversation, Task, Execution, GitStatus, Message } from "./types.ts";
 import { isStartRequest } from "./workbench.ts";
 import {taskState} from "./task-state.ts";
@@ -22,7 +22,6 @@ const props = defineProps<{
   online: boolean;
   agentAvailable: boolean;
   visible: boolean;
-  scroll: Record<string, number>;
 }>();
 const emit = defineEmits<{
   draft: [string];
@@ -69,21 +68,20 @@ async function togglePreview() {
     editor.value?.focus();
   }
 }
-let renderedID = props.conversation.id;
-function save() {
-  if (messages.value && messages.value.clientHeight > 0)
-    props.scroll[renderedID] = messages.value.scrollTop;
-}
+let renderedID = "";
 watch(
-  () => [props.conversation.id, props.visible] as const,
-  async () => {
-    save();
+  [() => props.conversation.id, () => props.visible],
+  async ([id, visible], _previous, onCleanup) => {
+    let current = true;
+    onCleanup(() => { current = false; });
+    // Initial mount, scope changes and reopening on mobile all start at the latest reply.
     await nextTick();
-    renderedID = props.conversation.id;
-    if (messages.value && props.visible)
-      messages.value.scrollTop = props.scroll[renderedID] ?? 0;
+    if (!current) return;
+    renderedID = id;
+    if (messages.value && visible && messages.value.clientHeight > 0)
+      messages.value.scrollTop = messages.value.scrollHeight;
   },
-  { flush: "pre" },
+  { flush: "post", immediate: true },
 );
 watch(
   () => props.conversation.messages.map((m) => m.text).join("\n"),
@@ -93,14 +91,13 @@ watch(
     const bottom =
       props.visible &&
       id === renderedID &&
-      el &&
-      el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+      el && el.clientHeight > 0 &&
+      el.scrollHeight - el.scrollTop - el.clientHeight < 2;
     await nextTick();
     if (el && bottom && props.conversation.id === id && props.visible)
       el.scrollTop = el.scrollHeight;
   },
 );
-onBeforeUnmount(save);
 function keydown(event: KeyboardEvent) {
   const fromDraft = event.target === editor.value ||
     (event.target instanceof HTMLElement && event.target.classList.contains("draft-preview"));
@@ -214,7 +211,6 @@ const deliveryLabels: Record<string, string> = {
       id="messages"
       ref="messages"
       aria-label="当前会话消息"
-      @scroll="save"
     >
 
       <article

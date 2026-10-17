@@ -31,6 +31,7 @@
 - [x] 项目／任务回复统一使用当前系统语言（简体中文），覆盖过程更新与报告，7331 已更新；协议回归通过，真实模型输出尚未验证。[验证](development/web-reply-language-verification.md)。
 - [x] 用户评审设计后已要求开始实现：任务成果／受控 HTTP 效果预览、确认完成后的持久反馈与后续入口，含原 pi／执行锁交接、配置指纹与能力网关；[实现与验收记录](development/web-task-result-preview-verification.md)区分本机验证、独立审查和 7331 更新状态。
 - [x] 顶栏项目切换改为轻量菜单，集中 Git 设置／刷新与添加项目，全局操作靠右；支持键盘、保留任务／草稿及窄屏长名称。7331 已更新，前端 16/16、Chromium 32/32、Go 全量与实际页面只读烟测通过；[验证记录](development/web-project-menu-verification.md)。
+- [x] 聊天首次打开、刷新与切回时定位最新消息，取代旧阅读位置恢复；手动上翻暂停跟随，回到底部恢复。7331 更新、前端 16/16、Chromium 32/32、Go 全量及实际桌面／手机只读烟测通过；[验证](development/web-chat-latest-scroll-verification.md)。
 - [ ] pi 真实模型调用、自动主协调编排、完整任务验收与更多故障验证。
 - [ ] 提交构建与版本 Tag/Release 流水线设计、初始化和实际运行验证。
 
