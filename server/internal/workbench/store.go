@@ -55,14 +55,7 @@ func Open(path string, profile Profile) (*Store, error) {
 			db.Close()
 		}
 	}()
-	var schema int
-	if err = db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil {
-		return nil, err
-	}
-	if schema > 1 {
-		return nil, errors.New("database schema is newer than this server")
-	}
-	if _, err = db.Exec(`PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, body BLOB NOT NULL); CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, receipt BLOB NOT NULL); CREATE TABLE IF NOT EXISTS login_sessions (id_hash TEXT PRIMARY KEY, token_hash TEXT NOT NULL, expires INTEGER NOT NULL); PRAGMA user_version=1;`); err != nil {
+	if err = migrate(db); err != nil {
 		return nil, err
 	}
 	var body []byte
@@ -88,6 +81,12 @@ func Open(path string, profile Profile) (*Store, error) {
 	}
 	if s.state.Executions == nil {
 		s.state.Executions = map[string]Execution{}
+	}
+	if s.state.Deliveries == nil {
+		s.state.Deliveries = map[string]DeliverySummary{}
+	}
+	if s.state.DeliveryPolicies == nil {
+		s.state.DeliveryPolicies = map[string]DeliveryPolicySummary{}
 	}
 	// Never replay requests that may already have reached a model or tool.
 	if err = s.Update(func(st *State) error {
@@ -163,6 +162,9 @@ func clone(st State) State {
 }
 func (s *Store) Snapshot() State { s.mu.Lock(); defer s.mu.Unlock(); return clone(s.state) }
 func (s *Store) persist(next State, operationID, fingerprint string, receipt Receipt) error {
+	return s.persistWith(next, operationID, fingerprint, receipt, nil)
+}
+func (s *Store) persistWith(next State, operationID, fingerprint string, receipt Receipt, write func(*sql.Tx) error) error {
 	next.Revision = s.state.Revision + 1
 	body, err := json.Marshal(next)
 	if err != nil {
@@ -173,6 +175,11 @@ func (s *Store) persist(next State, operationID, fingerprint string, receipt Rec
 		return err
 	}
 	defer tx.Rollback()
+	if write != nil {
+		if err := write(tx); err != nil {
+			return err
+		}
+	}
 	r, err := tx.Exec("UPDATE state SET revision=?,body=? WHERE id=1 AND revision=?", next.Revision, body, s.state.Revision)
 	if err != nil {
 		return err
@@ -288,7 +295,14 @@ func (s *Store) PreparedCommand(c Command, prepare func() error) (Receipt, error
 	}
 	r.Type = c.Type
 	r.Revision = s.state.Revision + 1
-	if err = s.persist(next, c.OperationID, fingerprint, r); err != nil {
+	var deliveryWrite func(*sql.Tx) error
+	if c.Type == "start_task" {
+		deliveryWrite, err = s.prepareDeliveryStart(&next, c, &r)
+		if err != nil {
+			return Receipt{}, err
+		}
+	}
+	if err = s.persistWith(next, c.OperationID, fingerprint, r, deliveryWrite); err != nil {
 		return Receipt{}, err
 	}
 	return r, nil

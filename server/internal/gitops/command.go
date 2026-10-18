@@ -35,10 +35,13 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 func Run(ctx context.Context, dir string, track func(int) error, args ...string) (string, error) {
+	return runEnv(ctx, dir, Env(), track, args...)
+}
+func runEnv(ctx context.Context, dir string, env []string, track func(int) error, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", Args(dir, args...)...)
-	cmd.Env = Env()
+	cmd.Env = env
 	cmd.WaitDelay = time.Second
 	out := &limitedBuffer{}
 	cmd.Stdout = out

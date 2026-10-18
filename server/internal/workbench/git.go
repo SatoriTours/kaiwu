@@ -136,6 +136,11 @@ func (s *Store) BeginMerge(req MergeRequest, p MergePreview) (MergeOperation, bo
 	if conv.RunState == "running" || conv.RunState == "starting" || TaskMerging(s.state, task.ID) {
 		return MergeOperation{}, false, Conflict("任务执行或合并中，请稍后重试")
 	}
+	// A running delivery cycle owns the integration lane; the old manual merge
+	// path must not race it for the same main branch.
+	if summary, ok := s.state.Deliveries[task.ID]; ok && DeliveryActive(summary.Phase) {
+		return MergeOperation{}, false, Conflict("任务交付进行中，请在交付流程内完成或取消后再手动合并")
+	}
 	if !p.CanMerge || p.ID != req.PreviewID || p.ProjectID != req.ProjectID || p.TaskID != req.TaskID {
 		return MergeOperation{}, false, Conflict("合并预检无效，请重新检查")
 	}

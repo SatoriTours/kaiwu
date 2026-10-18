@@ -60,7 +60,8 @@ func (h *handler) socketCall(r *http.Request, input socketRequest) socketReply {
 	path := ""
 	query := ""
 	switch input.Method {
-	case "commands", "git/refresh", "git/preview", "git/merge", "previews/status", "previews/start", "previews/stop", "previews/open":
+	case "commands", "git/refresh", "git/preview", "git/merge", "previews/status", "previews/start", "previews/stop", "previews/open",
+		"delivery/policy", "delivery/preflight", "delivery/accept", "delivery/control", "delivery/status", "delivery/steps":
 		path = "/api/" + input.Method
 	case "models", "models?refresh=1":
 		method = "GET"

@@ -12,3 +12,11 @@ func killProcess(cmd *exec.Cmd) {
 }
 
 func waitProcess(cmd *exec.Cmd) error { return cmd.Wait() }
+
+// StartGroup/KillGroup/WaitGroup expose the bounded process-group lifecycle
+// for sibling packages (delivery local checks).
+func StartGroup(cmd *exec.Cmd) { setupProcess(cmd) }
+func KillGroup(cmd *exec.Cmd)  { killProcess(cmd) }
+func WaitGroup(cmd *exec.Cmd) error {
+	return waitProcess(cmd)
+}

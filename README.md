@@ -6,6 +6,8 @@
 
 ## 当前状态
 
+- **固定自动开发交付流程（2026-10-17，规格／计划已审核，Tasks 1–12 已实现并通过隔离测试，闭环未完成）**：项目一次配置，任务独立 worktree 开发，本地检查、自动提交／推送任务分支、CI、串行集成及主分支 CI；代码问题有限自动修复，效果验收按项目配置。见[设计](docs/superpowers/specs/2026-10-17-automated-delivery-design.md)与[计划](docs/superpowers/plans/2026-10-17-automated-delivery.md)。配置校验、SQLite 原子周期、Actions 只读客户端、凭据桥、远程 Git 收据、写权租约／候选冻结／本地检查与单 worker 状态机、原会话自动修复与下一轮模型切换、失败分类与修复闭环、持久 FIFO 集成队列与候选重验、主分支快进集成与主 CI 隔离、每步骤崩溃核查（intent／回执、唯一可证补记、真实 Linux SIGKILL 重启恢复）、Web 交付 Socket（固定方法、认证／Origin／会话、操作回放、preflight 只读、set_next_profile）与生产装配（auth／remote／actions／delivery 注入、启动先恢复、关闭顺序、凭据不入库）均已通过 Go 全量／race／vet 审查；界面与真实浏览器闭环（Tasks 13–14）未实施，真实模型／GitHub／Actions 未联调。见[执行记录](docs/development/web-automated-delivery-ledger.md)，7331 未更新，不授权本开发会话执行远程写入。
+
 - 已创建本地 Git 仓库、GitHub 公开仓库与 Paseo 项目入口；2026-10-13 按用户授权建立首个本地代码提交；2026-10-17 用户明确授权提交当前已完成代码并推送 GitHub 的 `main` 分支。
 - **Go 服务基础已实现，通过本机与独立验收；3 项边界修正也已通过独立核对**：回环配置、HTTP 健康检查、结构化日志、优雅停止和故障测试。
 - Go 基础阶段的 32 项顶层 Go 测试、race、vet、格式、依赖校验、构建及 SIGINT/SIGTERM 烟测通过。详见 [验证记录](docs/development/go-foundation-verification.md)、[初次独立验收](docs/development/go-foundation-review.md) 与 [边界修正记录](docs/development/go-foundation-polish.md)。本机使用非稳定 Go 工具链，不代表稳定工具链或其他系统验收。

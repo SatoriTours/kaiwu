@@ -1,3 +1,17 @@
+# 当前设计：固定开发交付与 Actions 自动修复
+
+- [x] 核对现有 Git／worktree／会话／恢复机制，确认当前仅有本地审核集成。
+- [x] 用户将 Push 入口需求扩展为项目配置的统一流程，要求 Actions 检查及自动修复；按 Architectural 路径推进。
+- [x] 比较手动串联、仅提示词驱动、Go 固定状态机；用户确认方向并同意整理书面设计。
+- [x] 编写并自查[规格](docs/superpowers/specs/2026-10-17-automated-delivery-design.md)，同步需求／架构／README／路线图；不提交、不写业务代码。
+- [x] 用户在规格交付后回复“ok”，审核书面规格及其中的默认规则、凭据与授权边界。
+- [x] 编写并自查[14项实施计划](docs/superpowers/plans/2026-10-17-automated-delivery.md)，明确接口／失败测试／恢复边界及实际模型切换缺口。
+- [x] 用户回复“ok”审核计划并选择当前会话串行实现＋最终独立只读验收。
+- [x] Task 1、2：配置／领域校验、schema v2、周期／步骤／快照事务与回执；Go 全量、workbench race／vet 通过，见[执行记录](docs/development/web-automated-delivery-ledger.md)。
+- [ ] Task 3：官方 API／OpenAPI 资料被 fake-IP 安全检查阻断，取得可核对官方资料后恢复，不绕过防护。
+- [ ] Task 4–14：凭据、远程 Git、调度／CI／修复、界面、整体与独立验收；产品闭环未完成，7331 未更新。
+- [ ] 真实 GitHub／Actions／模型联调另行说明费用、副作用并获准。
+
 # 当前批次：正式 Web 服务
 
 - [x] 用户确认 Vue 3＋TypeScript＋Vite、SQLite、本机令牌和 pi 独立会话生命周期。

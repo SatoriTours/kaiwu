@@ -31,6 +31,11 @@ type Round struct {
 	Report      *Report      `json:"report,omitempty"`
 	ReportError string       `json:"reportError,omitempty"`
 	Tools       []ToolRecord `json:"tools"`
+	// Profile is the profile this round actually runs with, recorded at round
+	// start: the pending next-round request counts, a later switch does not.
+	Profile    Profile `json:"profile"`
+	Origin     string  `json:"origin,omitempty"`
+	DeliveryID string  `json:"deliveryId,omitempty"`
 }
 
 const ReportInstructions = `
@@ -107,9 +112,18 @@ func Evidence(r Round, c ReportCheck) string {
 	}
 	return "missing"
 }
+
+// roundProfile is the effective profile of the next round: an explicit
+// pending request wins over the conversation's stored profile.
+func roundProfile(c Conversation) Profile {
+	if c.PendingProfile != nil {
+		return *c.PendingProfile
+	}
+	return c.Profile
+}
 func BeginRound(st *State, conversationID, messageID string) {
 	c := st.Conversations[conversationID]
-	c.Rounds = append(c.Rounds, Round{ID: messageID, Phase: "running", StartedAt: time.Now().UTC().Format(time.RFC3339), Tools: []ToolRecord{}})
+	c.Rounds = append(c.Rounds, Round{ID: messageID, Phase: "running", StartedAt: time.Now().UTC().Format(time.RFC3339), Tools: []ToolRecord{}, Profile: roundProfile(c)})
 	st.Conversations[c.ID] = c
 }
 func UpdateRound(st *State, id, roundID string, fn func(*Round)) {

@@ -87,6 +87,14 @@ func mainReady(ctx context.Context, p workbench.Project, branch string) error {
 	}
 	return nil
 }
+
+// MainReady re-verifies the reuse protections of the old merge path before the
+// delivery machine may touch the project main checkout: on the main branch, no
+// unfinished Git operation, no uncommitted files.
+func MainReady(ctx context.Context, p workbench.Project, branch string) error {
+	return mainReady(ctx, p, branch)
+}
+
 func Check(ctx context.Context, p workbench.Project, t workbench.Task, x workbench.Execution, serviceRoots ...string) (s workbench.GitStatus, err error) {
 	s = workbench.GitStatus{TaskID: t.ID, State: "unknown", DirtyFiles: []workbench.GitFile{}, CheckedAt: time.Now().UTC().Format(time.RFC3339)}
 	fail := func(e error) (workbench.GitStatus, error) { s.Reason = e.Error(); return s, nil }

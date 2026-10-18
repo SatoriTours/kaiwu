@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/SatoriTours/kaiwu/server/internal/config"
 	"github.com/SatoriTours/kaiwu/server/internal/httpapi"
+	"github.com/SatoriTours/kaiwu/server/internal/workbench"
 )
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewJSONHandler(io.Discard, nil)) }
@@ -315,4 +318,166 @@ func TestServeUnexpectedExit(t *testing.T) {
 	if r.err == nil {
 		t.Fatal("unexpected Serve failure was ignored")
 	}
+}
+
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	return addr
+}
+
+func waitForHealth(t *testing.T, client *http.Client, addr string) {
+	t.Helper()
+	end := time.Now().Add(5 * time.Second)
+	for time.Now().Before(end) {
+		resp, err := client.Get("http://" + addr + "/healthz")
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode == 200 {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("service never became healthy")
+}
+
+// postJSON performs one same-origin Web request and returns status and body.
+func postJSON(t *testing.T, client *http.Client, raw, cookie, body string) (int, string, []*http.Cookie) {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest("POST", raw, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", u.Scheme+"://"+u.Host)
+	req.Header.Set("X-Kaiwu-Client", "web")
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(out), resp.Cookies()
+}
+
+// TestDeliveryAppLifecycle proves the production assembly: with credentials the
+// delivery surface is wired and recovered before traffic; without them the
+// basic service still starts and delivery is disabled; credentials never reach
+// the snapshot; and shutdown releases the store after the delivery worker.
+func TestDeliveryAppLifecycle(t *testing.T) {
+	t.Run("credentials wire delivery before traffic", func(t *testing.T) {
+		t.Setenv("KAIWU_GITHUB_API_TOKEN", strings.Repeat("a", 40))
+		t.Setenv("KAIWU_GITHUB_GIT_TOKEN", strings.Repeat("b", 40))
+		dir := t.TempDir()
+		addr := freeAddr(t)
+		token := strings.Repeat("k", 32)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			done <- Run(ctx, config.Config{ListenAddr: addr, Workbench: config.Workbench{Token: token, DataDir: dir}}, discardLogger())
+		}()
+		client := localClient(t)
+		waitForHealth(t, client, addr)
+
+		code, _, cookies := postJSON(t, client, "http://"+addr+"/api/login", "", `{"token":"`+token+`"}`)
+		if code != 200 || len(cookies) == 0 {
+			t.Fatalf("login failed: %d", code)
+		}
+		cookie := cookies[0].String()
+
+		// Delivery is assembled: an unknown project is a 404, not a 503
+		// "delivery unavailable".
+		code, body, _ := postJSON(t, client, "http://"+addr+"/api/delivery/preflight", cookie, `{"projectId":"missing"}`)
+		if code != 404 {
+			t.Fatalf("delivery preflight not wired: %d %s", code, body)
+		}
+		// Credential material never reaches the browser snapshot.
+		code, body, _ = postJSON(t, client, "http://"+addr+"/api/delivery/status", cookie, `{"taskId":"missing"}`)
+		if code != 200 {
+			t.Fatalf("status failed: %d %s", code, body)
+		}
+		snapCode, snap, _ := postJSON(t, client, "http://"+addr+"/api/delivery/policy", cookie, `{}`)
+		if snapCode == 200 {
+			t.Fatal("policy write without a project unexpectedly succeeded")
+		}
+		_ = snap
+		req, _ := http.NewRequest("GET", "http://"+addr+"/api/snapshot", nil)
+		req.Header.Set("Cookie", cookie)
+		if resp, err := client.Do(req); err == nil {
+			raw, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			for _, secret := range []string{strings.Repeat("a", 40), strings.Repeat("b", 40), token} {
+				if strings.Contains(string(raw), secret) {
+					t.Fatal("credential material leaked into the snapshot")
+				}
+			}
+		}
+
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("service did not stop")
+		}
+		// Delivery (and the agent) closed before the store: the database can
+		// be reopened without a lingering worker.
+		store, err := workbench.Open(filepath.Join(dir, "workbench.db"), workbench.Profile{})
+		if err != nil {
+			t.Fatalf("store not released: %v", err)
+		}
+		_ = store.Close()
+	})
+
+	t.Run("without credentials the basic service still starts", func(t *testing.T) {
+		t.Setenv("KAIWU_GITHUB_API_TOKEN", "")
+		t.Setenv("KAIWU_GITHUB_GIT_TOKEN", "")
+		t.Setenv("KAIWU_GITHUB_SSH_KEY", "")
+		dir := t.TempDir()
+		addr := freeAddr(t)
+		token := strings.Repeat("m", 32)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			done <- Run(ctx, config.Config{ListenAddr: addr, Workbench: config.Workbench{Token: token, DataDir: dir}}, discardLogger())
+		}()
+		client := localClient(t)
+		waitForHealth(t, client, addr)
+		code, _, cookies := postJSON(t, client, "http://"+addr+"/api/login", "", `{"token":"`+token+`"}`)
+		if code != 200 || len(cookies) == 0 {
+			t.Fatalf("login failed: %d", code)
+		}
+		// Disabled delivery answers 503 and never pretends to be ready.
+		code, _, _ = postJSON(t, client, "http://"+addr+"/api/delivery/preflight", cookies[0].String(), `{"projectId":"missing"}`)
+		if code != 503 {
+			t.Fatalf("disabled delivery answered %d", code)
+		}
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("service did not stop")
+		}
+	})
 }

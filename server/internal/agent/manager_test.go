@@ -26,6 +26,15 @@ func TestFakePi(t *testing.T) {
 			os.Exit(2)
 		}
 		response := map[string]any{"type": "response", "id": c["id"], "command": c["type"], "success": true, "data": map[string]any{"isStreaming": false, "isCompacting": false, "sessionId": session, "sessionFile": file, "pendingMessageCount": 0}}
+		if data, ok := response["data"].(map[string]any); ok {
+			// Mirror the launch argv so a different profile launch is
+			// verifiable without a real provider; absence means unknown.
+			data["model"] = fixtureArg("--model")
+			data["provider"] = fixtureArg("--provider")
+			if os.Getenv("KAIWU_AGENT_FAIL_MODEL") == "1" {
+				data["model"] = "wrong-model"
+			}
+		}
 		if c["type"] == "prompt" {
 			response["data"] = map[string]any{"disposition": "started"}
 		}

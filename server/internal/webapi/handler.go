@@ -36,6 +36,7 @@ type Config struct {
 		List(context.Context) ([]pimodel.Model, error)
 	}
 	Git            GitCommander
+	Delivery       DeliveryCommander
 	Context        context.Context
 	Token, Host    string
 	Assets         fs.FS
@@ -194,6 +195,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, map[string]any{"models": models})
 	case strings.HasPrefix(r.URL.Path, "/api/git/"):
 		h.git(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/delivery/"):
+		h.delivery(w, r)
 	case r.URL.Path == "/api/session" && r.Method == "GET":
 		respond(w, 200, map[string]bool{"ok": true})
 	case r.URL.Path == "/api/snapshot" && r.Method == "GET":
@@ -306,6 +309,41 @@ func (h *handler) command(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "invalid_thinking", "该模型不支持思考级别")
 			return
 		}
+	}
+	// set_next_profile applies to the next round boundary only: it never
+	// interrupts a running request and never rewrites the project template.
+	if c.Type == "set_next_profile" {
+		if h.cfg.Models == nil {
+			fail(w, 503, "models_unavailable", "服务未找到 pi，无法选择模型")
+			return
+		}
+		models, err := h.cfg.Models.List(r.Context())
+		if err != nil {
+			fail(w, 503, "models_unavailable", err.Error())
+			return
+		}
+		found, reasoning := false, false
+		for _, model := range models {
+			if model.Provider == c.Provider && model.ID == c.Model {
+				found, reasoning = true, model.Reasoning
+				break
+			}
+		}
+		if !found {
+			fail(w, 400, "model_unavailable", "该模型不在 pi 当前可用列表，请重新检测")
+			return
+		}
+		if !reasoning && c.Thinking != "" && c.Thinking != "off" {
+			fail(w, 400, "invalid_thinking", "该模型不支持思考级别")
+			return
+		}
+		receipt, e := h.store.RequestNextProfile(c.OperationID, c.ConversationID, workbench.Profile{Provider: c.Provider, Model: c.Model, Thinking: c.Thinking})
+		if e != nil {
+			h.failure(w, e)
+			return
+		}
+		respond(w, 200, receipt)
+		return
 	}
 	if c.Type == "add_project" {
 		canonical, e := canonicalProjectPath(c.Path)

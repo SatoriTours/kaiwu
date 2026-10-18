@@ -78,19 +78,24 @@ type Conversation struct {
 	Error       string    `json:"error,omitempty"`
 	Profile     Profile   `json:"profile"`
 	Messages    []Message `json:"messages"`
+	// PendingProfile is the requested model for the NEXT round; it never
+	// interrupts the running request and never rewrites the template.
+	PendingProfile *Profile `json:"pendingProfile,omitempty"`
 }
 type State struct {
-	ProfileConfigured bool                      `json:"profileConfigured,omitempty"`
-	StructureRevision uint64                    `json:"structureRevision"`
-	TaskGit           map[string]GitStatus      `json:"taskGit"`
-	Merges            map[string]MergeOperation `json:"merges"`
-	Revision          uint64                    `json:"revision"`
-	Projects          map[string]Project        `json:"projects"`
-	Topics            []Topic                   `json:"topics"`
-	Tasks             map[string]Task           `json:"tasks"`
-	Conversations     map[string]Conversation   `json:"conversations"`
-	Profile           Profile                   `json:"profile"`
-	Executions        map[string]Execution      `json:"executions"`
+	Deliveries        map[string]DeliverySummary       `json:"deliveries"`
+	DeliveryPolicies  map[string]DeliveryPolicySummary `json:"deliveryPolicies"`
+	ProfileConfigured bool                             `json:"profileConfigured,omitempty"`
+	StructureRevision uint64                           `json:"structureRevision"`
+	TaskGit           map[string]GitStatus             `json:"taskGit"`
+	Merges            map[string]MergeOperation        `json:"merges"`
+	Revision          uint64                           `json:"revision"`
+	Projects          map[string]Project               `json:"projects"`
+	Topics            []Topic                          `json:"topics"`
+	Tasks             map[string]Task                  `json:"tasks"`
+	Conversations     map[string]Conversation          `json:"conversations"`
+	Profile           Profile                          `json:"profile"`
+	Executions        map[string]Execution             `json:"executions"`
 }
 type Command struct {
 	RoundID            string  `json:"roundId,omitempty"`
@@ -117,6 +122,7 @@ type Command struct {
 	Text               string  `json:"text,omitempty"`
 }
 type Receipt struct {
+	DeliveryID     string `json:"deliveryId,omitempty"`
 	Replay         bool   `json:"-"`
 	Revision       uint64 `json:"revision"`
 	CreatedID      string `json:"createdId,omitempty"`

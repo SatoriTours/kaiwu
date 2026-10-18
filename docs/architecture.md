@@ -61,6 +61,12 @@ Go `gitops` 负责默认主分支识别、工作区归属、真实修改／祖�
 
 Vue 卡片及聊天展示服务器检查结果，审核框只显示目标、SHA、身份与文件路径，不提供源码／diff。预检 ID 绑定内容、索引、文件模式、设置及两个 HEAD，确认后重核；请求丢响应沿用 operation ID。已合并由当前任务 HEAD 的祖先关系决定，不由 Agent 回复或旧操作回执决定。完整实现、测试及限制见 [验证记录](development/web-task-merge-verification.md)。此入口的审核不能替代 pi 原生 bash 的通用审批或系统沙箱。
 
+## 固定自动交付闭环（规格／计划已审，基础已实现、闭环未完成）
+
+用户已审核统一项目配置的开发交付[书面规格](superpowers/specs/2026-10-17-automated-delivery-design.md)，[实施计划](superpowers/plans/2026-10-17-automated-delivery.md)及串行实现方式已获审核。计划由纯 Go `delivery` 固定状态机协调原任务 pi、`gitops` 和只读 GitHub Actions REST 适配；任务分支检查通过后串行集成，主分支 CI 通过才标记技术交付。源码修复在原任务 worktree／会话进行，不把 Git／CI 生命周期交给浏览器或仅靠模型提示词。
+
+交付记录、有限修复预算、配置授权快照和持久逻辑队列独立于现有轮次人工确认／实际 Git 状态；副作用意图先落库，重启先核查精确 refs／SHA／run attempt。Task 1、2 的领域校验、schema v2 和原子周期／步骤／摘要已实现，Go 全量／workbench race、vet 通过；Task 3 官方接口资料取证被 fake-IP 安全检查阻断，见[执行记录](development/web-automated-delivery-ledger.md)。调度／远程凭据接入／自动推送和整体独立验收均未完成。现有本地手动合并的授权与恢复规则继续有效。
+
 ## 任务成果与受控 HTTP 预览
 
 Vue 在主内容区展示成果及真实任务效果，右侧保留原任务聊天。完成确认沿用最新已结束轮次的精确令牌，成功反馈来自持久任务／轮次状态；Git 状态与后续审核合并独立，无配置任务可查看真实工具输出并手工补充说明。

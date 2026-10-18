@@ -24,26 +24,27 @@ type instance struct {
 	lease                 *executionLease
 }
 type Manager struct {
-	previewStop  func(context.Context, string) error
-	mu           sync.Mutex
-	ctx          context.Context
-	cancel       context.CancelFunc
-	store        *workbench.Store
-	cfg          Config
-	instances    map[string]*instance
-	seen         map[string]bool
-	previews     map[string]workbench.MergePreview
-	reserved     map[string]bool
-	refreshes    map[string]bool
-	gitSlots     chan struct{}
-	projectGates map[string]chan struct{}
-	closed       bool
-	wg           sync.WaitGroup
+	previewStop      func(context.Context, string) error
+	mu               sync.Mutex
+	ctx              context.Context
+	cancel           context.CancelFunc
+	store            *workbench.Store
+	cfg              Config
+	instances        map[string]*instance
+	seen             map[string]bool
+	previews         map[string]workbench.MergePreview
+	reserved         map[string]bool
+	deliveryReserved map[string]bool
+	refreshes        map[string]bool
+	gitSlots         chan struct{}
+	projectGates     map[string]chan struct{}
+	closed           bool
+	wg               sync.WaitGroup
 }
 
 func New(ctx context.Context, store *workbench.Store, cfg Config) *Manager {
 	owned, cancel := context.WithCancel(ctx)
-	return &Manager{ctx: owned, cancel: cancel, store: store, cfg: cfg, instances: map[string]*instance{}, seen: map[string]bool{}, previews: map[string]workbench.MergePreview{}, reserved: map[string]bool{}, refreshes: map[string]bool{}, gitSlots: make(chan struct{}, 2)}
+	return &Manager{ctx: owned, cancel: cancel, store: store, cfg: cfg, instances: map[string]*instance{}, seen: map[string]bool{}, previews: map[string]workbench.MergePreview{}, reserved: map[string]bool{}, deliveryReserved: map[string]bool{}, refreshes: map[string]bool{}, gitSlots: make(chan struct{}, 2)}
 }
 func (m *Manager) Count() int { m.mu.Lock(); defer m.mu.Unlock(); return len(m.instances) }
 func (m *Manager) Send(conversationID, messageID string) error {
@@ -115,6 +116,17 @@ func (m *Manager) begin(conversationID, messageID string) error {
 func (m *Manager) run(c workbench.Conversation, entry *instance, messageID string) {
 	defer m.wg.Done()
 	_, previousExecution, _ := executionFor(m.store.Snapshot(), c.ID)
+	pending := c.PendingProfile
+	// An explicit next-round model request applies here, at the round
+	// boundary: recycle the settled instance first, never interrupt a
+	// running request, never silently fall back to the old model.
+	if pending != nil && messageID != "" {
+		if e := m.recycleForModel(c, entry, true); e != nil {
+			m.failed(c.ID, "模型切换失败，本轮请求未发送："+e.Error(), false)
+			m.release(c.ID, entry, false)
+			return
+		}
+	}
 	if e := m.prepareDevelopment(c, entry, messageID == ""); e != nil {
 		m.failed(c.ID, e.Error(), false)
 		m.release(c.ID, entry, false)
@@ -124,6 +136,10 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 	client := entry.client
 	m.mu.Unlock()
 	if client == nil {
+		if pending != nil && messageID != "" {
+			local := *pending
+			c.Profile = local
+		}
 		spec, e := m.launch(c)
 		if e != nil {
 			m.failed(c.ID, "无法准备原会话目录或工作区；未创建替代上下文", false)
@@ -159,15 +175,32 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 			IsStreaming  bool   `json:"isStreaming"`
 			IsCompacting bool   `json:"isCompacting"`
 			Pending      int    `json:"pendingMessageCount"`
+			Model        string `json:"model"`
+			Provider     string `json:"provider"`
 		}
 		restoring := c.SessionFile != "" && (hasHistory(c) || fileExists(c.SessionFile))
 		if e != nil || json.Unmarshal(response.Data, &state) != nil || state.SessionID != c.SessionID || state.IsStreaming || state.IsCompacting || state.Pending != 0 || m.validateLocation(c, state.SessionFile) != nil || ((restoring || fileExists(state.SessionFile)) && m.validateSession(c, state.SessionFile) != nil) || (restoring && state.SessionFile != c.SessionFile) {
 			m.stopFailed(c.ID, entry, client, "原会话文件或握手不匹配；未创建替代上下文", true)
 			return
 		}
+		// When the launched process reports an actual model/provider, it must
+		// match the requested profile before this request is allowed to send.
+		// A mismatch can never be silently downgraded to the old model.
+		if pending != nil && messageID != "" {
+			honest := (state.Model == "" || state.Model == c.Profile.Model) && (state.Provider == "" || state.Provider == c.Profile.Provider)
+			if !honest {
+				m.stopFailed(c.ID, entry, client, "实际模型与请求不符（报告 "+state.Model+"）；本轮请求未发送，模型切换请求保留", false)
+				return
+			}
+		}
 		if e = m.store.Update(func(st *workbench.State) error {
 			v := st.Conversations[c.ID]
 			v.SessionFile = state.SessionFile
+			if pending != nil && messageID != "" {
+				newProfile := *pending
+				v.Profile = newProfile
+				v.PendingProfile = nil
+			}
 			st.Conversations[c.ID] = v
 			return nil
 		}); e != nil {

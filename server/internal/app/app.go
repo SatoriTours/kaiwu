@@ -8,11 +8,16 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/SatoriTours/kaiwu/server/internal/agent"
 	"github.com/SatoriTours/kaiwu/server/internal/config"
+	"github.com/SatoriTours/kaiwu/server/internal/delivery"
+	"github.com/SatoriTours/kaiwu/server/internal/githubactions"
+	"github.com/SatoriTours/kaiwu/server/internal/githubauth"
+	"github.com/SatoriTours/kaiwu/server/internal/gitops"
 	"github.com/SatoriTours/kaiwu/server/internal/httpapi"
 	"github.com/SatoriTours/kaiwu/server/internal/pimodel"
 	"github.com/SatoriTours/kaiwu/server/internal/preview"
@@ -20,6 +25,42 @@ import (
 	"github.com/SatoriTours/kaiwu/server/internal/webui"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
 )
+
+// buildDelivery assembles the automated-delivery worker from the service
+// credentials. Without API and Git credentials the feature stays disabled and
+// the basic server still starts; there is no fake-endpoint switch in
+// production.
+func buildDelivery(ctx context.Context, dataDir string, store *workbench.Store, agentPort delivery.AgentPort) (*delivery.Manager, error) {
+	gh := config.LoadGitHub(os.LookupEnv)
+	if gh.APIToken == "" || (gh.GitToken == "" && gh.SSHKey == "") {
+		return nil, nil
+	}
+	resolver, err := githubauth.New(githubauth.Config{Lookup: os.LookupEnv})
+	if err != nil {
+		return nil, fmt.Errorf("delivery credentials: %w", err)
+	}
+	actions, err := githubactions.NewClient(githubactions.ClientConfig{Token: resolver.Token})
+	if err != nil {
+		return nil, fmt.Errorf("delivery actions: %w", err)
+	}
+	remote := gitops.NewRemoteRunner(gitops.RemoteConfig{Resolver: resolver})
+	return delivery.New(ctx, store, delivery.Config{
+		Agent:   agentPort,
+		Actions: actions,
+		Remote:  remote,
+		Clock:   delivery.SystemClock{},
+		DataDir: dataDir,
+	})
+}
+
+// deliveryCommander keeps a disabled delivery out of the Web API as a real
+// nil interface instead of a typed nil.
+func deliveryCommander(m *delivery.Manager) webapi.DeliveryCommander {
+	if m == nil {
+		return nil
+	}
+	return m
+}
 
 // Run validates local-only configuration before acquiring resources. Client
 // connections do not own this context and cannot implicitly stop the server.
@@ -68,8 +109,21 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 		if err := manager.RecoverMerges(ctx); err != nil {
 			return err
 		}
+		// Automated delivery is assembled inside the listening service's
+		// lifecycle: recovery runs before any business traffic, and the worker
+		// is closed after the API and before the agent and the store.
+		deliveryMgr, err := buildDelivery(ctx, wb.DataDir, store, manager)
+		if err != nil {
+			return err
+		}
+		if deliveryMgr != nil {
+			defer func() { result = errors.Join(result, deliveryMgr.Close()) }()
+			if err := deliveryMgr.Recover(ctx); err != nil {
+				return err
+			}
+		}
 		catalog := &pimodel.Catalog{Program: wb.Program, SourceDir: wb.PiAgentDir, DataDir: filepath.Join(wb.DataDir, "probes")}
-		handler = webapi.New(webapi.Config{Previews: previews, Models: catalog, Git: manager, Context: ctx, Host: ln.Addr().String(), Token: wb.Token, Assets: webui.Files(), Health: handler, AgentAvailable: wb.Program != ""}, store, manager)
+		handler = webapi.New(webapi.Config{Previews: previews, Models: catalog, Git: manager, Delivery: deliveryCommander(deliveryMgr), Context: ctx, Host: ln.Addr().String(), Token: wb.Token, Assets: webui.Files(), Health: handler, AgentAvailable: wb.Program != ""}, store, manager)
 		defer func() {
 			if closer, ok := handler.(interface{ Close() error }); ok {
 				result = errors.Join(result, closer.Close())
