@@ -30,6 +30,7 @@ const emit = defineEmits<{
 function presentation(task:Task){return taskState(task,props.conversations[task.conversationId],props.executions[task.executionId??''])}
 function actionLabel(task: Task) {
  if(presentation(task).status==='interrupted')return '继续开发';
+ if(presentation(task).status==='waiting_user')return '待你处理';
   return props.pending[task.conversationId]
     ? "启动中…"
     : task.status === "running"

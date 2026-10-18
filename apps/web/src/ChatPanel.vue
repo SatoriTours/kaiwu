@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from "vue";
+import { ref, watch, nextTick, computed, onMounted, onUnmounted } from "vue";
 import type { Conversation, Task, Execution, GitStatus, Message, DeliverySummary } from "./types.ts";
 import { isStartRequest } from "./workbench.ts";
 import {taskState} from "./task-state.ts";
@@ -12,6 +12,17 @@ import {groupChatMessages} from './chat-messages.ts';
 import MarkdownContent from "./MarkdownContent.vue";
 import DeliveryStatus from "./DeliveryStatus.vue";
 import { isDeliveryActive } from "./delivery.ts";
+import InteractionCard from "./InteractionCard.vue";
+import "./interaction.css";
+import {
+  formatAnswerSummary,
+  splitInteractions,
+  effectiveInteractionStatus,
+  INTERACTION_DELIVERY_LABELS,
+  INTERACTION_STATUS_LABELS,
+  type InteractionAnswers,
+  type InteractionOthers,
+} from "./interaction.ts";
 const props = defineProps<{
   conversation: Conversation;
   tasks:Task[];
@@ -42,10 +53,54 @@ const emit = defineEmits<{
   resumeDelivery: [summary: DeliverySummary];
   cancelDelivery: [summary: DeliverySummary];
   extendBudgetDelivery: [summary: DeliverySummary];
+  answerInteraction: [
+    payload: {
+      conversationId: string;
+      requestId: string;
+      requestVersion: number;
+      answerMode: "form" | "text";
+      answers?: InteractionAnswers;
+      others?: InteractionOthers;
+      comment?: string;
+      text?: string;
+    },
+  ];
+  cancelInteraction: [payload: { conversationId: string; requestId: string; requestVersion: number }];
+  retryInteraction: [payload: { conversationId: string; requestId: string; requestVersion: number }];
 }>();
 const taskStatus=computed(()=>props.task?taskState(props.task,props.conversation,props.execution).status:'idle');
 const deliveryActive=computed(()=>props.delivery?isDeliveryActive(props.delivery.phase):false);
 const chatEntries=computed(()=>groupChatMessages(props.conversation.messages));
+// Expiry is wall-clock driven: a pending native request past its deadline must
+// leave the answer queue even when no snapshot arrives in between.
+const now = ref(Date.now());
+let expiryClock: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  expiryClock = setInterval(() => {
+    now.value = Date.now();
+  }, 1000);
+});
+onUnmounted(() => {
+  if (expiryClock) clearInterval(expiryClock);
+});
+const interactionLists = computed(() => splitInteractions(props.conversation.interactions, now.value));
+const pendingInteractions = computed(() => interactionLists.value.pending);
+const interactionCollapsed = ref(false);
+const userChoseChatOverride = ref(false);
+
+watch(() => props.conversation.id, () => {
+  interactionCollapsed.value = false;
+  userChoseChatOverride.value = false;
+});
+
+const shouldCollapseComposer = computed(() => {
+  return pendingInteractions.value.length > 0 && !interactionCollapsed.value && !userChoseChatOverride.value;
+});
+
+const historyInteractions = computed(() => interactionLists.value.history);
+function interactionStatus(ix: { status: string; expiresAt?: string }) {
+  return effectiveInteractionStatus(ix as any, now.value);
+}
 const messages = ref<HTMLElement>();
 async function showLatestReply(messageID?:string){
  await nextTick();const replies=Array.from(messages.value?.querySelectorAll<HTMLElement>('.message.assistant')??[]);const target=messageID?Array.from(messages.value?.querySelectorAll<HTMLElement>('[data-message-id]')??[]).find(el=>el.dataset.messageId===messageID):undefined;const el=messageID?target?.closest<HTMLElement>('.message.assistant'):replies.at(-1);
@@ -274,9 +329,96 @@ const deliveryLabels: Record<string, string> = {
         </button>
       </div>
 
+      <!-- Historical completed/cancelled/expired interactions with collapsible details -->
+      <div v-if="historyInteractions.length > 0" class="interaction-history-list" aria-label="交互历史记录">
+        <details
+          v-for="ix in historyInteractions"
+          :key="ix.id"
+          class="interaction-history-card"
+          :data-interaction-id="ix.id"
+        >
+          <summary class="interaction-history-head">
+            <span class="interaction-history-title">{{ ix.title }}</span>
+            <span
+              class="interaction-history-status"
+              :class="ix.response?.delivery || ix.status"
+            >
+              {{ interactionStatus(ix) === 'answered' && ix.response ? (INTERACTION_DELIVERY_LABELS[ix.response.delivery] || '已答复') : (INTERACTION_STATUS_LABELS[interactionStatus(ix)] || interactionStatus(ix)) }}
+            </span>
+          </summary>
+          <div class="interaction-history-body" style="padding-top: 6px;">
+            <p v-if="ix.description" class="interaction-desc" style="margin-bottom: 6px;">{{ ix.description }}</p>
+            <div class="interaction-history-summary">
+              <strong>答复内容：</strong>{{ ix.response ? formatAnswerSummary(ix) : '未答复（已失效，只可查看）' }}
+            </div>
+            <div v-if="interactionStatus(ix) === 'expired' && ix.statusReason" class="interaction-history-note">
+              {{ ix.statusReason }}
+            </div>
+            <div v-if="ix.response?.answeredAt" class="interaction-history-time" style="font-size: 11px; opacity: 0.7; margin-top: 4px;">
+              提交时间：{{ new Date(ix.response.answeredAt).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}
+            </div>
+            <div v-if="ix.response?.note" class="interaction-history-note">
+              {{ ix.response.note }}
+            </div>
+            <div v-if="ix.response?.delivery === 'not_sent'" class="interaction-retry-wrap" style="margin-top: 6px;">
+              <button
+                type="button"
+                class="interaction-btn primary"
+                :disabled="pending || !online"
+                @click="emit('retryInteraction', { conversationId: conversation.id, requestId: ix.id, requestVersion: ix.version })"
+              >
+                重试发送
+              </button>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <!-- Interaction parse error if any -->
+      <div v-if="conversation.rounds?.some(r => r.interactionError)" class="context-card" role="alert">
+        <strong>交互解析提示</strong>
+        <p>{{ conversation.rounds.find(r => r.interactionError)?.interactionError }}</p>
+        <small>可直接在下方输入框中发送文字消息继续沟通。</small>
+      </div>
+
+      <!-- Interaction notice if any (e.g. unknown method / oversized content cancelled) -->
+      <div
+        v-for="round in (conversation.rounds || []).filter(r => r.interactionNotice)"
+        :key="round.id + '-notice'"
+        class="context-card"
+        role="status"
+      >
+        <strong>交互能力说明</strong>
+        <p>{{ round.interactionNotice }}</p>
+      </div>
 
     </div>
-    <div class="composer">
+
+    <!-- Active pending interaction card (non-modal local card inside chat panel) -->
+    <InteractionCard
+      v-if="pendingInteractions.length > 0"
+      :requests="pendingInteractions"
+      :conversation-id="conversation.id"
+      :pending="pending"
+      :online="online"
+      @collapse-change="val => interactionCollapsed = val"
+      @submit="payload => emit('answerInteraction', payload)"
+      @cancel="payload => emit('cancelInteraction', payload)"
+      @retry="payload => emit('retryInteraction', payload)"
+    />
+
+    <div v-if="shouldCollapseComposer" class="composer-collapsed-bar" role="status">
+      <span>正在等待处理交互问题</span>
+      <button
+        type="button"
+        class="composer-expand-btn"
+        @click="userChoseChatOverride = true"
+      >
+        改用普通聊天回复 ↗
+      </button>
+    </div>
+
+    <div v-else class="composer">
       <div class="context-label row between">
         <span
           >发送至{{ task ? "任务 " + task.title : "项目 " + projectName }}</span

@@ -48,6 +48,9 @@ type Manager struct {
 	leases     map[string]agent.DeliveryLease
 	lastCI     map[string]string
 	dispatched map[string]bool
+	// userTurnAt maps a task to the delivery-clock start of its newest user
+	// turn; it ends an excluded wait segment at the exact AI run start.
+	userTurnAt map[string]time.Time
 }
 
 // New subscribes to store revisions and starts the delivery worker.
@@ -69,7 +72,12 @@ func New(ctx context.Context, store *workbench.Store, cfg Config) (*Manager, err
 		leases:     map[string]agent.DeliveryLease{},
 		lastCI:     map[string]string{},
 		dispatched: map[string]bool{},
+		userTurnAt: map[string]time.Time{},
 	}
+	// A user turn that starts a run ends the interaction wait at its real
+	// start, not when the worker happens to observe it; this keeps AI runtime
+	// out of the excluded wait window without resetting ActiveSince.
+	store.SetUserTurnHook(m.NoteUserTurn)
 	go m.loop()
 	return m, nil
 }
@@ -195,13 +203,38 @@ func (m *Manager) scanPass() {
 // stage was persisted and the chain should continue (paced).
 func (m *Manager) step(d workbench.Delivery) (out workbench.Delivery, cont bool) {
 	out = d
-	switch d.Phase {
-	case "queued", "developing", "local_checking", "committing", "pushing_task", "task_ci", "repairing",
-		"preparing_integration", "integrating", "integration_checking", "pushing_main", "main_ci":
-		if code, reason := m.gateCode(d); code != "" {
+	if !sideEffectPhase(d.Phase) {
+		// awaiting_acceptance/blocked/paused/needs_check are passive; the
+		// explicit user commands and recovery own them.
+		return d, false
+	}
+	if code, reason := m.gateCode(d); code != "" {
+		return m.block(d, code, reason)
+	}
+	// A blocking question keeps the same cycle alive: no side effect runs and
+	// nothing is released as done. Malformed interaction output and a missing
+	// dependency round still fail closed.
+	if code, reason := m.interactionWait(d); code != "" {
+		switch code {
+		case "interaction_pending", "interaction_unanswered", "interaction_cycle", "interaction_answering":
+			return m.waitForUser(d, code, reason)
+		default:
 			return m.block(d, code, reason)
 		}
-	default:
+	}
+	if d.WaitingCode != "" {
+		next := d
+		// Closing a user-answer wait settles its excluded window before the
+		// cycle continues; a running user turn ends the segment at its start.
+		closeUserWait(&next, m.userWaitEnd(d, m.now()))
+		next.WaitingCode, next.WaitingReason = "", ""
+		cleared, err := m.store.AdvanceDelivery(d.ID, d.Version, next, nil)
+		if err != nil {
+			return d, false
+		}
+		// Re-enter the chain with the cleared cycle; the next pass runs the
+		// real stage on the same delivery row.
+		return cleared, true
 	}
 	switch d.Phase {
 	case "queued":
@@ -233,6 +266,168 @@ func (m *Manager) step(d workbench.Delivery) (out workbench.Delivery, cont bool)
 		// on user acceptance or the next scheduled pass.
 		return d, false
 	}
+}
+
+func sideEffectPhase(phase string) bool {
+	switch phase {
+	case "queued", "developing", "local_checking", "committing", "pushing_task", "task_ci", "repairing",
+		"preparing_integration", "integrating", "integration_checking", "pushing_main", "main_ci":
+		return true
+	}
+	return false
+}
+
+// interactionWait reports why dependent automated work must wait for the user.
+// During a repair the cycle waits on the repair job's own round, not only the
+// cycle's original start round.
+func (m *Manager) interactionWait(d workbench.Delivery) (code, reason string) {
+	st := m.store.Snapshot()
+	roundID := d.RoundID
+	if d.Phase == "repairing" {
+		if job, err := m.store.LatestDeliveryRepair(d.ID); err == nil && job.MessageID != "" {
+			roundID = job.MessageID
+		}
+	}
+	gateCode, gateReason := workbench.InteractionGate(st, d.TaskID, roundID)
+	_, _, depCode, depReason := workbench.DeliveryDependency(st, d.TaskID, roundID)
+	// Fatal interaction states stay fail-closed even while a turn runs.
+	if gateCode == "interaction_invalid" || gateCode == "round_missing" {
+		return gateCode, gateReason
+	}
+	if depCode == "interaction_invalid" || depCode == "round_missing" {
+		return depCode, depReason
+	}
+	if gateCode == "" && depCode == "" {
+		return "", ""
+	}
+	if t, ok := st.Tasks[d.TaskID]; ok {
+		// A live native dialog blocks pi in the middle of a running round.
+		// That is the user thinking, not AI activity: keep the wait open.
+		if workbench.HasPendingNativeInteraction(st, t.ConversationID) {
+			return "interaction_pending", "原生请求正在等待你的回答"
+		}
+		// With an ordinary interaction dependency, a running/starting
+		// conversation is real AI work, not user waiting. The hook timestamp
+		// makes the wait end deterministic even if the worker only observes the
+		// finished round later.
+		if c, ok := st.Conversations[t.ConversationID]; ok && (c.RunState == "running" || c.RunState == "starting") {
+			return "interaction_answering", "新的用户轮次正在运行，等待其完成"
+		}
+	}
+	if gateCode != "" {
+		return gateCode, gateReason
+	}
+	return depCode, depReason
+}
+
+// NoteUserTurn records when a user turn starts a new AI run. It is called by
+// the store after the command lock is released and never calls back.
+func (m *Manager) NoteUserTurn(taskID, conversationID string) {
+	if taskID == "" {
+		return
+	}
+	now := m.now()
+	m.mu.Lock()
+	if m.userTurnAt == nil {
+		m.userTurnAt = map[string]time.Time{}
+	}
+	m.userTurnAt[taskID] = now
+	m.mu.Unlock()
+}
+
+// userWaitEnd resolves the exact end of a user-wait segment: the latest user
+// turn start that falls inside the segment, otherwise the observation time
+// (restart/legacy fallback).
+func (m *Manager) userWaitEnd(d workbench.Delivery, now time.Time) time.Time {
+	at, ok := m.takeUserTurn(d.TaskID)
+	if ok && !at.Before(d.WaitingSince) && !at.After(now) {
+		return at
+	}
+	return now
+}
+
+func (m *Manager) takeUserTurn(taskID string) (time.Time, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	at, ok := m.userTurnAt[taskID]
+	if ok {
+		delete(m.userTurnAt, taskID)
+	}
+	return at, ok
+}
+
+// waitForUser parks the cycle without changing its phase or dropping its
+// frozen policy/candidate evidence. The task write lease is released so the
+// user's answer (a real agent turn) can run; the stage re-acquires it after
+// the dependency round settles and re-validates the candidate.
+//
+// Waiting time is accounted explicitly: interaction_pending/unanswered/cycle
+// are user waits and are excluded from the activation budget, while
+// interaction_answering means the answer round is actually running and must
+// count as AI-active time.
+func (m *Manager) waitForUser(d workbench.Delivery, code, reason string) (workbench.Delivery, bool) {
+	now := m.now()
+	next := d
+	if userWaitCode(code) {
+		// A native response (or a user turn that leaves a question pending)
+		// resumed AI work while the wait code stayed open. Split the segment at
+		// that exact resume moment, then measure the new wait from this
+		// observation: a late worker observation counts the gap as AI time,
+		// which is conservative and can never leak budget.
+		if at, resumed := m.takeUserTurn(d.TaskID); resumed && !at.Before(d.WaitingSince) && !at.After(now) {
+			closeUserWait(&next, at)
+			next.WaitingSince = now
+		} else if next.WaitingSince.IsZero() {
+			next.WaitingSince = now
+		}
+	} else {
+		closeUserWait(&next, m.userWaitEnd(d, now))
+	}
+	next.WaitingCode, next.WaitingReason = code, reason
+	if next.WaitingCode == d.WaitingCode && next.WaitingReason == d.WaitingReason &&
+		next.WaitingSince.Equal(d.WaitingSince) && next.WaitExcludedMillis == d.WaitExcludedMillis {
+		return d, false
+	}
+	m.dropLease(d.ID, true)
+	out, err := m.store.AdvanceDelivery(d.ID, d.Version, next, nil)
+	if err != nil {
+		return d, false
+	}
+	return out, false
+}
+
+// userWaitCode separates "a human still has to answer" from "the answer round
+// is running". Only the former may be excluded from the activation budget.
+func userWaitCode(code string) bool {
+	switch code {
+	case "interaction_pending", "interaction_unanswered", "interaction_cycle":
+		return true
+	}
+	return false
+}
+
+// closeUserWait folds the current user-wait segment into the excluded budget.
+func closeUserWait(d *workbench.Delivery, at time.Time) {
+	if d.WaitingSince.IsZero() {
+		return
+	}
+	if delta := at.Sub(d.WaitingSince); delta > 0 {
+		d.WaitExcludedMillis += delta.Milliseconds()
+	}
+	d.WaitingSince = time.Time{}
+}
+
+// activeElapsed is the AI-active duration of one cycle: total wall time since
+// the frozen ActiveSince minus completed and in-flight user waits.
+func activeElapsed(d workbench.Delivery, now time.Time) time.Duration {
+	if d.ActiveSince.IsZero() {
+		return 0
+	}
+	elapsed := now.Sub(d.ActiveSince) - time.Duration(d.WaitExcludedMillis)*time.Millisecond
+	if userWaitCode(d.WaitingCode) && !d.WaitingSince.IsZero() {
+		elapsed -= now.Sub(d.WaitingSince)
+	}
+	return elapsed
 }
 
 // drive chains paced stage transitions of one delivery until a passive

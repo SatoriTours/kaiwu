@@ -4,6 +4,7 @@ import type {Task,Conversation,Execution,TaskPreview} from './types.ts';
 import MarkdownContent from './MarkdownContent.vue';
 import {taskState} from './task-state.ts';
 import {safePreviewURL} from './preview.ts';
+import {formatResultHeading} from './result-history.ts';
 const props=defineProps<{task:Task;conversation:Conversation;execution?:Execution;roundId:string;preview?:TaskPreview;busy:boolean;online:boolean;error:string}>();
 const emit=defineEmits<{back:[];chat:[];refresh:[];start:[];stop:[];revise:[];instructions:[]}>();
 const rounds=computed(()=>props.conversation.rounds??[]);
@@ -16,11 +17,15 @@ const tools=computed(()=>round.value?.tools??props.execution?.tools??[]);
 const frameURL=computed(()=>!historical.value&&props.preview?.state==='running'?safePreviewURL(props.preview.url):undefined);
 const canStart=computed(()=>!historical.value&&!!props.preview?.command?.length&&['stopped','failed'].includes(props.preview.state));
 const stateLabel=computed(()=>({running:'服务运行中',starting:'正在启动',stopped:'服务已停止',failed:'预览启动失败',unavailable:'暂无网页预览'}[props.preview?.state??'unavailable']));
+const headingText=computed(()=>{
+ if(!round.value) return '本轮成果';
+ return formatResultHeading(round.value, !historical.value, props.conversation);
+});
 </script>
 <template>
 <section class="result-pane" role="region" aria-label="任务成果与效果">
  <header class="result-toolbar"><button @click="emit('back')">← 返回看板</button><div class="row"><button :disabled="busy||!online" @click="emit('refresh')">刷新状态</button><button class="preview-chat-back" @click="emit('chat')">返回任务对话</button></div></header>
- <div class="result-pane-heading"><h2>{{task.title}}</h2><small>{{index?'第 '+index+' 轮成果':'本轮成果'}} · {{presentation.resultConfirmed?'你已确认':'待验收'}}</small><p>来自任务独立工作区；Git 合并状态单独核对。</p></div>
+ <div class="result-pane-heading"><h2>{{task.title}}</h2><small :title="headingText">{{headingText}} · {{presentation.resultConfirmed?'你已确认':'待验收'}}</small><p>来自任务独立工作区；Git 合并状态单独核对。</p></div>
  <div class="result-pane-scroll">
   <p v-if="historical" class="preview-warning">正在查看历史成果记录。当前工作区已用于后续开发，不能以当前预览复现历史效果。</p>
   <div v-if="error" class="preview-warning" role="alert">{{error}}<span> 如操作结果未知，请刷新状态，系统不会自动重发启动或停止命令。</span></div>

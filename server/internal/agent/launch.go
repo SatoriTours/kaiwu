@@ -58,7 +58,7 @@ func (m *Manager) launch(c workbench.Conversation) (pirpc.LaunchSpec, error) {
 		prompt += taskPreviewInstructions
 	}
 	args := append([]string{}, m.cfg.BaseArgs...)
-	args = append(args, "--mode", "rpc", "--session-dir", root, "--name", "开悟独立对话", "--tools", tools, "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", "--offline", "--append-system-prompt", prompt+workbench.ReportInstructions+replyLanguageInstructions+replyTurnInstructions)
+	args = append(args, "--mode", "rpc", "--session-dir", root, "--name", "开悟独立对话", "--tools", tools, "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", "--offline", "--append-system-prompt", prompt+workbench.ReportInstructions+workbench.InteractionInstructions+replyLanguageInstructions+replyTurnInstructions)
 	if c.SessionFile != "" && (hasHistory(c) || fileExists(c.SessionFile)) {
 		if e := m.validateSession(c, c.SessionFile); e != nil {
 			return pirpc.LaunchSpec{}, e

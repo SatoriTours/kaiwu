@@ -42,22 +42,14 @@ func executionOf(st workbench.State, d workbench.Delivery) (p workbench.Project,
 	return
 }
 
-// roundSettled reports whether the cycle's source round has definitely
-// finished (or was confirmed by a human).
+// roundSettled reports whether the cycle's dependency round has definitely
+// finished (or was confirmed by a human). A round that asked a blocking
+// question settles through the round created from its answers, so a delivery
+// never resumes on a half-answered form.
 func (m *Manager) roundSettled(st workbench.State, d workbench.Delivery) (settled, found bool) {
-	t, ok := st.Tasks[d.TaskID]
-	if !ok {
+	_, settled, code, _ := workbench.DeliveryDependency(st, d.TaskID, d.RoundID)
+	if code == "round_missing" {
 		return false, false
 	}
-	c, ok := st.Conversations[t.ConversationID]
-	if !ok {
-		return false, false
-	}
-	for _, r := range c.Rounds {
-		if r.ID != d.RoundID {
-			continue
-		}
-		return r.Phase == "finished" || r.Phase == "confirmed", true
-	}
-	return false, false
+	return settled, true
 }

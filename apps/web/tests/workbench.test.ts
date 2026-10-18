@@ -502,3 +502,72 @@ test('parseArgsString and formatArgsString handle spaces, quotes, tabs and round
  assert.equal(isEquivalentRepo('https://github.com/foo/bar.git', 'https://github.com/foo/other.git'), false);
  assert.equal(isEquivalentRepo('https://github.com/foo/bar.git', ''), false);
 });
+
+test('result-history pure functions handle time, displayText, multiline stripping, honest fallback without 第N轮', async () => {
+ const {
+  formatRoundTime,
+  cleanTextSummary,
+  getRoundRequestSummary,
+  getRoundOptions,
+  formatResultHeading,
+ } = await import('../src/result-history.ts');
+
+ // 1. formatRoundTime
+ const formattedTime = formatRoundTime('2026-10-18T10:30:00Z');
+ assert.match(formattedTime, /^10\/18 \d\d:\d\d$/);
+ assert.equal(formatRoundTime(''), '');
+ assert.equal(formatRoundTime('invalid-date'), '');
+
+ // 2. cleanTextSummary: 多行压缩、空白折叠、超长省略、JSON unescape
+ const multiline = '第一行需求\n  第二行说明\t\t更多细节  \n 结束';
+ assert.equal(cleanTextSummary(multiline, 20), '第一行需求 第二行说明 更多细节 结束');
+ const jsonSummary = '{"request":"从 JSON 解析的请求内容"}';
+ assert.equal(cleanTextSummary(jsonSummary, 30), '从 JSON 解析的请求内容');
+ const longText = '这是一个超过二十个字符非常非常非常长的需求摘要文本用来测试截断';
+ assert.equal(cleanTextSummary(longText, 15), '这是一个超过二十个字符非常非常…');
+
+ // 3. getRoundRequestSummary: 优先 displayText -> text -> report.summary -> 请求记录不可用
+ const mockRound: any = {
+  id: 'round-1',
+  userMessageId: 'msg-1',
+  createdAt: '2026-10-18T10:30:00Z',
+  report: { summary: '报告备选摘要' },
+ };
+ const convWithDisplayText: any = {
+  messages: [
+   { id: 'round-1', role: 'user', displayText: '优先展示的显示文本\n带换行', text: 'raw prompt text' },
+  ],
+ };
+ assert.equal(getRoundRequestSummary(mockRound, convWithDisplayText), '优先展示的显示文本 带换行');
+
+ const convWithTextOnly: any = {
+  messages: [
+   { id: 'msg-1', role: 'user', text: '退回的原始文本' },
+  ],
+ };
+ assert.equal(getRoundRequestSummary(mockRound, convWithTextOnly), '退回的原始文本');
+
+ const convEmpty: any = { messages: [] };
+ assert.equal(getRoundRequestSummary(mockRound, convEmpty), '报告备选摘要');
+
+ const roundNoReport: any = { id: 'round-x' };
+ assert.equal(getRoundRequestSummary(roundNoReport, convEmpty), '请求记录不可用');
+
+ // 4. getRoundOptions: 不含“第N轮”，输出格式为 "MM/DD HH:mm · 摘要"
+ const rounds = [mockRound];
+ const options = getRoundOptions(rounds, convWithDisplayText);
+ assert.equal(options.length, 1);
+ assert.equal(options[0].id, 'round-1');
+ assert.match(options[0].label, /^10\/18 \d\d:\d\d · 优先展示的显示文本 带换行$/);
+ assert.ok(!options[0].label.includes('第 1 轮'));
+ assert.ok(!options[0].label.includes('第1轮'));
+
+ // 5. formatResultHeading: 最新/历史结果 · 时间 · 需求摘要，不含“第N轮”
+ const latestHeading = formatResultHeading(mockRound, true, convWithDisplayText);
+ assert.match(latestHeading, /^最新结果 · 10\/18 \d\d:\d\d · 优先展示的显示文本 带换行$/);
+ assert.ok(!latestHeading.includes('第 1 轮'));
+
+ const historyHeading = formatResultHeading(mockRound, false, convWithDisplayText);
+ assert.match(historyHeading, /^历史结果 · 10\/18 \d\d:\d\d · 优先展示的显示文本 带换行$/);
+ assert.ok(!historyHeading.includes('第 1 轮'));
+});

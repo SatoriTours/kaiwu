@@ -125,7 +125,13 @@ func (m *Manager) prepareDevelopment(c workbench.Conversation, entry *instance, 
 		entry.client = nil
 		entry.consumerDone = nil
 		entry.dead = false
+		entry.runID = ""
 		m.mu.Unlock()
+		// The recycled process cannot answer an old dialog.
+		_ = m.store.Update(func(st *workbench.State) error {
+			workbench.ExpireNativeInteractions(st, c.ID, "原 pi 进程已更换，原生请求失效；请让 AI 重新发起")
+			return nil
+		})
 	}
 	m.mu.Lock()
 	entry.workspace = prepared.Workspace

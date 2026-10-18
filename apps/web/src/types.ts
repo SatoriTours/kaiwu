@@ -56,7 +56,7 @@ export interface Message {
   delivery: string;
 }
 export interface Conversation {
- rounds?:Round[];
+  rounds?: Round[];
   sessionFile?: string;
   id: string;
   projectId: string;
@@ -67,6 +67,7 @@ export interface Conversation {
   profile: Profile;
   pendingProfile?: Profile;
   messages: Message[];
+  interactions?: InteractionRequest[];
 }
 export interface Snapshot {
   structureRevision?: number;
@@ -88,6 +89,10 @@ export interface Receipt {
   conversationId?: string;
   notice?: string;
   type: string;
+  interactionId?: string;
+  interactionVersion?: number;
+  delivery?: string;
+  interaction?: InteractionRequest;
 }
 export interface GitFile {
   path: string;
@@ -135,7 +140,17 @@ export interface MergeOperation {
 export interface ToolRecord {id:string;name:string;input?:string;result?:string;failed:boolean}
 export interface ReportCheck {title:string;claim:string;toolId?:string}
 export interface Report {summary:string;stage:string;plan:string[];results:string[];checks:ReportCheck[];blockers:string[];next:string[];question:string}
-export interface Round {id:string;phase:string;startedAt:string;finishedAt?:string;reportError?:string;report?:Report;tools:ToolRecord[]}
+export interface Round {
+  id: string;
+  phase: string;
+  startedAt: string;
+  finishedAt?: string;
+  reportError?: string;
+  interactionError?: string;
+  interactionNotice?: string;
+  report?: Report;
+  tools: ToolRecord[];
+}
 
 export interface TaskPreview {
  taskId: string;
@@ -240,6 +255,8 @@ export interface DeliverySummary {
   repairsLimit: number;
   blockCode?: string;
   blockReason?: string;
+  waitingCode?: string;
+  waitingReason?: string;
   holdsTurn: boolean;
   steps: DeliveryStep[];
   ci: DeliveryCI[];
@@ -259,3 +276,108 @@ export interface PreflightReport {
   fingerprint: string;
   blockers: string[];
 }
+
+export type InteractionFieldType =
+  | "confirm"
+  | "text"
+  | "textarea"
+  | "single_select"
+  | "multi_select"
+  | "number";
+
+export interface InteractionOption {
+  id: string;
+  label: string;
+  description?: string;
+  recommended?: boolean;
+}
+
+export interface InteractionField {
+  id: string;
+  type: InteractionFieldType;
+  label: string;
+  description?: string;
+  placeholder?: string;
+  unit?: string;
+  yesLabel?: string;
+  noLabel?: string;
+  prefill?: string;
+  required?: boolean;
+  allowEmpty?: boolean;
+  allowOther?: boolean;
+  integer?: boolean;
+  minLength?: number;
+  maxLength?: number;
+  minSelections?: number;
+  maxSelections?: number;
+  min?: number;
+  max?: number;
+  options?: InteractionOption[];
+}
+
+export type InteractionSource = "assistant_question" | "agent_ui";
+
+export type InteractionStatus =
+  | "pending"
+  | "answered"
+  | "cancelled"
+  | "expired"
+  | "superseded";
+
+export type InteractionDelivery =
+  | "recorded"
+  | "dispatching"
+  | "accepted"
+  | "not_sent"
+  | "uncertain";
+
+export interface InteractionResponse {
+  operationId: string;
+  mode: "form" | "text" | "cancel";
+  answers?: Record<string, boolean | string | string[] | number>;
+  others?: Record<string, string>;
+  comment?: string;
+  text?: string;
+  delivery: InteractionDelivery;
+  note?: string;
+  messageId?: string;
+  followUpRoundId?: string;
+  answeredAt?: string;
+  updatedAt?: string;
+}
+
+export interface InteractionNative {
+  method: "confirm" | "select" | "input" | "editor";
+  upstreamId: string;
+  runId?: string;
+  generation?: number;
+  choices?: string[];
+  hasTimeout?: boolean;
+}
+
+export interface InteractionRequest {
+  schemaVersion: number;
+  id: string;
+  version: number;
+  projectId: string;
+  conversationId: string;
+  taskId?: string;
+  roundId?: string;
+  sourceMessageId?: string;
+  source: InteractionSource;
+  title: string;
+  description?: string;
+  fields: InteractionField[];
+  blocking: boolean;
+  allowCancel: boolean;
+  allowTextFallback?: boolean;
+  status: InteractionStatus;
+  statusReason?: string;
+  supersededBy?: string;
+  createdAt: string;
+  expiresAt?: string;
+  dedupeKey?: string;
+  native?: InteractionNative;
+  response?: InteractionResponse;
+}
+

@@ -47,4 +47,10 @@
 
 原审查的 Declined to judge 均保留：UI 由主控浏览器验证，不将此后端报告作为 UI 独立验收；真实 API 版本／Git 权限／SSH／模型费用仍未联调；不提供恶意仓库 OS 沙箱；不声明 Windows/macOS／PC／Android 原生验证；不能自动证明任意测试语义未削弱；不是全仓性能或完整安全审计。这些限制不能豁免上表的可机械保护点。
 
+## 2026-10-18 收口新增观察（不解除安全门禁）
+
+- `userTurnAt` 为单槽。worker 若延迟到同轮第二次原生答复之后才观察，前一 resume 边界可能被覆盖，过度扣除 AI 活动预算。连续原生问题的现有同步测试只证明各段正常被观察时的计量；不能据此保证长调度停滞下严格计量。装配自动交付 worker 前，须另行设计并验证持久化／队列化 resume 边界，不以“通常毫秒级唤醒”豁免。
+- 候选最终 `go test ./...` 出现旧 `TestDeliveryRecoveryCrashAndRestart/after-main-receipt` 的瞬态窗口失败（子进程已到 succeeded，未按测试预期在 main_ci 被 SIGKILL），日志 `/tmp/kaiwu-release-20261018-interaction-history/go-test-final.log`。该测试及 interruption hook／integration 源码与 `d6f8614` 相同；旧提交隔离聚焦12次、候选聚焦15次均通过，**不足以抹去全量失败或声称已证明完全无关**。未为凑全绿修改该项或重跑全套，限定切片的门禁裁决与后续证据见交互收口记录。
+- 上述风险与原2 Critical／14 Important／1 Minor清单分开保留，未凭测试同步修正关闭任何生产安全项。实际7331保持无GitHub凭据环境、worker未装配、启用禁用和只读预检503；当前只交付交互／成果历史切片，不开放真实上传。
+
 两个未来方向仍为团队协作、通用可配置编排；当前先完成固定交付流程的安全验收。

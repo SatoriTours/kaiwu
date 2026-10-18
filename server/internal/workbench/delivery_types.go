@@ -63,16 +63,27 @@ type Delivery struct {
 	AcceptedSHA          string                `json:"acceptedSHA"`
 	BlockCode            string                `json:"blockCode"`
 	BlockReason          string                `json:"blockReason"`
-	RepairsUsed          int                   `json:"repairsUsed"`
-	RepairsLimit         int                   `json:"repairsLimit"`
-	ActiveMillis         int64                 `json:"activeMillis"`
-	ActiveLimitSeconds   int64                 `json:"activeLimitSeconds"`
-	ActiveSince          time.Time             `json:"activeSince"`
-	TriggerDeadline      time.Time             `json:"triggerDeadline"`
-	CIDeadline           time.Time             `json:"ciDeadline"`
-	StartedAt            time.Time             `json:"startedAt"`
-	FinishedAt           time.Time             `json:"finishedAt"`
-	HoldsTurn            bool                  `json:"holdsTurn"`
+	// WaitingCode/WaitingReason keep the cycle alive while a user answer is
+	// outstanding. They are never terminal: the same cycle continues when the
+	// dependency round settles.
+	WaitingCode   string `json:"waitingCode,omitempty"`
+	WaitingReason string `json:"waitingReason,omitempty"`
+	// WaitingSince is the start of the current user-answer wait.
+	// WaitExcludedMillis accumulates completed waits (including service
+	// downtime) so the activation budget never charges time in which no AI ran.
+	// Both are persisted: restarts and repeated questions cannot reset budget.
+	WaitingSince       time.Time `json:"waitingSince,omitempty"`
+	WaitExcludedMillis int64     `json:"waitExcludedMillis,omitempty"`
+	RepairsUsed        int       `json:"repairsUsed"`
+	RepairsLimit       int       `json:"repairsLimit"`
+	ActiveMillis       int64     `json:"activeMillis"`
+	ActiveLimitSeconds int64     `json:"activeLimitSeconds"`
+	ActiveSince        time.Time `json:"activeSince"`
+	TriggerDeadline    time.Time `json:"triggerDeadline"`
+	CIDeadline         time.Time `json:"ciDeadline"`
+	StartedAt          time.Time `json:"startedAt"`
+	FinishedAt         time.Time `json:"finishedAt"`
+	HoldsTurn          bool      `json:"holdsTurn"`
 }
 type DeliveryStep struct {
 	ID               string    `json:"id"`
@@ -142,6 +153,8 @@ type DeliverySummary struct {
 	RepairsLimit      int            `json:"repairsLimit"`
 	BlockCode         string         `json:"blockCode,omitempty"`
 	BlockReason       string         `json:"blockReason,omitempty"`
+	WaitingCode       string         `json:"waitingCode,omitempty"`
+	WaitingReason     string         `json:"waitingReason,omitempty"`
 	HoldsTurn         bool           `json:"holdsTurn"`
 	Steps             []DeliveryStep `json:"steps"`
 	CI                []DeliveryCI   `json:"ci"`

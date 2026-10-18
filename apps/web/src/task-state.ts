@@ -1,4 +1,5 @@
 import type {Task,Conversation,Execution} from './types.ts';
+import {hasBlockingPendingInteraction} from './interaction.ts';
 
 // One interpretation for the board and detail view. CLI connectivity and a
 // persisted, finished development result are independent facts.
@@ -7,13 +8,16 @@ export function taskState(task:Task, conversation?:Conversation, execution?:Exec
  const latest=rounds.at(-1);
  const round=selectedRoundId?rounds.find(r=>r.id===selectedRoundId):latest;
  const busy=['starting','running'].includes(conversation?.runState??'');
+ const hasBlocking=hasBlockingPendingInteraction(conversation?.interactions);
+ const waitingUser=task.status==='waiting_user'||execution?.phase==='awaiting_user'||latest?.phase==='awaiting_user'||hasBlocking;
  let confirmRoundId:string|undefined;
- if(task.status==='needs_confirmation'&&execution?.phase==='awaiting_review'&&!busy&&['idle','interrupted','failed'].includes(conversation?.runState??'')){
+ if(!waitingUser&&task.status==='needs_confirmation'&&execution?.phase==='awaiting_review'&&!busy&&['idle','interrupted','failed'].includes(conversation?.runState??'')){
   if(latest?.phase==='finished')confirmRoundId=latest.id;
   else if(!latest&&execution.finishedAt)confirmRoundId=`legacy:${execution.id}:${execution.finishedAt}`;
  }
  let status=task.status;
  if(busy&&task.executionId)status='running';
+ else if(waitingUser)status='waiting_user';
  else if(confirmRoundId)status='needs_confirmation';
  else if(task.status!=='completed'){
   if(conversation?.runState==='failed'||execution?.phase==='failed')status='failed';
@@ -21,7 +25,7 @@ export function taskState(task:Task, conversation?:Conversation, execution?:Exec
   else if(task.status==='needs_confirmation')status='interrupted';
  }
  const needsResume=!busy&&['interrupted','failed'].includes(conversation?.runState??'');
- const label=status==='interrupted'&&!needsResume?'待继续':({idle:'未开始',running:'执行中',needs_confirmation:'待验收',completed:'已完成',interrupted:'已中断',failed:'执行失败'}[status]??'待核查');
+ const label=status==='interrupted'&&!needsResume?'待继续':({idle:'未开始',running:'执行中',waiting_user:'待你处理',needs_confirmation:'待验收',completed:'已完成',interrupted:'已中断',failed:'执行失败'}[status]??'待核查');
  const legacyRound=round?.id.startsWith('legacy:');
  const nextRound=round?rounds[rounds.indexOf(round)+1]:undefined;
  const tools=legacyRound?(round?.tools?.length?round.tools:!nextRound?execution?.tools??[]:[]):round?.tools??execution?.tools??[];

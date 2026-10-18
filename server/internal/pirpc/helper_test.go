@@ -87,6 +87,19 @@ func runRPCHelper(scenario string) {
 		if json.Unmarshal([]byte(line), &cmd) != nil {
 			return
 		}
+		// Raw extension UI answers are a separate protocol family: pi emits no
+		// normal response, so the helper must not emit one either.
+		if cmd.Type == "extension_ui_response" {
+			if path := os.Getenv("KAIWU_PI_UI_CAPTURE"); path != "" {
+				f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+				if err != nil {
+					os.Exit(10)
+				}
+				_, _ = f.WriteString(line)
+				_ = f.Close()
+			}
+			continue
+		}
 		r := map[string]any{"type": "response", "id": cmd.ID, "command": cmd.Type, "success": true}
 		switch cmd.Type {
 		case "get_state":
@@ -202,6 +215,10 @@ func runRPCHelper(scenario string) {
 			r["data"] = map[string]string{"disposition": "started"}
 		}
 		_ = encoder.Encode(r)
+		if scenario == "rpc_ui" && cmd.Type == "get_state" {
+			_ = encoder.Encode(map[string]any{"type": "extension_ui_request", "id": "upstream-ui-1", "method": "confirm", "title": "Clear session?", "message": "All messages will be lost.", "timeout": 5000})
+			_ = encoder.Encode(map[string]any{"type": "extension_ui_request", "id": "upstream-ui-notify", "method": "notify", "message": "info only", "notifyType": "info"})
+		}
 		if scenario == "rpc_pause" && cmd.Type == "get_state" {
 			_, _ = reader.ReadByte()
 			_ = encoder.Encode(map[string]any{"type": "fixture_write_start"})

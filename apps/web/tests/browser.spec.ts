@@ -1012,11 +1012,16 @@ test('structured progress uses bidirectional socket and keeps verification evide
  expect(after.tasks[t.id].status).toBe('completed');
  expect(after.taskGit?.[t.id]?.state).toBe(before.taskGit?.[t.id]?.state);
  await page.locator('#draft').fill('继续改进结构化登录恢复');await page.locator('#send').click();
- await expect(page.getByLabel('查看历史轮次')).toBeVisible();
+ await expect(page.locator('.history-dropdown')).toBeVisible();
  await expect(page.getByRole('button',{name:'确认完成',exact:true})).toBeVisible();
- await page.getByLabel('查看历史轮次').selectOption(before.conversations[t.conversationId].rounds[0].id);
- await expect(page.locator('.progress-card')).toContainText('历史轮次');
+ await page.locator('.history-dropdown summary').click();
+ await page.getByRole('combobox',{name:'查看历史记录'}).selectOption(before.conversations[t.conversationId].rounds[0].id);
+ await expect(page.locator('.progress-card')).toContainText('历史记录');
+ await expect(page.getByRole('button',{name:'返回最新'})).toBeVisible();
  await expect(page.getByRole('button',{name:'确认完成',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'返回最新'}).click();
+ await expect(page.locator('.progress-card')).not.toContainText('历史记录');
+ await expect(page.getByRole('button',{name:'确认完成',exact:true})).toBeVisible();
  expect(requests).toEqual([]);
 });
 
@@ -1113,7 +1118,11 @@ test('result review opens a result view and completion remains visible after ref
  await page.getByRole('button',{name:'查看效果',exact:true}).click();
  await expect(page.getByRole('region',{name:'任务成果与效果'})).toBeVisible();
  await page.getByRole('button',{name:'确认完成',exact:true}).click();
- await expect(page.locator('.task-completed')).toContainText('你已确认本轮结果');
+ await expect(page.locator('.task-completed')).toBeVisible();
+ await expect(page.locator('.task-completed')).not.toContainText('你已确认本轮结果');
+ await expect(page.locator('.task-completed')).not.toContainText('任务已完成，效果入口、聊天记录和工作区继续保留');
+ await expect(page.locator('.task-completed').getByRole('button',{name:'查看效果',exact:true})).toBeVisible();
+ await expect(page.locator('.task-completed').getByRole('button',{name:'继续修改',exact:true})).toBeVisible();
  await expect(page.getByRole('region',{name:'任务成果与效果'})).toBeVisible();
  await expect(page.getByRole('button',{name:'确认完成',exact:true})).toHaveCount(0);
  const disconnected=(data:any)=>{const t=data.state?.tasks[taskId];if(t){const c=data.state.conversations[t.conversationId];c.runState='interrupted';c.error='pi 会话已中断，发送下一条消息时自动接回；历史已保留'}};
@@ -1122,7 +1131,20 @@ test('result review opens a result view and completion remains visible after ref
  await page.reload();
  await expect(page.locator('.task-completed')).toBeVisible();
  await expect(page.locator('.auto-recovery')).toHaveCount(0);
- await expect(page.locator('.task-completed')).toContainText('合并到主分支');
+ // 检查已合并状态时只显示“已合并·实际分支”，不显示 disabled 合并按钮与“先审核再合并”
+ const mergedSnapshot=(data:any)=>{
+  if(data.state?.taskGit?.[taskId]){
+   data.state.taskGit[taskId].state='merged';
+   data.state.taskGit[taskId].canMerge=false;
+   data.state.taskGit[taskId].mainBranch='main';
+  }
+ };
+ probeFor(page).transform=mergedSnapshot;
+ await page.route('**/api/snapshot',async route=>{const response=await route.fetch(),data=await response.json();mergedSnapshot(data);await route.fulfill({response,json:data})});
+ await page.reload();
+ await expect(page.locator('.task-completed')).toContainText('已合并 · main');
+ await expect(page.locator('.task-completed').getByRole('button',{name:'合并到主分支'})).toHaveCount(0);
+ await expect(page.locator('.task-completed')).not.toContainText('先审核具体改动再合并');
  await page.getByRole('button',{name:'继续修改',exact:true}).click();
  await expect(page.locator('#draft')).toBeFocused();
  await page.setViewportSize({width:390,height:844});
@@ -1228,6 +1250,98 @@ test('late preview responses stay with their original task and absent previews d
  await expect(page.locator('#draft')).toHaveValue(/kaiwu-preview.json/);
  expect(probeFor(page).calls.filter(r=>r.method==='previews/start')).toHaveLength(0);
  expect(probeFor(page).calls.filter(r=>r.method==='commands'&&r.body?.type==='send_message')).toHaveLength(sendsBefore);
+});
+
+test('result history UI: compact completed bar, history toggle, request summary, heading without 第N轮, and mobile layout', async ({ page }) => {
+ await authenticateResultTest(page);
+ const fixturePath = readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'), 'utf8');
+ let snapshot = (await (await page.request.get('/api/snapshot')).json()).state;
+ let targetProject = Object.values(snapshot.projects).find((p: any) => p.name === '开悟验收项目') as any;
+ if (!targetProject) {
+  const resp = await page.request.post('/api/commands', {
+   data: { type: 'add_project', operationId: 'history-ui-project', revision: snapshot.revision, name: '历史UI测试', path: fixturePath },
+   headers: { Origin: 'http://127.0.0.1:17331', 'X-Kaiwu-Client': 'web' },
+  });
+  expect(resp.ok()).toBe(true);
+  targetProject = { id: (await resp.json()).createdId, name: '历史UI测试' };
+ }
+ await page.goto('/projects/' + targetProject.id);
+ await chooseMenuProject(page, { id: targetProject.id });
+ await expect(page.locator('#chat-title')).toBeVisible();
+
+ await page.locator('[data-action=new-task]').click();
+ await page.locator('input[name=title]').fill('历史UI测试任务');
+ await page.locator('textarea[name=request]').fill('结构化登录恢复');
+ await page.getByRole('button', { name: '保存', exact: true }).click();
+
+ const card = page.locator('.task-card').filter({ has: page.getByRole('heading', { name: '历史UI测试任务', exact: true }) });
+ await card.getByRole('button', { name: '开始开发', exact: true }).click();
+ await expect(page.getByRole('button', { name: '确认完成', exact: true })).toBeVisible();
+
+ // 完成开发后，先确认
+ await page.getByRole('button', { name: '确认完成', exact: true }).click();
+ const completed = page.locator('.task-completed');
+ await expect(completed).toBeVisible();
+ // 验证大框与长提示删除，紧凑单行
+ await expect(completed).not.toContainText('你已确认本轮结果');
+ await expect(completed).not.toContainText('任务已完成，效果入口、聊天记录和工作区继续保留');
+ await expect(completed.getByRole('button', { name: '查看效果', exact: true })).toBeVisible();
+ await expect(completed.getByRole('button', { name: '继续修改', exact: true })).toBeVisible();
+
+ // 发送新的一轮，生成第2轮历史
+ await page.locator('#draft').fill('第二轮改进请求内容');
+ await page.locator('#send').click();
+ await expect(page.locator('.history-dropdown')).toBeVisible();
+
+ // 打开历史折叠
+ const historyDetails = page.locator('.history-dropdown');
+ await expect(historyDetails).not.toHaveAttribute('open', '');
+ await historyDetails.locator('summary').click();
+ await expect(historyDetails).toHaveAttribute('open', '');
+
+ // 历史下拉列表不含“第N轮”，含有时间与请求摘要
+ const historySelect = page.getByRole('combobox', { name: '查看历史记录' });
+ const textContent = await historySelect.textContent();
+ expect(textContent).not.toContain('第 1 轮');
+ expect(textContent).not.toContain('第 2 轮');
+
+ // 选择第一轮历史
+ const latestState = (await (await page.request.get('/api/snapshot')).json()).state;
+ const t = Object.values(latestState.tasks).find((task: any) => task.title === '历史UI测试任务') as any;
+ const firstRoundId = latestState.conversations[t.conversationId].rounds[0].id;
+ await historySelect.selectOption(firstRoundId);
+
+ // 明确标记历史记录且提供返回最新
+ await expect(page.locator('.progress-card')).toContainText('历史记录');
+ const backLatestBtn = page.getByRole('button', { name: '返回最新' });
+ await expect(backLatestBtn).toBeVisible();
+ // 查看历史记录时，绝不携带确认完成按钮
+ await expect(page.getByRole('button', { name: '确认完成', exact: true })).toHaveCount(0);
+
+ // 点击查看本轮结果打开 ResultPreview
+ const viewHistoryResultBtn = page.getByRole('button', { name: '查看本轮结果' });
+ await expect(viewHistoryResultBtn).toBeVisible();
+ await viewHistoryResultBtn.click();
+ const previewPane = page.getByRole('region', { name: '任务成果与效果' });
+ await expect(previewPane).toBeVisible();
+ // 标题不含第N轮，显示历史结果
+ await expect(previewPane.locator('.result-pane-heading')).not.toContainText('第 1 轮');
+ await expect(previewPane.locator('.result-pane-heading')).not.toContainText('第 2 轮');
+ await expect(previewPane.locator('.result-pane-heading')).toContainText('历史结果');
+
+ // 桌面返回看板
+ await previewPane.getByRole('button', { name: '← 返回看板' }).click();
+
+ // 点击返回最新
+ await backLatestBtn.click();
+ await expect(page.locator('.progress-card')).not.toContainText('历史记录');
+ await expect(page.getByRole('button', { name: '确认完成', exact: true })).toBeVisible();
+
+ // 移动端 390x844 与 360x800 布局无横向溢出
+ for (const [width, height] of [[390, 844], [360, 800]]) {
+  await page.setViewportSize({ width, height });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+ }
 });
 
 

@@ -65,7 +65,7 @@ Vue 卡片及聊天展示服务器检查结果，审核框只显示目标、SHA�
 
 用户已审核统一项目配置的开发交付[书面规格](superpowers/specs/2026-10-17-automated-delivery-design.md)，[实施计划](superpowers/plans/2026-10-17-automated-delivery.md)及串行实现方式已获审核。计划由纯 Go `delivery` 固定状态机协调原任务 pi、`gitops` 和只读 GitHub Actions REST 适配；任务分支检查通过后串行集成，主分支 CI 通过才标记技术交付。源码修复在原任务 worktree／会话进行，不把 Git／CI 生命周期交给浏览器或仅靠模型提示词。
 
-交付记录、有限修复预算、配置授权快照和持久逻辑队列独立于现有轮次人工确认／实际 Git 状态；副作用意图先落库，重启先核查精确 refs／SHA／run attempt。Tasks 1–12 的配置／持久化、只读 Actions、凭据桥、受控远程 Git、原任务修复、FIFO 集成、崩溃核查与服务装配已实现并通过隔离测试。官方资料阻塞已解除；2026-10-18 接续 Task 13，并用真实 Store／agent／delivery／webapi＋临时 bare＋假 pi／Actions 验证五条服务链路。界面和最终独立验收尚未完成，真实模型／GitHub 未联调；见[执行记录](development/web-automated-delivery-ledger.md)。现有本地手动合并的授权与恢复规则继续有效。
+交付记录、有限修复预算、配置授权快照和持久逻辑队列独立于现有轮次人工确认／实际 Git 状态；副作用意图先落库，重启先核查精确 refs／SHA／run attempt。Tasks 1–12 的配置／持久化、只读 Actions、凭据桥、受控远程 Git、原任务修复、FIFO 集成、崩溃核查与服务装配已实现并通过隔离测试。官方资料阻塞已解除；Task 13 界面及真实 Store／agent／delivery／webapi＋临时 bare＋假 pi／Actions 的隔离服务链路已经实现，交付设置界面已部署。Task 14 安全验收仍不通过，现用服务不装配真实交付 worker、启用保持禁用；真实模型／GitHub 未联调，计量残余及旧崩溃注入观察失败见[审查续接](development/web-automated-delivery-review-resolution.md)。历史实施见[执行记录](development/web-automated-delivery-ledger.md)。现有本地手动合并的授权与恢复规则继续有效。
 
 ## 任务成果与受控 HTTP 预览
 
@@ -79,7 +79,7 @@ Go `preview.Manager` 负责受控 manifest、展示指纹与启动输入绑定�
 
 **已确认：Go 直接管理 pi RPC 子进程；开悟自有后端全部使用 Go。** 此要求取代此前 TypeScript 可信扩展和 SDK 宿主的建议，不新增这些实现。pi 本身仍为第三方 CLI，不重写 Agent 或改变客户端语言。
 
-- `server/internal/pirpc/` 已实现进程、JSONL、请求关联、有界原始事件和故障退出，并通过隔离 Go 假进程自测；独立验收已通过，首轮问题已修正复验。HTTP/main 未接入此包，不先建设通用适配平台。
+- `server/internal/pirpc/` 已实现进程、JSONL、请求关联、有界原始事件和故障退出，并通过隔离 Go 假进程自测；独立验收已通过，首轮问题已修正复验；后续 Web HTTP/main 已通过 agent.Manager 接入独立RPC会话，非仍停留在基础包阶段，不先建设通用适配平台。
 - RPC 只提供通信与进程状态，不把请求响应或 `agent_settled` 映射为产品任务验收成功。
 - Go 拥有进程生命周期；stdout/stderr 持续消费，事件由服务内部接收，不由客户端连接直接拥有。
 - 当前先用纯 Go 假进程测试；真实 pi 启动配置、凭据和会话持久化另行验证，不继承个人扩展。

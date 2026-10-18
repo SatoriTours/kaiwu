@@ -51,6 +51,16 @@ import {
   createOperationID,
   isStartRequest,
 } from "./workbench.ts";
+import {
+  clearInteractionDraft,
+  clearInteractionDrafts,
+  type InteractionAnswers,
+  type InteractionOthers,
+} from "./interaction.ts";
+import {
+  dispatchInteractionCommand,
+  type InteractionCommandPayload,
+} from "./interaction-command.ts";
 const local = reactive(createLocalState());
 const authenticated = ref(false),
   loaded = ref(false),
@@ -180,6 +190,7 @@ function clearIdentity() {
   local.current = "";
   operations.clear();
   lengths.clear();
+  clearInteractionDrafts();
   for (const id of Object.keys(unread)) delete unread[id];
   projectID.value = "";
   taskID.value = "";
@@ -294,6 +305,7 @@ async function login() {
 }
 async function logout() {
   clearIdentity();
+  clearInteractionDrafts();
   const epoch = authEpoch;
   history.replaceState(null, "", "/");
   try {
@@ -390,6 +402,13 @@ async function reconcile(retryOriginal = false) {
         // delivery 相关的 operation 完成
       } else {
         const body = JSON.parse(operation.signature) as Record<string, string>;
+        if (["answer_interaction", "cancel_interaction", "retry_interaction_answer"].includes(body.type)) {
+          clearInteractionDraft(
+            body.conversationId ?? "",
+            body.requestId ?? "",
+            Number(body.requestVersion ?? 0),
+          );
+        }
         if (body.type === "send_message" || body.type === "start_task") {
           const d = local.drafts[body.conversationId!];
           if (d && operation.draftRevision !== undefined)
@@ -425,6 +444,123 @@ function openModels(c?: Conversation) {
     : { scope: 'default', profile: state.value?.profile };
   modelError.value = "";
 }
+async function handleAnswerInteraction(payload: {
+  conversationId: string;
+  requestId: string;
+  requestVersion: number;
+  answerMode: "form" | "text";
+  answers?: InteractionAnswers;
+  others?: InteractionOthers;
+  comment?: string;
+  text?: string;
+}) {
+  // Capture the owning conversation from the emitted request, never the
+  // possibly-later selected card.
+  const conv = state.value?.conversations[payload.conversationId];
+  if (!conv || !online.value) {
+    error.value = "交互所属会话已变化，请重新选择后重试";
+    return;
+  }
+  await dispatchInteractionCommand(
+    {
+      authEpoch,
+      getCurrentEpoch: () => authEpoch,
+      online: online.value,
+      createOperationId: createOperationID,
+      operations,
+      localPending: local.pending,
+      api,
+      refresh,
+      report,
+      setError: (msg: string) => { error.value = msg; },
+      getConversation: (id: string) => state.value?.conversations[id],
+    },
+    {
+      type: "answer_interaction",
+      projectId: conv.projectId,
+      conversationId: conv.id,
+      taskId: conv.taskId || "",
+      requestId: payload.requestId,
+      requestVersion: payload.requestVersion,
+      answerMode: payload.answerMode,
+      answers: payload.answers,
+      others: payload.others,
+      comment: payload.comment,
+      text: payload.text,
+    },
+  );
+}
+
+async function handleCancelInteraction(payload: {
+  conversationId: string;
+  requestId: string;
+  requestVersion: number;
+}) {
+  const conv = state.value?.conversations[payload.conversationId];
+  if (!conv || !online.value) {
+    error.value = "交互所属会话已变化，请重新选择后重试";
+    return;
+  }
+  await dispatchInteractionCommand(
+    {
+      authEpoch,
+      getCurrentEpoch: () => authEpoch,
+      online: online.value,
+      createOperationId: createOperationID,
+      operations,
+      localPending: local.pending,
+      api,
+      refresh,
+      report,
+      setError: (msg: string) => { error.value = msg; },
+      getConversation: (id: string) => state.value?.conversations[id],
+    },
+    {
+      type: "cancel_interaction",
+      projectId: conv.projectId,
+      conversationId: conv.id,
+      taskId: conv.taskId || "",
+      requestId: payload.requestId,
+      requestVersion: payload.requestVersion,
+    },
+  );
+}
+
+async function handleRetryInteraction(payload: {
+  conversationId: string;
+  requestId: string;
+  requestVersion: number;
+}) {
+  const conv = state.value?.conversations[payload.conversationId];
+  if (!conv || !online.value) {
+    error.value = "交互所属会话已变化，请重新选择后重试";
+    return;
+  }
+  await dispatchInteractionCommand(
+    {
+      authEpoch,
+      getCurrentEpoch: () => authEpoch,
+      online: online.value,
+      createOperationId: createOperationID,
+      operations,
+      localPending: local.pending,
+      api,
+      refresh,
+      report,
+      setError: (msg: string) => { error.value = msg; },
+      getConversation: (id: string) => state.value?.conversations[id],
+    },
+    {
+      type: "retry_interaction_answer",
+      projectId: conv.projectId,
+      conversationId: conv.id,
+      taskId: conv.taskId || "",
+      requestId: payload.requestId,
+      requestVersion: payload.requestVersion,
+    },
+  );
+}
+
 async function saveModel(values: Record<string, string>) {
   const target = modelTarget.value, epoch = authEpoch;
   if (!target || modelSaving.value) return;
@@ -1133,6 +1269,9 @@ onBeforeUnmount(() => {
           @resume-delivery="s => controlDelivery(s, 'resume')"
           @cancel-delivery="s => controlDelivery(s, 'cancel')"
           @extend-budget-delivery="s => controlDelivery(s, 'extend_budget')"
+          @answer-interaction="handleAnswerInteraction"
+          @cancel-interaction="handleCancelInteraction"
+          @retry-interaction="handleRetryInteraction"
         />
         <aside v-else class="chat">
           <p class="error">聊天目标无效。请显式选择项目或任务。</p>

@@ -115,6 +115,7 @@ function formatTime(iso?: string) {
     <div class="delivery-header">
       <div class="delivery-headline">
         <span class="delivery-tag" :class="view.phase">{{ view.label }}</span>
+        <span class="delivery-waiting-badge" v-if="view.waiting" :title="view.waitingReason">{{ view.waitingText || '交互等待中' }}</span>
         <span class="delivery-repairs" v-if="view.repairsText">{{ view.repairsText }}</span>
         <span class="delivery-turn-badge" v-if="view.holdsTurn">持有回合</span>
       </div>
@@ -168,6 +169,11 @@ function formatTime(iso?: string) {
     </div>
 
     <p class="delivery-desc">{{ view.description }}</p>
+
+    <div v-if="view.waiting" class="delivery-waiting-box" role="status">
+      <strong>{{ view.waitingText || '交付等待中' }}</strong>
+      <p>{{ view.waitingReason || '需要先完成相关交互答复或补充说明，交付流程才会自动继续。' }}</p>
+    </div>
 
     <div v-if="view.blocked" class="delivery-blocker-box" role="alert">
       <strong>交付阻塞 ({{ view.blockCode || 'BLOCKED' }}):</strong>

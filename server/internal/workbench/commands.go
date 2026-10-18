@@ -175,6 +175,12 @@ func apply(st *State, c Command) (Receipt, error) {
 		r.CreatedID = key
 	case "confirm_result":
 		return ConfirmResult(st, c)
+	case "answer_interaction":
+		return answerInteraction(st, c)
+	case "cancel_interaction":
+		return cancelInteraction(st, c)
+	case "retry_interaction_answer":
+		return retryInteractionAnswer(st, c)
 	case "start_task":
 		return startTask(st, c)
 	case "send_message", "resume":
@@ -182,8 +188,18 @@ func apply(st *State, c Command) (Receipt, error) {
 		if !ok || conversation.ProjectID != c.ProjectID || (c.TaskID != "" && c.TaskID != conversation.TaskID) {
 			return r, Missing()
 		}
-		if summary := st.Deliveries[conversation.TaskID]; DeliveryActive(summary.Phase) && summary.Phase != "paused" {
+		// A cycle that is waiting for the user's answer must accept that new
+		// instruction; an actively working cycle still refuses chat turns.
+		if summary := st.Deliveries[conversation.TaskID]; DeliveryActive(summary.Phase) && summary.Phase != "paused" && !strings.HasPrefix(summary.WaitingCode, "interaction_") {
 			return r, Conflict("自动交付正在管理该候选，请先暂停交付再发送新消息或接回会话")
+		}
+		if c.Type == "send_message" {
+			if hasRecordedAnswerAwaitingBatch(conversation) {
+				return r, Conflict("还有已记录的问题答复待一起发送，请先回答或取消剩余问题")
+			}
+			if hasUnsentInteractionAnswer(*st, conversation.ID) {
+				return r, Conflict("还有已记录的问题答复未送达，请先重试发送")
+			}
 		}
 		if conversation.RunState == "running" || conversation.RunState == "starting" {
 			return r, Conflict("会话正在运行，草稿已保留")

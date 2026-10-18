@@ -68,7 +68,7 @@ func (m *Manager) repairStage(d workbench.Delivery, ev githubactions.FailureEvid
 	}
 	now := m.now()
 	if !d.ActiveSince.IsZero() && d.ActiveLimitSeconds > 0 &&
-		now.After(d.ActiveSince.Add(time.Duration(d.ActiveLimitSeconds)*time.Second)) {
+		activeElapsed(d, now) > time.Duration(d.ActiveLimitSeconds)*time.Second {
 		return m.block(d, "repair_deadline", "激活周期已超出预算，请人工复核")
 	}
 	jobStage, fingerprint, summary := "task_ci", ev.Fingerprint, ev.Summary
@@ -147,23 +147,14 @@ func (m *Manager) stageRepairing(d workbench.Delivery) (workbench.Delivery, bool
 	return out, true
 }
 
-// roundStateFor reports the settle state of one exact round id.
+// roundStateFor reports the settle state of one round, following the answer
+// chain of a round that asked a blocking question.
 func (m *Manager) roundStateFor(st workbench.State, taskID, roundID string) (settled, found bool) {
-	t, ok := st.Tasks[taskID]
-	if !ok {
+	_, settled, code, _ := workbench.DeliveryDependency(st, taskID, roundID)
+	if code == "round_missing" {
 		return false, false
 	}
-	c, ok := st.Conversations[t.ConversationID]
-	if !ok {
-		return false, false
-	}
-	for _, r := range c.Rounds {
-		if r.ID != roundID {
-			continue
-		}
-		return r.Phase == "finished" || r.Phase == "confirmed", true
-	}
-	return false, false
+	return settled, true
 }
 
 // clipRunes bounds persisted evidence to the store's rune budget.

@@ -19,6 +19,8 @@ type instance struct {
 	responseSequence      int
 	lastError             bool
 	acknowledged, settled bool
+	runID                 string
+	generation            int
 	workspace             string
 	consumerDone          chan struct{}
 	lease                 *executionLease
@@ -156,6 +158,10 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 		client, e = pirpc.Start(m.ctx, spec, pirpc.Options{})
 		m.mu.Lock()
 		entry.client = client
+		// A fresh process invalidates every earlier native waiter in this
+		// conversation; the run token is what a late answer is checked against.
+		entry.runID = newRunToken()
+		entry.generation++
 		m.mu.Unlock()
 		if e != nil {
 			m.failed(c.ID, "pi 启动或协议握手失败，请检查配置后恢复", false)
@@ -274,6 +280,7 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 			}
 		}
 		st.Conversations[c.ID] = v
+		workbench.SyncConversationInteractionsFromMessages(st, c.ID)
 		return nil
 	})
 	if e == nil && entry.settled {
@@ -282,12 +289,14 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 	m.mu.Unlock()
 	if e != nil {
 		m.stopFailed(c.ID, entry, client, "无法保存轮次状态，请检查存储后恢复", true)
+		return
 	}
+	m.flushSettledInteractionAnswers(c.ID)
 }
 
 // Caller holds mu. A settled event alone cannot release an unacknowledged prompt.
 func (m *Manager) finishLocked(id string, entry *instance) error {
-	if !entry.acknowledged || !entry.settled {
+	if !entry.acknowledged || !entry.settled || !entry.busy {
 		return nil
 	}
 	if entry.lastError {
@@ -295,6 +304,11 @@ func (m *Manager) finishLocked(id string, entry *instance) error {
 		entry.busy = false
 		return nil
 	}
+	responseID := entry.responseID
+	if responseID == "" {
+		responseID = entry.lastResponseID
+	}
+	roundID := entry.messageID
 	e := m.store.Update(func(st *workbench.State) error {
 		c := st.Conversations[id]
 		if c.RunState == "running" {
@@ -305,11 +319,6 @@ func (m *Manager) finishLocked(id string, entry *instance) error {
 				}
 			}
 		}
-		st.Conversations[id] = c
-		responseID := entry.responseID
-		if responseID == "" {
-			responseID = entry.lastResponseID
-		}
 		for i := range c.Messages {
 			if c.Messages[i].ID == responseID {
 				c.Messages[i].Kind = "summary"
@@ -317,8 +326,26 @@ func (m *Manager) finishLocked(id string, entry *instance) error {
 			}
 		}
 		st.Conversations[id] = c
-		workbench.UpdateRound(st, id, entry.messageID, func(r *workbench.Round) { r.Phase = "finished"; r.FinishedAt = time.Now().UTC().Format(time.RFC3339) })
-		settleExecution(st, id, responseID, false)
+		// The interaction decision happens at this exact boundary: a valid
+		// block turns the round into a waiting state, never into a result.
+		waiting := settleRoundInteraction(st, id, roundID, responseID)
+		now := time.Now().UTC().Format(time.RFC3339)
+		workbench.UpdateRound(st, id, roundID, func(r *workbench.Round) {
+			if waiting {
+				r.Phase = "awaiting_user"
+			} else {
+				r.Phase = "finished"
+			}
+			r.FinishedAt = now
+		})
+		// A settled run has no live extension waiter left: a dialog that was
+		// never answered upstream must not keep blocking the task.
+		workbench.ExpireNativeInteractions(st, id, "本轮已结束，原生等待请求已失效；请让 AI 重新发起")
+		if waiting {
+			awaitUser(st, id)
+		} else {
+			settleExecution(st, id, responseID, false)
+		}
 		return nil
 	})
 	if e == nil {
@@ -333,6 +360,7 @@ func (m *Manager) stopFailed(id string, entry *instance, client *pirpc.Client, m
 		return
 	}
 	entry.dead = true
+	entry.runID = ""
 	m.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	_ = client.Close(ctx)
@@ -357,6 +385,7 @@ func (m *Manager) release(id string, entry *instance, dead bool) {
 		entry.lease = nil
 	}
 	if entry.client == nil {
+		entry.runID = ""
 		delete(m.instances, id)
 	}
 }
@@ -378,7 +407,6 @@ func (m *Manager) failed(id, message string, uncertain bool) {
 				}
 			}
 		}
-		st.Conversations[id] = c
 		phase := "failed"
 		if uncertain {
 			phase = "interrupted"
@@ -390,6 +418,10 @@ func (m *Manager) failed(id, message string, uncertain bool) {
 			}
 		}
 		st.Conversations[id] = c
+		// A failed run leaves no live pi extension waiter: pending native
+		// dialogs expire instead of accepting a late answer for a new process.
+		workbench.ExpireNativeInteractions(st, id, "原 pi 会话已结束或中断，原生请求失效；请让 AI 重新发起")
+		workbench.SyncConversationInteractionsFromMessages(st, id)
 		if !preserveResult {
 			setExecutionPhase(st, id, phase, message)
 		}
@@ -399,9 +431,25 @@ func (m *Manager) failed(id, message string, uncertain bool) {
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	m.closed = true
+	conversations := make([]string, 0, len(m.instances))
+	for id := range m.instances {
+		conversations = append(conversations, id)
+	}
 	m.cancel()
 	m.mu.Unlock()
 	m.wg.Wait()
+	defer func() {
+		// Native waiters do not survive this process: expire them so a later
+		// service instance never accepts a stale answer.
+		if len(conversations) > 0 {
+			_ = m.store.Update(func(st *workbench.State) error {
+				for _, id := range conversations {
+					workbench.ExpireNativeInteractions(st, id, "服务已关闭，原生请求失效")
+				}
+				return nil
+			})
+		}
+	}()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var all error

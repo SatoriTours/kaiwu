@@ -20,6 +20,9 @@ type startCommander struct {
 
 func (c *startCommander) Send(string, string) error { c.sends++; return c.err }
 func (c *startCommander) Resume(string) error       { return nil }
+func (c *startCommander) AnswerInteraction(string, string) error {
+	return nil
+}
 
 func TestStartAPIUsesOneDispatchAndReportsRefusals(t *testing.T) {
 	if !pirpc.ProcessGroupsSupported() {

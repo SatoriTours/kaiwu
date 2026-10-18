@@ -78,6 +78,9 @@ type Conversation struct {
 	Error       string    `json:"error,omitempty"`
 	Profile     Profile   `json:"profile"`
 	Messages    []Message `json:"messages"`
+	// Interactions are the authoritative user-interaction requests of this
+	// conversation. report.question stays readable history, never a live form.
+	Interactions []InteractionRequest `json:"interactions,omitempty"`
 	// PendingProfile is the requested model for the NEXT round; it never
 	// interrupts the running request and never rewrites the template.
 	PendingProfile *Profile `json:"pendingProfile,omitempty"`
@@ -98,37 +101,46 @@ type State struct {
 	Executions        map[string]Execution             `json:"executions"`
 }
 type Command struct {
-	RoundID            string  `json:"roundId,omitempty"`
-	Provider           string  `json:"provider,omitempty"`
-	Model              string  `json:"model,omitempty"`
-	Thinking           string  `json:"thinking,omitempty"`
-	StructureRevision  *uint64 `json:"structureRevision,omitempty"`
-	MainBranchOverride string  `json:"mainBranchOverride,omitempty"`
-	CommitName         string  `json:"commitName,omitempty"`
-	CommitEmail        string  `json:"commitEmail,omitempty"`
-	OperationID        string  `json:"operationId"`
-	Revision           uint64  `json:"revision"`
-	Type               string  `json:"type"`
-	ProjectID          string  `json:"projectId,omitempty"`
-	TopicID            string  `json:"topicId,omitempty"`
-	TaskID             string  `json:"taskId,omitempty"`
-	ConversationID     string  `json:"conversationId,omitempty"`
-	Name               string  `json:"name,omitempty"`
-	Path               string  `json:"path,omitempty"`
-	InitializeGit      string  `json:"initializeGit,omitempty"`
-	RemoteURL          string  `json:"remoteURL,omitempty"`
-	Title              string  `json:"title,omitempty"`
-	Request            string  `json:"request,omitempty"`
-	Text               string  `json:"text,omitempty"`
+	RoundID            string            `json:"roundId,omitempty"`
+	Provider           string            `json:"provider,omitempty"`
+	Model              string            `json:"model,omitempty"`
+	Thinking           string            `json:"thinking,omitempty"`
+	StructureRevision  *uint64           `json:"structureRevision,omitempty"`
+	MainBranchOverride string            `json:"mainBranchOverride,omitempty"`
+	CommitName         string            `json:"commitName,omitempty"`
+	CommitEmail        string            `json:"commitEmail,omitempty"`
+	Answers            map[string]any    `json:"answers,omitempty"`
+	Others             map[string]string `json:"others,omitempty"`
+	OperationID        string            `json:"operationId"`
+	Revision           uint64            `json:"revision"`
+	Type               string            `json:"type"`
+	ProjectID          string            `json:"projectId,omitempty"`
+	TopicID            string            `json:"topicId,omitempty"`
+	TaskID             string            `json:"taskId,omitempty"`
+	ConversationID     string            `json:"conversationId,omitempty"`
+	Name               string            `json:"name,omitempty"`
+	Path               string            `json:"path,omitempty"`
+	InitializeGit      string            `json:"initializeGit,omitempty"`
+	RemoteURL          string            `json:"remoteURL,omitempty"`
+	Title              string            `json:"title,omitempty"`
+	Request            string            `json:"request,omitempty"`
+	Text               string            `json:"text,omitempty"`
+	RequestID          string            `json:"requestId,omitempty"`
+	AnswerMode         string            `json:"answerMode,omitempty"`
+	Comment            string            `json:"comment,omitempty"`
+	RequestVersion     int               `json:"requestVersion,omitempty"`
 }
 type Receipt struct {
-	DeliveryID     string `json:"deliveryId,omitempty"`
-	Replay         bool   `json:"-"`
-	Revision       uint64 `json:"revision"`
-	CreatedID      string `json:"createdId,omitempty"`
-	ConversationID string `json:"conversationId,omitempty"`
-	Notice         string `json:"notice,omitempty"`
-	Type           string `json:"type"`
+	DeliveryID         string `json:"deliveryId,omitempty"`
+	Replay             bool   `json:"-"`
+	Revision           uint64 `json:"revision"`
+	CreatedID          string `json:"createdId,omitempty"`
+	ConversationID     string `json:"conversationId,omitempty"`
+	Notice             string `json:"notice,omitempty"`
+	Type               string `json:"type"`
+	InteractionID      string `json:"interactionId,omitempty"`
+	InteractionVersion int    `json:"interactionVersion,omitempty"`
+	Delivery           string `json:"delivery,omitempty"`
 }
 type Error struct {
 	Code    string

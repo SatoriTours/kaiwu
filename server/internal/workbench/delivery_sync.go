@@ -18,7 +18,7 @@ func deliveryExcerpt(text string, limit int) (string, bool) {
 	return text, true
 }
 func (s *Store) deliverySummary(d Delivery, changed *DeliveryStep, ci []DeliveryCI) (DeliverySummary, error) {
-	summary := DeliverySummary{ID: d.ID, ProjectID: d.ProjectID, TaskID: d.TaskID, Phase: d.Phase, Version: d.Version, Cycle: d.Cycle, CandidateSHA: d.CandidateSHA, LocalMainSHA: d.LocalMainSHA, RemoteMainSHA: d.RemoteMainSHA, RequireAcceptance: d.Policy.RequireAcceptance, AcceptanceToken: d.AcceptanceToken, AcceptedSHA: d.AcceptedSHA, RepairsUsed: d.RepairsUsed, RepairsLimit: d.RepairsLimit, BlockCode: d.BlockCode, BlockReason: d.BlockReason, HoldsTurn: d.HoldsTurn, Steps: []DeliveryStep{}, CI: []DeliveryCI{}}
+	summary := DeliverySummary{ID: d.ID, ProjectID: d.ProjectID, TaskID: d.TaskID, Phase: d.Phase, Version: d.Version, Cycle: d.Cycle, CandidateSHA: d.CandidateSHA, LocalMainSHA: d.LocalMainSHA, RemoteMainSHA: d.RemoteMainSHA, RequireAcceptance: d.Policy.RequireAcceptance, AcceptanceToken: d.AcceptanceToken, AcceptedSHA: d.AcceptedSHA, RepairsUsed: d.RepairsUsed, RepairsLimit: d.RepairsLimit, BlockCode: d.BlockCode, BlockReason: d.BlockReason, WaitingCode: d.WaitingCode, WaitingReason: d.WaitingReason, HoldsTurn: d.HoldsTurn, Steps: []DeliveryStep{}, CI: []DeliveryCI{}}
 	rows, err := s.db.Query("SELECT body FROM delivery_steps WHERE delivery_id=? ORDER BY sequence DESC LIMIT 20", d.ID)
 	if err != nil {
 		return summary, err

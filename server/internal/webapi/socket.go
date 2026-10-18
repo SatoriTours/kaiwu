@@ -204,7 +204,7 @@ func (h *handler) socket(w http.ResponseWriter, r *http.Request) {
 			deltas = nil
 		}
 		if reset != nil {
-			if e := writeSnapshot(map[string]any{"type": "snapshot", "streamId": h.streamID, "state": reset, "capabilities": map[string]bool{"agent": h.cfg.AgentAvailable, "git": h.cfg.Git != nil}}, write); e != nil {
+			if e := writeSnapshot(map[string]any{"type": "snapshot", "streamId": h.streamID, "state": reset, "capabilities": map[string]bool{"agent": h.cfg.AgentAvailable, "git": h.cfg.Git != nil, "interactions": true}}, write); e != nil {
 				return e
 			}
 			cursor = reset.Revision

@@ -23,6 +23,30 @@ type Store struct {
 	closed      bool
 	syncEvents  []SyncEvent
 	syncBytes   int
+	// userTurnHook is notified after a command that starts a user run commits.
+	// It is called after the store lock is released and must not call back.
+	userTurnHook func(taskID, conversationID string)
+}
+
+// SetUserTurnHook installs the delivery manager's user-turn observer. It runs
+// after the command lock is released, so the hook may use its own locks/clock.
+func (s *Store) SetUserTurnHook(hook func(taskID, conversationID string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.userTurnHook = hook
+}
+
+// NotifyUserTurn marks the exact moment a user action resumed AI work. The
+// command path calls it after commit; the agent manager calls it after a raw
+// native extension response was actually written (native answers never create
+// a product round, so they have no command-side user-turn boundary).
+func (s *Store) NotifyUserTurn(taskID, conversationID string) {
+	s.mu.Lock()
+	hook := s.userTurnHook
+	s.mu.Unlock()
+	if hook != nil && taskID != "" {
+		hook(taskID, conversationID)
+	}
 }
 
 func id() string {
@@ -144,6 +168,9 @@ func Open(path string, profile Profile) (*Store, error) {
 				c.Error = strings.ReplaceAll(c.Error, "请明确恢复", "发送时自动接回")
 			}
 			st.Conversations[key] = c
+			// Interaction state is normalized after message delivery so an
+			// answer never claims to be sent while its message says otherwise.
+			NormalizeInteractionsOnRestart(st, key)
 		}
 		return nil
 	}); err != nil {
@@ -229,6 +256,15 @@ func (s *Store) Command(c Command) (Receipt, error) {
 // A persistence failure may leave prepared resources; they are never deleted.
 func (s *Store) PreparedCommand(c Command, prepare func() error) (Receipt, error) {
 	s.mu.Lock()
+	hook := s.userTurnHook
+	var turnTask, turnConv string
+	// Registered before the unlock defer (LIFO) so the hook runs after the
+	// store lock is released.
+	defer func() {
+		if turnTask != "" && hook != nil {
+			hook(turnTask, turnConv)
+		}
+	}()
 	defer s.mu.Unlock()
 	if s.closed {
 		return Receipt{}, errors.New("store closed")
@@ -267,7 +303,7 @@ func (s *Store) PreparedCommand(c Command, prepare func() error) (Receipt, error
 	if c.StructureRevision != nil {
 		stale = *c.StructureRevision != s.state.StructureRevision
 	}
-	if stale && c.Type != "send_message" && c.Type != "resume" && c.Type != "start_task" {
+	if stale && c.Type != "send_message" && c.Type != "resume" && c.Type != "start_task" && !IsInteractionCommand(c.Type) {
 		return Receipt{}, Conflict("内容已变化，请刷新后重试")
 	}
 	var count int
@@ -280,9 +316,18 @@ func (s *Store) PreparedCommand(c Command, prepare func() error) (Receipt, error
 	next := clone(s.state)
 	r, err := apply(&next, c)
 	if err != nil {
+		// A lazy interaction timeout is the one refused command whose state
+		// transition still has to become durable, so the UI never keeps
+		// offering an answer that upstream already abandoned.
+		if errors.Is(err, errInteractionExpired) {
+			if persistErr := s.persist(next, "", "", Receipt{}); persistErr != nil {
+				return Receipt{}, persistErr
+			}
+			return Receipt{}, Conflict("请求已超时，请等待 AI 重新询问")
+		}
 		return Receipt{}, err
 	}
-	if (c.Type == "send_message" || c.Type == "start_task") && r.CreatedID != "" {
+	if (c.Type == "send_message" || c.Type == "start_task" || c.Type == "answer_interaction") && r.CreatedID != "" {
 		BeginRound(&next, r.ConversationID, r.CreatedID)
 	}
 	if prepare != nil {
@@ -305,8 +350,22 @@ func (s *Store) PreparedCommand(c Command, prepare func() error) (Receipt, error
 	if err = s.persistWith(next, c.OperationID, fingerprint, r, deliveryWrite); err != nil {
 		return Receipt{}, err
 	}
+	if turnCreatesRun(c.Type) && r.CreatedID != "" {
+		if conv, ok := next.Conversations[r.ConversationID]; ok && conv.TaskID != "" {
+			turnTask, turnConv = conv.TaskID, conv.ID
+		}
+	}
 	return r, nil
 }
+
+func turnCreatesRun(typ string) bool {
+	switch typ {
+	case "send_message", "start_task", "answer_interaction", "retry_interaction_answer":
+		return true
+	}
+	return false
+}
+
 func (s *Store) Operation(key string) (Receipt, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -179,6 +179,11 @@ func (c *Client) writeLoop() {
 		req.phase = written
 		c.releasePacketLocked(req)
 		stoppingNow := c.state >= stopping
+		// Raw extension UI answers have no command response: the completed
+		// write is the only transport acknowledgement available.
+		if err == nil && req.typ == "extension_ui_response" {
+			c.completeLocked(req, Response{}, nil)
+		}
 		c.mu.Unlock()
 		if !watchdog.Stop() {
 			<-callbackDone

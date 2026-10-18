@@ -33,6 +33,9 @@ func (s *Store) AcceptDelivery(operationID, deliveryID, token string, expectedVe
 	if err != nil {
 		return Receipt{}, err
 	}
+	if _, pending := s.taskInteractionGateLocked(d.TaskID); pending {
+		return Receipt{}, Conflict("还有待你处理的交互问题，回答或取消后才能验收交付")
+	}
 	// The fingerprint covers the target token and version so a stale caller
 	// cannot replay an acceptance computed for an older cycle state.
 	fp := deliveryFingerprint(struct {
@@ -104,6 +107,11 @@ func (s *Store) ControlDelivery(operationID, deliveryID, action, token string, e
 	d, err := s.deliveryLocked(deliveryID)
 	if err != nil {
 		return Receipt{}, err
+	}
+	if action == "resume" {
+		if _, pending := s.taskInteractionGateLocked(d.TaskID); pending {
+			return Receipt{}, Conflict("还有待你处理的交互问题，回答或取消后才能恢复交付")
+		}
 	}
 	fp := deliveryFingerprint(struct {
 		Kind     string

@@ -24,13 +24,20 @@ type Report struct {
 	Question string        `json:"question"`
 }
 type Round struct {
-	ID          string       `json:"id"`
-	Phase       string       `json:"phase"`
-	StartedAt   string       `json:"startedAt"`
-	FinishedAt  string       `json:"finishedAt,omitempty"`
-	Report      *Report      `json:"report,omitempty"`
-	ReportError string       `json:"reportError,omitempty"`
-	Tools       []ToolRecord `json:"tools"`
+	ID          string  `json:"id"`
+	Phase       string  `json:"phase"`
+	StartedAt   string  `json:"startedAt"`
+	FinishedAt  string  `json:"finishedAt,omitempty"`
+	Report      *Report `json:"report,omitempty"`
+	ReportError string  `json:"reportError,omitempty"`
+	// InteractionError records a malformed structured interaction block of the
+	// round: automation fails closed instead of guessing options.
+	InteractionError string `json:"interactionError,omitempty"`
+	// InteractionNotice records a visible native capability limit (unknown
+	// method or over-limit decision content that was cancelled upstream). It is
+	// informational and does not by itself block delivery.
+	InteractionNotice string       `json:"interactionNotice,omitempty"`
+	Tools             []ToolRecord `json:"tools"`
 	// Profile is the profile this round actually runs with, recorded at round
 	// start: the pending next-round request counts, a later switch does not.
 	Profile    Profile `json:"profile"`
@@ -40,6 +47,12 @@ type Round struct {
 
 const ReportInstructions = `
 开悟展示约定：对用户只给简短结论、必要问题和阻塞说明，过程归入记录，不重复长篇操作过程。在方案改变、阶段推进或本轮结束时，在回复末尾附一个完整的 <kaiwu-report>JSON</kaiwu-report> 块。JSON 仅含 summary（600字以内）、stage（planning/developing/verifying/blocked/awaiting_review）、plan（步骤字符串数组）、results（已实现成果字符串数组）、checks（{title,claim,toolId}数组，claim仅passed/failed/not_run/unknown，toolId引用本轮实际工具调用ID，没有则留空）、blockers（字符串数组）、next（字符串数组）、question（需要用户决定的问题，无则空字符串）。没有依据时写未执行或unknown，不能编造验证；执行结束不等于用户确认或Git合并。普通沟通没有结构化进展可只给简短正常回复，不要为填写报告执行额外命令。`
+
+// InteractionInstructions is the model-facing contract for structured user
+// questions. Only this block produces an answerable form; ordinary prose never
+// does, and the block is never a permission to skip approval or run tools.
+const InteractionInstructions = `
+当确实需要用户输入、选择或确认才能继续时（不是普通建议，也不是系统授权），可在回复末尾附且最多附一个完整的 <kaiwu-interaction>JSON</kaiwu-interaction> 块；能合并的字段请合并为一份表单。JSON 仅含 title（160字以内）、description（可选，4000字以内）、allowCancel（布尔值，可选）、fields（1–12 个）。每个字段仅含 id（小写字母开头，可含数字和下划线，1–64 字符）、type、label（160字以内）、description（可选）、required（可选）、placeholder（可选）、allowOther（仅选择题可选）、minLength/maxLength（仅文本）、minSelections/maxSelections（仅多选）、min/max/integer/unit（仅数字）、yesLabel/noLabel（仅 confirm）、options（仅选择题，1–20 个，每项仅含 id/label/description/recommended）。type 只能是 confirm、text、textarea、single_select、multi_select、number。选择题必须给出明确选项，选项 id 稳定唯一；不要编造上游无法接受的选项。不要把 API Key、密码、私钥或任何凭据写进字段或要求用户在此填写。该块会作为待处理问题展示，用户答复后会以新的用户消息回到本会话；在此之前不要假定用户已同意，也不要执行依赖该答复的操作。不要用普通正文代替该块来索要结构化选择。`
 
 // Accept only complete validated blocks. Preserve original text on malformed input.
 func ParseReport(text string) (*Report, string) {
@@ -142,6 +155,12 @@ func ConfirmResult(st *State, c Command) (Receipt, error) {
 		return Receipt{}, Missing()
 	}
 	conv := st.Conversations[t.ConversationID]
+	// Explicit safety gate for the interaction contract: even if a legacy or
+	// partially migrated record still looks confirmable, a pending blocking
+	// question must never let a human confirm a result that is still waiting.
+	if _, pending := PendingBlockingInteraction(*st, conv.ID); pending {
+		return Receipt{}, Conflict("还有待你处理的交互问题，回答或取消后才能确认成果")
+	}
 
 	x, exists := st.Executions[t.ExecutionID]
 	if !exists || (conv.RunState != "idle" && conv.RunState != "interrupted" && conv.RunState != "failed") || t.Status != "needs_confirmation" || TaskMerging(*st, t.ID) {

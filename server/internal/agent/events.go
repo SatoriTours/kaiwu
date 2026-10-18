@@ -30,6 +30,12 @@ func (m *Manager) consume(id string, entry *instance, client *pirpc.Client) {
 		if dead {
 			return
 		}
+		// Extension UI requests carry their own "message" string field, so they
+		// must be routed before the message-shape probe below.
+		if event.Type == extensionUIRequestEvent {
+			m.handleExtensionUI(id, entry, client, event.Raw)
+			continue
+		}
 		var v struct {
 			AssistantMessageEvent struct{ Type, Delta string }      `json:"assistantMessageEvent"`
 			Message               struct{ Role, StopReason string } `json:"message"`
@@ -82,10 +88,19 @@ func (m *Manager) consume(id string, entry *instance, client *pirpc.Client) {
 				}
 				c.Messages[index].Text += v.AssistantMessageEvent.Delta
 				c.Messages[index].DisplayText = nil
-				if report, visible := workbench.ParseReport(c.Messages[index].Text); report != nil {
-					c.Messages[index].DisplayText = &visible
+				visible := c.Messages[index].Text
+				if report, stripped := workbench.ParseReport(visible); report != nil {
+					visible = stripped
 					workbench.UpdateRound(st, id, roundID, func(r *workbench.Round) { r.Report = report; r.ReportError = "" })
 					c.Rounds = st.Conversations[id].Rounds
+				}
+				// Hide a complete structured block while streaming too; the
+				// request is only published at the settled boundary.
+				if block, stripped := workbench.ParseInteractionBlock(visible); block != nil {
+					visible = stripped
+				}
+				if visible != c.Messages[index].Text {
+					c.Messages[index].DisplayText = &visible
 				}
 				st.Conversations[id] = c
 				return nil
@@ -121,6 +136,15 @@ func (m *Manager) consume(id string, entry *instance, client *pirpc.Client) {
 									}
 								}
 							}
+							// A malformed interaction block shows the original
+							// text until the boundary marks the round fail-closed.
+							if strings.Contains(c.Messages[i].Text, interactionTag) {
+								if block, stripped := workbench.ParseInteractionBlock(c.Messages[i].Text); block != nil {
+									c.Messages[i].DisplayText = &stripped
+								} else {
+									c.Messages[i].DisplayText = nil
+								}
+							}
 						}
 					}
 					st.Conversations[id] = c
@@ -146,6 +170,7 @@ func (m *Manager) consume(id string, entry *instance, client *pirpc.Client) {
 				m.stopFailed(id, entry, client, "无法保存轮次结束状态，请检查存储后恢复", true)
 				return
 			}
+			m.flushSettledInteractionAnswers(id)
 		}
 	}
 }

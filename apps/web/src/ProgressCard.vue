@@ -6,6 +6,7 @@ import GitStatusView from './GitStatus.vue';
 import {taskState} from './task-state.ts';
 import {gitStatusLabel} from './git.ts';
 import {isDeliveryActive} from './delivery.ts';
+import {getRoundOptions} from './result-history.ts';
 const props=defineProps<{conversation:Conversation;task?:Task;tasks:Task[];execution?:Execution;git?:GitStatus;delivery?:DeliverySummary;online:boolean;pending:boolean;agentAvailable:boolean}>();
 const emit=defineEmits<{confirm:[string];revise:[];merge:[];resume:[];reply:[string];preview:[string]}>();
 const media=window.matchMedia('(max-width:600px)');
@@ -31,8 +32,12 @@ const viewedSummary=computed(()=>props.task?taskState(props.task,props.conversat
 const currentSummary=computed(()=>report.value?.summary??viewedSummary.value?.summary??'');
 const stats=computed(()=>[{label:'正在推进',n:props.tasks.filter(t=>t.status==='running').length},{label:'等待确认',n:props.tasks.filter(t=>t.status==='needs_confirmation').length},{label:'需要处理',n:props.tasks.filter(t=>['failed','interrupted'].includes(t.status)).length}]);
 const deliveryActive=computed(()=>props.delivery?isDeliveryActive(props.delivery.phase):false);
-const confirmable=computed(()=>!oldRound.value&&!!presentation.value?.confirmRoundId&&!deliveryActive.value);
+const confirmable=computed(()=>!oldRound.value&&presentation.value?.status!=='waiting_user'&&!!presentation.value?.confirmRoundId&&!deliveryActive.value);
+const hasActiveInteraction=computed(()=>props.conversation.interactions?.some(ix=>ix.status==='pending'));
+const showQuestion=computed(()=>oldRound.value?!!report.value?.question:(!hasActiveInteraction.value&&!!report.value?.question));
 const dirtyFiles=computed(()=>props.git?.dirtyFiles??[]);
+const roundOptions=computed(()=>getRoundOptions(rounds.value,props.conversation));
+function resetToLatest(){selected.value=''}
 function time(value?:string){return value?new Date(value).toLocaleString([], {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):''}
 function chooseTab(event:KeyboardEvent){const tabs=['plan','results','checks','records'];if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();tab.value=event.key==='Home'?'plan':event.key==='End'?'records':tabs[(tabs.indexOf(tab.value)+(event.key==='ArrowRight'?1:3))%4]!;(event.currentTarget as HTMLElement).querySelector<HTMLButtonElement>(`[data-tab="${tab.value}"]`)?.focus()}
 </script>
@@ -46,15 +51,41 @@ function chooseTab(event:KeyboardEvent){const tabs=['plan','results','checks','r
   <div class="row result-main-actions"><button class="primary" @click="emit('preview',presentation!.resultRoundId!)">查看效果</button><button :disabled="pending" @click="emit('revise')">继续修改</button></div>
   <div class="result-accept"><small>确认后将任务标记为完成，代码集成另行审核。</small><button :disabled="!online||pending" @click="emit('confirm',presentation!.confirmRoundId!)">确认完成</button></div>
  </section>
- <section v-else-if="!oldRound&&presentation?.status==='completed'&&presentation.resultConfirmed" class="task-completed result-review" role="status">
-  <strong>你已确认本轮结果</strong><p>任务已完成，效果入口、聊天记录和工作区继续保留。</p>
-  <div class="row result-main-actions"><button class="primary" @click="emit('preview',presentation.resultRoundId!)">查看效果</button><button :disabled="pending" @click="emit('revise')">继续修改</button></div>
-  <div v-if="!deliveryActive" class="result-integration"><span>{{gitStatusLabel(git)}}<template v-if="git?.mainBranch"> · {{git.mainBranch}}</template></span><button :disabled="!online||pending||!git?.canMerge" @click="emit('merge')">合并到主分支</button><small>{{git?.reason||'需要纳入项目时，先审核具体改动再合并。'}}</small></div>
+ <section v-else-if="!oldRound&&presentation?.status==='completed'&&presentation.resultConfirmed" class="task-completed result-review-compact" role="status">
+  <div class="completed-compact-bar">
+   <div class="completed-compact-status">
+    <span class="completed-badge">已完成</span>
+    <span v-if="git?.state==='merged'" class="merged-tag">已合并 · {{git?.mainBranch||'主分支'}}</span>
+    <span v-else-if="!deliveryActive" class="unmerged-label">{{gitStatusLabel(git)}}<template v-if="git?.mainBranch"> · {{git.mainBranch}}</template></span>
+   </div>
+   <div class="completed-compact-actions">
+    <button class="compact-btn" @click="emit('preview',presentation.resultRoundId!)">查看效果</button>
+    <button class="compact-btn" :disabled="pending" @click="emit('revise')">继续修改</button>
+    <button v-if="!deliveryActive&&git?.state!=='merged'&&git?.canMerge" class="compact-btn merge-btn" :disabled="!online||pending" @click="emit('merge')">合并到主分支</button>
+   </div>
+  </div>
  </section>
  <div v-if="task&&!oldRound&&presentation?.status==='interrupted'&&!presentation.needsResume" class="progress-attention continuation-hint" role="status">上次执行尚未完成，直接发送消息或点继续开发即可接着处理。</div>
  <section class="progress-card" aria-label="结构化进展">
   <div class="progress-top">
-   <div class="row between"><span class="progress-caption">{{task?'任务概况':'项目概览'}}</span><div class="row"><select v-if="rounds.length>1" aria-label="查看历史轮次" :value="round?.id" @change="selected=($event.target as HTMLSelectElement).value"><option v-for="(r,i) in rounds" :key="r.id" :value="r.id">第 {{i+1}} 轮 · {{time(r.startedAt)}}</option></select><span class="progress-state">{{label}}</span></div></div>
+   <div class="row between">
+    <span class="progress-caption">{{task?'任务概况':'项目概览'}}</span>
+    <div class="row history-controls">
+     <details v-if="roundOptions.length>1" class="history-dropdown">
+      <summary class="history-toggle" aria-label="往期记录">往期记录 ▾</summary>
+      <div class="history-select-pop">
+       <select aria-label="查看历史记录" :value="round?.id" @change="selected=($event.target as HTMLSelectElement).value">
+        <option v-for="opt in roundOptions" :key="opt.id" :value="opt.id">{{opt.label}}</option>
+       </select>
+      </div>
+     </details>
+     <span class="progress-state">{{label}}</span>
+    </div>
+   </div>
+   <div v-if="oldRound" class="history-banner">
+    <span>正在查看历史记录</span>
+    <button class="return-latest-btn" @click="resetToLatest">返回最新</button>
+   </div>
    <button v-if="oldRound&&viewedSummary?.resultRoundId" class="result-history-button" @click="emit('preview',viewedSummary.resultRoundId)">查看本轮结果</button>
    <div v-if="!task" class="project-metrics"><div v-for="s in stats" :key="s.label"><b>{{s.n}}</b><span>{{s.label}}</span></div></div>
    <details v-if="task" class="task-requirement"><summary>任务要求：{{task.request}}</summary><p>{{task.request}}</p></details>
@@ -77,5 +108,5 @@ function chooseTab(event:KeyboardEvent){const tabs=['plan','results','checks','r
   </template>
   <div v-if="task&&!collapsed" class="report-foot"><details><summary>{{gitStatusLabel(git)}}<span v-if="git?.mainBranch"> · {{git.mainBranch}}</span></summary><GitStatusView :status="git" detail/></details><button :disabled="!git?.canMerge||oldRound" @click="emit('merge')">合并预检 ↗</button></div>
  </section>
- <div v-if="report?.blockers?.length||report?.question" class="progress-attention" role="status"><strong>{{report.question?'需要你决定':'当前阻塞'}}</strong><p v-if="report.question">{{report.question}}</p><p v-for="(item,i) in report.blockers" :key="i">{{item}}</p></div>
+ <div v-if="report?.blockers?.length||showQuestion" class="progress-attention" role="status"><strong>{{showQuestion?'需要你决定':'当前阻塞'}}</strong><p v-if="showQuestion">{{report?.question}}</p><p v-for="(item,i) in report?.blockers??[]" :key="i">{{item}}</p></div>
 </template>

@@ -33,6 +33,15 @@ func startTask(st *State, c Command) (Receipt, error) {
 		return Receipt{}, Missing()
 	}
 	conv := st.Conversations[t.ConversationID]
+	if _, pending := PendingBlockingInteraction(*st, conv.ID); pending {
+		return Receipt{}, Conflict("还有待你处理的交互问题，回答或取消后才能继续开发")
+	}
+	if hasRecordedAnswerAwaitingBatch(conv) {
+		return Receipt{}, Conflict("还有已记录的问题答复待一起发送，请先回答或取消剩余问题")
+	}
+	if hasUnsentInteractionAnswer(*st, conv.ID) {
+		return Receipt{}, Conflict("还有已记录的问题答复未送达，请先重试发送")
+	}
 	if conv.RunState == "starting" || conv.RunState == "running" {
 		return Receipt{}, Conflict("任务会话正在运行，请等待当前轮次结束")
 	}

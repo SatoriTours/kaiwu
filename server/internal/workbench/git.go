@@ -133,6 +133,9 @@ func (s *Store) BeginMerge(req MergeRequest, p MergePreview) (MergeOperation, bo
 		return MergeOperation{}, false, Missing()
 	}
 	conv := s.state.Conversations[task.ConversationID]
+	if _, pending := PendingBlockingInteraction(s.state, conv.ID); pending {
+		return MergeOperation{}, false, Conflict("还有待你处理的交互问题，回答或取消后才能合并")
+	}
 	if conv.RunState == "running" || conv.RunState == "starting" || TaskMerging(s.state, task.ID) {
 		return MergeOperation{}, false, Conflict("任务执行或合并中，请稍后重试")
 	}

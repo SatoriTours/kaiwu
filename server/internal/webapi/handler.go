@@ -29,6 +29,9 @@ import (
 type Commander interface {
 	Send(string, string) error
 	Resume(string) error
+	// AnswerInteraction delivers one stored native answer to the original pi
+	// extension wait. Ordinary answers use Send with the durable message id.
+	AnswerInteraction(conversationID, interactionID string) error
 }
 type Config struct {
 	Previews *preview.Manager
@@ -200,7 +203,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/api/session" && r.Method == "GET":
 		respond(w, 200, map[string]bool{"ok": true})
 	case r.URL.Path == "/api/snapshot" && r.Method == "GET":
-		respond(w, 200, map[string]any{"state": h.store.Snapshot(), "capabilities": map[string]bool{"git": h.cfg.Git != nil, "merge": h.cfg.Git != nil && pirpc.ProcessGroupsSupported(), "agent": h.cfg.AgentAvailable, "execution": h.cfg.AgentAvailable && pirpc.ProcessGroupsSupported()}})
+		respond(w, 200, map[string]any{"state": h.store.Snapshot(), "capabilities": map[string]bool{"git": h.cfg.Git != nil, "merge": h.cfg.Git != nil && pirpc.ProcessGroupsSupported(), "agent": h.cfg.AgentAvailable, "execution": h.cfg.AgentAvailable && pirpc.ProcessGroupsSupported(), "interactions": true}})
 	case r.URL.Path == "/api/logout" && r.Method == "POST":
 		c, _ := r.Cookie("kaiwu_session")
 		if err := h.store.RevokeLogin(credentialHash(c.Value)); err != nil {
@@ -268,6 +271,9 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request) {
 func (h *handler) command(w http.ResponseWriter, r *http.Request) {
 	var c workbench.Command
 	if !decode(w, r, &c) {
+		return
+	}
+	if !interactionAnswerGuard(w, c) {
 		return
 	}
 	if c.Type == "update_project_git" {
@@ -431,6 +437,15 @@ func (h *handler) command(w http.ResponseWriter, r *http.Request) {
 				return nil
 			})
 		}
+	}
+	if workbench.IsInteractionCommand(c.Type) {
+		if !receipt.Replay {
+			if notice := h.dispatchInteraction(receipt); notice != "" {
+				receipt.Notice = notice
+			}
+		}
+		respond(w, 200, h.interactionEnvelope(receipt))
+		return
 	}
 	respond(w, 200, receipt)
 }

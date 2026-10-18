@@ -7,6 +7,10 @@ export interface DeliveryView {
   description: string;
   blocked: boolean;
   paused: boolean;
+  waiting: boolean;
+  waitingCode?: string;
+  waitingReason?: string;
+  waitingText?: string;
   canAccept: boolean;
   canPause: boolean;
   canResume: boolean;
@@ -352,6 +356,7 @@ export function deliveryView(summary?: DeliverySummary): DeliveryView {
       description: "当前任务尚未配置或启动自动交付。",
       blocked: false,
       paused: false,
+      waiting: false,
       canAccept: false,
       canPause: false,
       canResume: false,
@@ -371,6 +376,22 @@ export function deliveryView(summary?: DeliverySummary): DeliveryView {
   const active = isDeliveryActive(phase);
   const blocked = phase === "blocked";
   const paused = phase === "paused";
+  const waiting = !!summary.waitingCode;
+  const waitingCode = summary.waitingCode;
+  const waitingReason = summary.waitingReason;
+  let waitingText: string | undefined;
+  if (waitingCode === "interaction_pending") {
+    waitingText = "等待处理阻塞问题";
+  } else if (waitingCode === "interaction_answering") {
+    waitingText = "答复已提交，等待轮次推进";
+  } else if (waitingCode === "interaction_unanswered") {
+    waitingText = "问题已取消或失效，等待补充说明";
+  } else if (waitingCode === "interaction_cycle") {
+    waitingText = "依赖轮次异常，等待中";
+  } else if (waitingCode) {
+    waitingText = waitingReason || "交互等待中";
+  }
+
   const canAccept = canAcceptDelivery(summary);
   const canPause = canPauseDelivery(phase);
   const canResume = paused;
@@ -389,7 +410,9 @@ export function deliveryView(summary?: DeliverySummary): DeliveryView {
   const label = PHASE_LABELS[phase] ?? phase;
 
   let description = "";
-  if (phase === "awaiting_acceptance") {
+  if (waiting && waitingText) {
+    description = `交付流程等待中：${waitingText}${waitingReason && waitingReason !== waitingText ? `（${waitingReason}）` : ""}`;
+  } else if (phase === "awaiting_acceptance") {
     description = "本地检查与任务 CI 已通过，请验收实际效果并确认交付。";
   } else if (blocked) {
     description = summary.blockReason || "交付因门禁或限制受阻，需人工干预。";
@@ -419,6 +442,10 @@ export function deliveryView(summary?: DeliverySummary): DeliveryView {
     description,
     blocked,
     paused,
+    waiting,
+    waitingCode,
+    waitingReason,
+    waitingText,
     canAccept,
     canPause,
     canResume,
