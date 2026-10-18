@@ -3,7 +3,7 @@
 ## 授权与交付状态
 
 - 用户已批准[总体设计](../superpowers/specs/2026-10-18-agent-user-interaction-design.md)，回复“ok”后原会话推进[实施计划](../superpowers/plans/2026-10-18-agent-user-interaction.md)。不重复请求计划／角色／执行方式批准。
-- 当前 **交互＋成果历史限定切片验收及7331实际入口烟测通过，独立候选部署已收口**；本批本地提交、未推送。真实模型／真实pi扩展未联调，自动交付安全整体不通过，Go全量保留旧崩溃注入窗口失败，不称全套通过。原切片独立结论见[验收报告](web-agent-interaction-acceptance.md)，最新部署／范围以文末22:12起收口记录为准。
+- 当前 **交互＋成果历史限定切片验收及7331实际入口烟测通过，独立候选部署已收口**；功能提交 `1c9fcc7` 已按用户后续授权推送 GitHub `main`。真实模型／真实pi扩展未联调，自动交付安全整体不通过，Go全量保留旧崩溃注入窗口失败，不称全套通过。原切片独立结论见[验收报告](web-agent-interaction-acceptance.md)，最新部署／范围以文末22:12起收口记录为准。
 - 当前实现不是通用工具审批／沙箱，也不以会话内“同意”代替 Git、成果或交付授权。
 
 ## 写入协调与角色
@@ -216,6 +216,6 @@ M2/M5改为明确取消不可表示的原生请求并发布 `Round.interactionNo
 - 候选vet／Go构建exit0；新构建产物真实Go＋假pi交互8项及成果历史1项浏览器均exit0，不重复旧43项分组。候选二进制 `server/bin/kaiwu-server-interaction-history-20261018`，SHA256 `61c11b05a905824a0ae424c373c557788c59c9af480a7a0c16315c975e87835b`；三份静态资源完整hash保留在 `.kaiwu/interaction-history-candidate.json`，index仍3ec56487…；构建未伪造VCS stamp。
 - 前两批及状态说明69个文件精确内容已暂存，7个共享文件的第三批hunk仍仅在工作树；18文件第三批hash无变化并额外备份至 `.kaiwu/backups/third-batch-paused-20261018/`。11张无关截图、假pi二进制、2份extra残留仍原地未暂存。`git diff --cached --check`只报progress.css/types.ts末尾空行两项低危观察，未为清洁度改动共享类型或重复功能验收。
 - 独立验收对旧崩溃注入瞬态窗口作出限定裁决：基线及候选注入／integration测试源码相同、无交互路径为no-op，未能确定复现偶发；不因此抹去全量失败。该自动交付路径在worker彻底未装配的当前7331不可达，不阻塞本交互＋历史切片发布，自动交付整体仍不通过。完整裁决 `/tmp/kaiwu-release-sync-acceptance.md`，后续聚焦107次通过不替代失败归因实证。
-- 22:43 备份 `.kaiwu/backups/before-interaction-history-20261018T144302Z/` 后，核验旧进程身份及零活动会话／周期，SIGTERM正常结束；同一Paseo终端 `65cb4cc1-899a-40e1-ae1f-c7f462560056` 切换为候选二进制。真实7331健康200，首页／JS／CSS三资源逐字节hash与候选一致，schema仍2；消息／会话身份／登录行／原令牌保留，进程无KAIWU_GITHUB环境。记录 `.kaiwu/interaction-history-deployment.json`。最终独立实际入口烟测已通过（`/tmp/kaiwu-interaction-history-live-acceptance.md`）：1440／390／360导航／溢出／交付禁用及preflight503、历史折叠时间摘要、真实已完成／已合并紧凑条、刷新登录均有证据，13张实际截图逐张检查；无pending交互、旧历史切换和预览深度未在live执行，不伪造生产交互链路验证。主控再比对最初备份中的19条原登录行全部保留，消息／会话身份不变、schema2、SQLite integrity ok；当前24条含独立测试留下的登录记录，不将其说成原始总数仍19。本批仅本地提交，不推送。
+- 22:43 备份 `.kaiwu/backups/before-interaction-history-20261018T144302Z/` 后，核验旧进程身份及零活动会话／周期，SIGTERM正常结束；同一Paseo终端 `65cb4cc1-899a-40e1-ae1f-c7f462560056` 切换为候选二进制。真实7331健康200，首页／JS／CSS三资源逐字节hash与候选一致，schema仍2；消息／会话身份／登录行／原令牌保留，进程无KAIWU_GITHUB环境。记录 `.kaiwu/interaction-history-deployment.json`。最终独立实际入口烟测已通过（`/tmp/kaiwu-interaction-history-live-acceptance.md`）：1440／390／360导航／溢出／交付禁用及preflight503、历史折叠时间摘要、真实已完成／已合并紧凑条、刷新登录均有证据，13张实际截图逐张检查；无pending交互、旧历史切换和预览深度未在live执行，不伪造生产交互链路验证。主控再比对最初备份中的19条原登录行全部保留，消息／会话身份不变、schema2、SQLite integrity ok；当前24条含独立测试留下的登录记录，不将其说成原始总数仍19。该次收口仅本地提交；用户随后明确授权 push，已将功能提交 `1c9fcc71a273340c9972d7af55cd4a96ea1f1277` 正常推至实际 `origin/main`，`git ls-remote` 核对一致；GitHub API workflows=0、该SHA的Actions runs=0，未触发CI，不称CI通过。未推送第三批或其他残留，不重启7331；本次仅补记推送状态。
 - 回滚：保留原ddc811f二进制及两次私有SQLite备份，本次无schema迁移。不能直接构建当前含第三批的checkout来替换候选；后续schema3部署须另行授权迁移和回滚策略，不擅改PRAGMA降库。
 - 自动交付安全项仍未关闭，不启用真实上传，不调用真实模型。阶段消耗按既有角色／修复轮次记录，输入／缓存／输出及估价本批未知，不猜测账单。
