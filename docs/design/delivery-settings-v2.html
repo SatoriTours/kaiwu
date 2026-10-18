@@ -1,0 +1,1274 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>自动交付 · 项目设置 (交互设计稿)</title>
+  <style>
+    :root {
+      --ink: #1f2427;
+      --muted: #6e767c;
+      --faint: #98a0a5;
+      --border: #e2e5e8;
+      --border-subtle: #eceeef;
+      --surface: #ffffff;
+      --surface-hover: #f5f7f8;
+      --surface-subtle: #fafbfb;
+      --bg: #f3f5f6;
+      --brand: #24332d;
+      --brand-hover: #1b2622;
+      --primary: #2d453b;
+      --primary-hover: #22352d;
+      --primary-subtle: #eff4f1;
+      --primary-border: #c4d7cc;
+      --amber-bg: #fdf8ee;
+      --amber-border: #f2e2be;
+      --amber-text: #8c5b14;
+      --amber-icon: #b87b1c;
+      --blue: #2c5985;
+      --blue-subtle: #f0f5fa;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --shadow-modal: 0 20px 60px rgba(15, 23, 42, 0.16), 0 1px 3px rgba(0, 0, 0, 0.05);
+      --font-stack: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: var(--font-stack); font-size: 14px; line-height: 1.5; color: var(--ink); background: var(--bg); overflow: hidden; }
+
+    /* 顶部 48px 轻量顶栏 */
+    .kaiwu-topbar {
+      height: 48px;
+      padding: 0 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 10;
+    }
+    .kaiwu-logo {
+      width: 26px;
+      height: 26px;
+      background: var(--brand);
+      color: #fff;
+      border-radius: 6px;
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .kaiwu-brand { font-size: 15px; font-weight: 600; letter-spacing: 0.5px; }
+    .kaiwu-slash { color: #d0d4d7; font-size: 16px; }
+    .kaiwu-project-menu {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 550;
+      color: var(--ink);
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      cursor: default;
+    }
+    .kaiwu-prototype-tag {
+      margin-left: auto;
+      font-size: 11px;
+      padding: 3px 9px;
+      background: #f1f3f4;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .kaiwu-prototype-tag::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--primary);
+      opacity: 0.8;
+    }
+
+    /* 模拟底图背景：看板+聊天区 */
+    .kaiwu-bg-workbench {
+      position: absolute;
+      top: 48px;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      opacity: 0.35;
+      filter: blur(1.5px);
+      pointer-events: none;
+      user-select: none;
+      background: #edf1f3;
+      overflow: hidden;
+    }
+    .bg-board {
+      padding: 24px;
+      display: flex;
+      gap: 16px;
+      overflow: hidden;
+    }
+    .bg-column {
+      flex: 1;
+      max-width: 320px;
+      background: #e4e7e9;
+      border-radius: var(--radius-md);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .bg-col-header { height: 18px; width: 60%; background: #cfd4d8; border-radius: 4px; }
+    .bg-card { height: 78px; background: white; border-radius: var(--radius-sm); border: 1px solid #dcdfe1; }
+    .bg-chat {
+      border-left: 1px solid var(--border);
+      background: white;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .bg-chat-header { height: 28px; width: 70%; background: #eaedef; border-radius: 4px; }
+    .bg-chat-msg { height: 60px; background: #f4f6f7; border-radius: var(--radius-sm); }
+
+    /* 重新打开入口（当弹窗关闭时浮现） */
+    .reopen-banner {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      padding: 24px 32px;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+      text-align: center;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      z-index: 50;
+    }
+    .reopen-banner.visible { display: flex; }
+    .reopen-banner h3 { font-size: 16px; font-weight: 600; color: var(--ink); }
+    .reopen-banner p { font-size: 13px; color: var(--muted); }
+
+    /* 模态遮罩与主面板 */
+    .modal-overlay {
+      position: fixed;
+      top: 48px;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(18, 26, 23, 0.38);
+      backdrop-filter: blur(2px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 100;
+    }
+    .modal-overlay.hidden { display: none; }
+
+    .delivery-modal {
+      width: 100%;
+      max-width: 760px;
+      max-height: min(920px, calc(100vh - 60px));
+      height: 860px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-modal);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* 固定 Header */
+    .modal-header {
+      padding: 16px 22px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--surface);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .title-group { display: flex; align-items: baseline; gap: 10px; }
+    .title-group h2 { font-size: 16px; font-weight: 650; color: var(--ink); letter-spacing: -0.2px; }
+    .title-group .project-badge {
+      font-size: 12px;
+      color: var(--muted);
+      background: var(--surface-hover);
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+    }
+    .btn-close {
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      line-height: 1;
+      transition: all 0.15s ease;
+    }
+    .btn-close:hover { background: var(--surface-hover); color: var(--ink); }
+
+    /* 单一滚动 Body */
+    .modal-body {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 16px 22px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      background: var(--surface);
+      scrollbar-width: thin;
+    }
+
+    /* 固定 Footer */
+    .modal-footer {
+      padding: 14px 22px;
+      border-top: 1px solid var(--border-subtle);
+      background: var(--surface-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      gap: 12px;
+    }
+    .footer-left {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .footer-left svg { flex-shrink: 0; color: var(--faint); }
+    .footer-actions { display: flex; align-items: center; gap: 10px; }
+
+    /* 按钮样式规范 */
+    button {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 7px 14px;
+      cursor: pointer;
+      background: var(--surface);
+      color: var(--ink);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+      min-height: 34px;
+      user-select: none;
+    }
+    button:hover:not(:disabled) { background: var(--surface-hover); border-color: #d1d6da; }
+    button:active:not(:disabled) { background: #eaedef; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.btn-primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: white;
+    }
+    button.btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+      border-color: var(--primary-hover);
+    }
+    button.btn-text {
+      border-color: transparent;
+      background: transparent;
+      color: var(--blue);
+      padding: 4px 8px;
+      min-height: 28px;
+    }
+    button.btn-text:hover { background: var(--blue-subtle); border-color: transparent; }
+
+    /* Section 1: 用途解释与核心定位 */
+    .purpose-box {
+      background: var(--surface-subtle);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .purpose-lead {
+      font-size: 14px;
+      font-weight: 550;
+      color: var(--ink);
+      line-height: 1.5;
+    }
+    .purpose-note {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    /* Section 2: 紧凑流程线 */
+    .flow-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
+    }
+    .flow-steps {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      position: relative;
+    }
+    .flow-node {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+    }
+    .flow-circle {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--primary-subtle);
+      color: var(--primary);
+      border: 1px solid var(--primary-border);
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .flow-text { min-width: 0; }
+    .flow-text .title { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .flow-text .desc { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .flow-arrow {
+      color: #cfd4d8;
+      font-size: 12px;
+      padding: 0 4px;
+      flex-shrink: 0;
+    }
+    .flow-clarification {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px dashed var(--border-subtle);
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      line-height: 1.4;
+    }
+    .flow-clarification svg { flex-shrink: 0; margin-top: 1px; }
+
+    /* Section 3: 版本状态提示条 */
+    .notice-banner {
+      background: var(--amber-bg);
+      border: 1px solid var(--amber-border);
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--amber-text);
+      line-height: 1.45;
+    }
+    .notice-icon { color: var(--amber-icon); flex-shrink: 0; display: flex; }
+
+    /* Section 4: 交付方式单选卡片 */
+    .section-title {
+      font-size: 13px;
+      font-weight: 650;
+      color: var(--ink);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .delivery-mode-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .mode-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      background: white;
+      cursor: pointer;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      transition: all 0.12s;
+    }
+    .mode-card:hover { background: var(--surface-hover); border-color: #ccd2d6; }
+    .mode-card.selected {
+      border-color: var(--primary-border);
+      background: #fbfdfc;
+      box-shadow: 0 0 0 1px var(--primary-border);
+    }
+    .mode-radio {
+      width: 16px;
+      height: 16px;
+      margin-top: 2px;
+      accent-color: var(--primary);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .mode-content { flex: 1; min-width: 0; }
+    .mode-headline {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .badge-recommend {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--primary);
+      background: var(--primary-subtle);
+      border: 1px solid var(--primary-border);
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+    .mode-desc {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+      line-height: 1.45;
+    }
+
+    /* Section 5: 项目准备三行摘要卡片 */
+    .checklist-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: white;
+      overflow: hidden;
+    }
+    .check-row {
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .check-row:last-child { border-bottom: 0; }
+    .check-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+    .check-icon-box {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      background: var(--surface-hover);
+      border: 1px solid var(--border-subtle);
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+    .check-info { min-width: 0; }
+    .check-title { font-size: 13px; font-weight: 600; color: var(--ink); }
+    .check-detail {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .check-tag {
+      display: inline-block;
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: #f1f3f4;
+      color: #555e63;
+      border: 1px solid #e1e4e6;
+      margin-left: 6px;
+    }
+
+    /* Section 6: 高级设置折叠 */
+    details.advanced-box {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface-subtle);
+      overflow: hidden;
+    }
+    details.advanced-box summary {
+      padding: 10px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    details.advanced-box summary::-webkit-details-marker { display: none; }
+    details.advanced-box summary:hover { color: var(--ink); background: var(--surface-hover); }
+    .advanced-content {
+      padding: 14px 16px;
+      border-top: 1px solid var(--border-subtle);
+      background: white;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      font-size: 12px;
+    }
+    .adv-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .adv-item { display: flex; flex-direction: column; gap: 4px; }
+    .adv-item label { color: var(--muted); font-size: 11px; font-weight: 500; }
+    .adv-item .adv-val {
+      font-size: 12px;
+      color: var(--ink);
+      padding: 6px 10px;
+      background: var(--surface-subtle);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+    }
+
+    /* =========================================================
+       向导视图 (Wizard View) - 3步引导配置
+       ========================================================= */
+    .wizard-view {
+      display: none;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .wizard-view.active { display: flex; }
+    .overview-view { display: flex; flex-direction: column; gap: 14px; }
+    .overview-view.hidden { display: none; }
+
+    .wizard-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 12px;
+      margin-bottom: 4px;
+    }
+    .wizard-steps-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .wstep {
+      font-size: 12px;
+      font-weight: 550;
+      color: var(--faint);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .wstep.current { color: var(--primary); font-weight: 600; }
+    .wstep.done { color: var(--ink); }
+    .wstep-num {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1px solid currentColor;
+      display: grid;
+      place-items: center;
+      font-size: 11px;
+    }
+    .wstep.current .wstep-num { background: var(--primary); color: white; border-color: var(--primary); }
+    .wstep-sep { color: #d0d5d8; font-size: 11px; }
+
+    /* 向导表单区域 */
+    .wizard-panel {
+      display: none;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .wizard-panel.active { display: flex; }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .form-group label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .form-group label .hint { font-weight: normal; color: var(--muted); font-size: 11px; }
+    .form-group input, .form-group select {
+      font-family: inherit;
+      font-size: 13px;
+      padding: 8px 11px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: white;
+      color: var(--ink);
+      width: 100%;
+    }
+    .form-group input:focus, .form-group select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px var(--primary-subtle);
+    }
+    .form-tip { font-size: 11px; color: var(--muted); line-height: 1.45; }
+
+    .parsed-repo-box {
+      background: var(--surface-subtle);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .parsed-repo-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+    }
+    .parsed-repo-val { font-weight: 550; color: var(--ink); }
+
+    /* 授权核对摘要 (Step 3) */
+    .auth-summary-card {
+      border: 1px solid var(--primary-border);
+      background: #fbfdfc;
+      border-radius: var(--radius-md);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .auth-summary-card h4 {
+      font-size: 13px;
+      font-weight: 650;
+      color: var(--ink);
+    }
+    .auth-item-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--ink);
+    }
+    .auth-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      line-height: 1.45;
+    }
+    .auth-item svg { flex-shrink: 0; color: var(--primary); margin-top: 1px; }
+
+    .wizard-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 8px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    /* Toast 提示 */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: #1e2622;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 30px;
+      font-size: 13px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+      z-index: 1000;
+      opacity: 0;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    /* 响应式断点支持 (390x844 & 360x800 手机端) */
+    @media (max-width: 640px) {
+      .kaiwu-bg-workbench {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .bg-chat { display: none; }
+      .modal-overlay { padding: 0; top: 0; }
+      .delivery-modal {
+        max-width: 100%;
+        height: 100dvh;
+        max-height: 100dvh;
+        border-radius: 0;
+        border: 0;
+      }
+      .modal-header { padding: 12px 16px; }
+      .modal-body { padding: 14px 16px 20px; }
+      .modal-footer {
+        padding: 12px 16px;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+      }
+      .footer-left { justify-content: center; order: 2; font-size: 11px; }
+      .footer-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; order: 1; }
+      .footer-actions button { min-height: 42px; width: 100%; }
+      .flow-steps { flex-direction: column; align-items: stretch; gap: 8px; }
+      .flow-node { width: 100%; }
+      .flow-arrow { display: none; }
+      .adv-grid { grid-template-columns: 1fr; }
+      .wstep-title { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 48px 开悟顶栏 -->
+  <header class="kaiwu-topbar">
+    <div class="kaiwu-logo">悟</div>
+    <span class="kaiwu-brand">开悟</span>
+    <span class="kaiwu-slash">/</span>
+    <div class="kaiwu-project-menu">
+      <span>abc</span>
+    </div>
+    <div class="kaiwu-prototype-tag">交互设计稿 · 不连接真实项目</div>
+  </header>
+
+  <!-- 模拟背景：专题看板与聊天模糊透出 -->
+  <div class="kaiwu-bg-workbench" aria-hidden="true">
+    <div class="bg-board">
+      <div class="bg-column">
+        <div class="bg-col-header"></div>
+        <div class="bg-card"></div>
+        <div class="bg-card"></div>
+      </div>
+      <div class="bg-column">
+        <div class="bg-col-header"></div>
+        <div class="bg-card"></div>
+      </div>
+      <div class="bg-column">
+        <div class="bg-col-header"></div>
+        <div class="bg-card"></div>
+      </div>
+    </div>
+    <div class="bg-chat">
+      <div class="bg-chat-header"></div>
+      <div class="bg-chat-msg"></div>
+      <div class="bg-chat-msg"></div>
+    </div>
+  </div>
+
+  <!-- 关闭后的恢复入口 -->
+  <div id="reopenBanner" class="reopen-banner" role="region" aria-label="恢复设计稿窗口">
+    <h3>自动交付 · 项目设置 (交互设计稿)</h3>
+    <p>弹窗已关闭。这是静态高保真交互评审原型，可随时重新打开。</p>
+    <button class="btn-primary" onclick="openModal()" data-testid="view-design">查看设计稿</button>
+  </div>
+
+  <!-- 模态弹窗 -->
+  <div id="modalOverlay" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modalTitle" data-testid="delivery-design-dialog">
+    <div class="delivery-modal">
+
+      <!-- 固定顶部 Header -->
+      <div class="modal-header">
+        <div class="title-group">
+          <h2 id="modalTitle">自动交付</h2>
+          <span class="project-badge">abc · 项目设置</span>
+        </div>
+        <button class="btn-close" onclick="closeModal()" aria-label="关闭面板" title="关闭">&times;</button>
+      </div>
+
+      <!-- 单一滚动 Body -->
+      <div class="modal-body">
+
+        <!-- ================= 概览视图 (Overview) ================= -->
+        <div id="overviewView" class="overview-view" data-testid="overview">
+
+          <!-- 用途解释 -->
+          <section class="purpose-box" aria-label="用途说明">
+            <p class="purpose-lead">开发完成后，自动运行检查、推送至 GitHub 并由独立 CI 验证，按需合并入主分支。</p>
+            <p class="purpose-note">这是代码交付设置，不是网站部署。</p>
+          </section>
+
+          <!-- 版本开放状态通知条 -->
+          <div class="notice-banner" role="status">
+            <span class="notice-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            </span>
+            <span>当前版本暂未开放自动交付。可先保存配置草稿，项目仍可正常开发。</span>
+          </div>
+
+          <!-- 常用：交付方式两项单选 -->
+          <section aria-labelledby="deliveryModeTitle">
+            <div id="deliveryModeTitle" class="section-title">
+              <span>交付方式</span>
+            </div>
+            <div class="delivery-mode-group" role="radiogroup" aria-labelledby="deliveryModeTitle">
+              <label class="mode-card selected" id="modeCardManual">
+                <input type="radio" name="deliveryMode" value="manual" checked class="mode-radio" onchange="selectMode('manual')">
+                <div class="mode-content">
+                  <div class="mode-headline">
+                    <span>我先查看效果，再合并</span>
+                    <span class="badge-recommend">推荐</span>
+                  </div>
+                  <div class="mode-desc">任务与 CI 检查通过后，由你在工作台中点击验收确认，再触发主分支合并与推送。</div>
+                </div>
+              </label>
+
+              <label class="mode-card" id="modeCardAuto">
+                <input type="radio" name="deliveryMode" value="auto" class="mode-radio" onchange="selectMode('auto')">
+                <div class="mode-content">
+                  <div class="mode-headline">
+                    <span>检查通过后直接合并</span>
+                  </div>
+                  <div class="mode-desc">所有本地与远程 CI 检查绿色通过后自动推入主分支；注：自动合并跳过人工点击，不代表已进行人工视觉验收。</div>
+                </div>
+              </label>
+            </div>
+          </section>
+
+          <!-- 交付设置三行摘要 -->
+          <section aria-labelledby="checklistTitle">
+            <div id="checklistTitle" class="section-title">
+              <span>交付设置</span>
+              <span style="font-weight: normal; color: var(--muted); font-size: 11px;">点击右侧“调整”可分步修改</span>
+            </div>
+            <div class="checklist-card">
+              <!-- 目标仓库行 -->
+              <div class="check-row">
+                <div class="check-left">
+                  <div class="check-icon-box">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
+                  </div>
+                  <div class="check-info">
+                    <div class="check-title">
+                      <span>目标仓库</span>
+                      <span class="check-tag" id="summaryRepoTag">演示数据</span>
+                    </div>
+                    <div class="check-detail" id="summaryRepoDetail">acme-corp/sample-service · 主分支 master</div>
+                  </div>
+                </div>
+                <button class="btn-text" onclick="openWizard(1)" data-testid="configure-repository">调整</button>
+              </div>
+
+              <!-- 通过标准行 -->
+              <div class="check-row">
+                <div class="check-left">
+                  <div class="check-icon-box">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                  </div>
+                  <div class="check-info">
+                    <div class="check-title">
+                      <span>通过标准</span>
+                      <span class="check-tag">示例配置</span>
+                    </div>
+                    <div class="check-detail" id="summaryCheckDetail">本地：go test ./... · CI：test-and-build</div>
+                  </div>
+                </div>
+                <button class="btn-text" onclick="openWizard(2)" data-testid="configure-checks">配置</button>
+              </div>
+
+              <!-- 失败处理行 -->
+              <div class="check-row">
+                <div class="check-left">
+                  <div class="check-icon-box">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+                  </div>
+                  <div class="check-info">
+                    <div class="check-title">失败处理</div>
+                    <div class="check-detail" id="summaryRepairDetail">最多自动修复 3 次 · 任务活跃超时 1 小时</div>
+                  </div>
+                </div>
+                <button class="btn-text" onclick="openWizard(3)" data-testid="configure-repair">调整</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- 高级设置折叠 -->
+          <details class="advanced-box">
+            <summary>
+              <span>高级技术参数 (非必需)</span>
+              <span style="font-weight: normal; font-size: 11px;">▼ 展开</span>
+            </summary>
+            <div class="advanced-content">
+              <div class="adv-grid">
+                <div class="adv-item">
+                  <label>允许自动创建远程主分支</label>
+                  <div class="adv-val">否 (默认保护已有主分支，不自动新建)</div>
+                </div>
+                <div class="adv-item">
+                  <label>CI 触发等待超时</label>
+                  <div class="adv-val">5 分钟 (300 秒)</div>
+                </div>
+                <div class="adv-item">
+                  <label>CI 排队与运行最长等待</label>
+                  <div class="adv-val">30 分钟 (1800 秒)</div>
+                </div>
+                <div class="adv-item">
+                  <label>GitHub 凭据绑定状态</label>
+                  <div class="adv-val">未检查（设计稿不读取服务器凭据）</div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+        </div>
+
+        <!-- ================= 3步配置向导 (Wizard) ================= -->
+        <div id="wizardView" class="wizard-view" data-testid="wizard-view">
+
+          <!-- 向导导航头 -->
+          <div class="wizard-nav">
+            <div class="wizard-steps-indicator">
+              <div class="wstep current" id="wstep1">
+                <span class="wstep-num">1</span>
+                <span class="wstep-title">确认仓库</span>
+              </div>
+              <span class="wstep-sep">/</span>
+              <div class="wstep" id="wstep2">
+                <span class="wstep-num">2</span>
+                <span class="wstep-title">完成检查</span>
+              </div>
+              <span class="wstep-sep">/</span>
+              <div class="wstep" id="wstep3">
+                <span class="wstep-num">3</span>
+                <span class="wstep-title">交付授权</span>
+              </div>
+            </div>
+            <button class="btn-text" onclick="exitWizard()" style="font-size: 12px;">返回概览</button>
+          </div>
+
+          <!-- Step 1: 确认仓库 -->
+          <div id="wizardStep1" class="wizard-panel active">
+            <div class="form-group">
+              <label for="repoUrlInput">
+                <span>GitHub 仓库地址</span>
+                <span class="hint">支持 https://github.com/owner/repo</span>
+              </label>
+              <input id="repoUrlInput" type="text" value="https://github.com/acme-corp/sample-service" oninput="parseRepoUrl()" placeholder="https://github.com/owner/repo">
+              <div class="form-tip">提示：此处由前端直接解析，不伪装真实连接；仅用于演示设置。</div>
+            </div>
+
+            <div class="parsed-repo-box">
+              <div class="parsed-repo-row">
+                <span>解析 Owner:</span>
+                <span id="parsedOwner" class="parsed-repo-val">acme-corp</span>
+              </div>
+              <div class="parsed-repo-row">
+                <span>解析 Name:</span>
+                <span id="parsedName" class="parsed-repo-val">sample-service</span>
+              </div>
+              <div class="parsed-repo-row">
+                <span>交付目标主分支:</span>
+                <span class="parsed-repo-val">master</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="branchOverride">
+                <span>主分支覆盖 (可选)</span>
+                <span class="hint">默认为 master，不自动改 main</span>
+              </label>
+              <input id="branchOverride" type="text" value="master" oninput="updateAuthSummary()" placeholder="例如 master">
+            </div>
+
+            <div class="wizard-actions">
+              <div></div>
+              <button class="btn-primary" onclick="setWizardStep(2)" data-testid="wizard-next">下一步：完成检查 →</button>
+            </div>
+          </div>
+
+          <!-- Step 2: 完成检查 -->
+          <div id="wizardStep2" class="wizard-panel">
+            <div class="form-group">
+              <label for="checkName">检查项目名称</label>
+              <input id="checkName" type="text" value="Go 单元测试与构建" placeholder="例如：Go 测试">
+            </div>
+
+            <div class="form-group">
+              <label for="checkProgram">执行程序 (无需 shell 拼接)</label>
+              <input id="checkProgram" type="text" value="go" placeholder="例如：go 或 npm">
+            </div>
+
+            <div class="form-group">
+              <label for="checkArgs">参数 (空格分隔)</label>
+              <input id="checkArgs" type="text" value="test ./..." placeholder="例如：test ./...">
+            </div>
+
+            <details class="advanced-box">
+              <summary>
+                <span>检查高级选项 (目录与超时)</span>
+                <span style="font-weight: normal; font-size: 11px;">▼</span>
+              </summary>
+              <div class="advanced-content">
+                <div class="form-group">
+                  <label for="checkDir">相对执行目录</label>
+                  <input id="checkDir" type="text" value="" placeholder="留空代表项目根目录">
+                </div>
+                <div class="form-group">
+                  <label for="checkTimeout">超时限制 (秒)</label>
+                  <input id="checkTimeout" type="number" value="600">
+                </div>
+              </div>
+            </details>
+
+            <div class="form-group">
+              <label for="workflowSelect">
+                <span>关联 GitHub Actions Workflow</span>
+                <span class="hint">示例选择 / 待连接</span>
+              </label>
+              <select id="workflowSelect">
+                <option value="test-and-build.yml">test-and-build.yml (运行测试并构建)</option>
+                <option value="ci.yml">ci.yml (综合代码检查流水线)</option>
+                <option value="custom">待项目连接后自动识别</option>
+              </select>
+              <div class="form-tip">只显示名称供选择，不强制索要数字 ID，也不会自动猜错 npm test。</div>
+            </div>
+
+            <div class="wizard-actions">
+              <button class="btn-secondary" onclick="setWizardStep(1)" data-testid="wizard-back">← 上一步</button>
+              <button class="btn-primary" onclick="setWizardStep(3)" data-testid="wizard-next">下一步：交付规则与授权 →</button>
+            </div>
+          </div>
+
+          <!-- Step 3: 交付规则与明确授权 -->
+          <div id="wizardStep3" class="wizard-panel">
+            <div class="form-group">
+              <label for="maxRepairs">最大自动修复次数</label>
+              <select id="maxRepairs" onchange="updateAuthSummary()">
+                <option value="1">1 次 (严格控制额度)</option>
+                <option value="3" selected>3 次 (推荐，兼顾成功率)</option>
+                <option value="5">5 次</option>
+              </select>
+            </div>
+
+            <!-- 具体授权摘要卡片 -->
+            <div class="auth-summary-card">
+              <h4>具体授权摘要确认</h4>
+              <ul class="auth-item-list">
+                <li class="auth-item">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  <span>仅授权操作指定仓库：<strong id="authRepoName">acme-corp/sample-service</strong></span>
+                </li>
+                <li class="auth-item">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  <span>任务分支命名为 <code>kaiwu/task-*</code>，本地检查后先上传用于 CI 运行</span>
+                </li>
+                <li class="auth-item">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  <span>交付目标主分支为 <code id="authMainBranch">master</code>；若已配置持续部署，任务分支或主分支推送均可能触发已有自动化构建或发包</span>
+                </li>
+                <li class="auth-item">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  <span>执行过程遇到故障时，最多自动修复 <span id="authRepairTimes">3</span> 次，防止无休止消耗额度</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="wizard-actions">
+              <button class="btn-secondary" onclick="setWizardStep(2)" data-testid="wizard-back">← 上一步</button>
+              <button class="btn-primary" onclick="confirmWizard()" data-testid="wizard-finish">完成调整并返回概览</button>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- 固定底部 Footer -->
+      <div class="modal-footer">
+        <div class="footer-left">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+          <span>设计演示 · 草稿仅在本页暂存</span>
+        </div>
+        <div class="footer-actions">
+          <button class="btn-secondary" onclick="saveDraft()" data-testid="save-draft">保存草稿</button>
+          <button class="btn-primary" disabled title="当前版本暂未开放自动交付" data-testid="activate-delivery">启用自动交付</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 轻量 Toast 提示 -->
+  <div id="toast" class="toast" role="alert" aria-live="polite">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+    <span id="toastMsg">仅设计演示：草稿已暂存，本页刷新后重置</span>
+  </div>
+
+  <script>
+    // 模态开关
+    function closeModal() {
+      document.getElementById('modalOverlay').classList.add('hidden');
+      document.getElementById('reopenBanner').classList.add('visible');
+    }
+    function openModal() {
+      document.getElementById('modalOverlay').classList.remove('hidden');
+      document.getElementById('reopenBanner').classList.remove('visible');
+    }
+
+    // 交付方式选择
+    function selectMode(mode) {
+      const cardManual = document.getElementById('modeCardManual');
+      const cardAuto = document.getElementById('modeCardAuto');
+      if (mode === 'manual') {
+        cardManual.classList.add('selected');
+        cardAuto.classList.remove('selected');
+      } else {
+        cardAuto.classList.add('selected');
+        cardManual.classList.remove('selected');
+      }
+    }
+
+    // 向导控制
+    function openWizard(step) {
+      document.getElementById('overviewView').classList.add('hidden');
+      document.getElementById('wizardView').classList.add('active');
+      setWizardStep(step);
+    }
+
+    function exitWizard() {
+      document.getElementById('wizardView').classList.remove('active');
+      document.getElementById('overviewView').classList.remove('hidden');
+    }
+
+    function setWizardStep(step) {
+      if (step === 3) {
+        updateAuthSummary();
+      }
+      for (let i = 1; i <= 3; i++) {
+        const stepEl = document.getElementById('wstep' + i);
+        const panelEl = document.getElementById('wizardStep' + i);
+        if (i === step) {
+          stepEl.className = 'wstep current';
+          panelEl.classList.add('active');
+        } else if (i < step) {
+          stepEl.className = 'wstep done';
+          panelEl.classList.remove('active');
+        } else {
+          stepEl.className = 'wstep';
+          panelEl.classList.remove('active');
+        }
+      }
+    }
+
+    // URL 纯前端解析演示
+    function parseRepoUrl() {
+      const url = document.getElementById('repoUrlInput').value.trim();
+      let owner = 'owner';
+      let name = 'repo';
+      try {
+        const clean = url.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
+        const parts = clean.split('/');
+        if (parts.length >= 2) {
+          owner = parts[0] || 'owner';
+          name = parts[1] || 'repo';
+        }
+      } catch (e) {}
+      document.getElementById('parsedOwner').textContent = owner;
+      document.getElementById('parsedName').textContent = name;
+      updateAuthSummary();
+    }
+
+    function updateAuthSummary() {
+      const owner = document.getElementById('parsedOwner')?.textContent || 'owner';
+      const name = document.getElementById('parsedName')?.textContent || 'repo';
+      const authRepo = document.getElementById('authRepoName');
+      if (authRepo) authRepo.textContent = owner + '/' + name;
+
+      const branch = document.getElementById('branchOverride')?.value.trim() || 'master';
+      const authBranch = document.getElementById('authMainBranch');
+      if (authBranch) authBranch.textContent = branch;
+
+      const repairs = document.getElementById('maxRepairs')?.value || '3';
+      const authRepairs = document.getElementById('authRepairTimes');
+      if (authRepairs) authRepairs.textContent = repairs;
+    }
+
+    function confirmWizard() {
+      const owner = document.getElementById('parsedOwner').textContent;
+      const name = document.getElementById('parsedName').textContent;
+      const branch = document.getElementById('branchOverride').value.trim() || 'master';
+      const checkProg = document.getElementById('checkProgram').value.trim();
+      const checkArgs = document.getElementById('checkArgs').value.trim();
+      const repairs = document.getElementById('maxRepairs').value;
+
+      const wfSelect = document.getElementById('workflowSelect');
+      let wfText = 'test-and-build';
+      if (wfSelect) {
+        const selectedOpt = wfSelect.options[wfSelect.selectedIndex];
+        wfText = selectedOpt ? selectedOpt.value : wfSelect.value;
+        if (wfText === 'custom') wfText = '待自动识别';
+        else wfText = wfText.replace(/\.ya?ml$/, '');
+      }
+
+      document.getElementById('summaryRepoDetail').textContent = owner + '/' + name + ' · 主分支 ' + branch;
+      document.getElementById('summaryCheckDetail').textContent = '本地：' + checkProg + ' ' + checkArgs + ' · CI：' + wfText;
+      document.getElementById('summaryRepairDetail').textContent = '最多自动修复 ' + repairs + ' 次 · 任务活跃超时 1 小时';
+
+      exitWizard();
+      showToast('配置已暂存更新（仅设计演示）');
+    }
+
+    // Toast 反馈
+    let toastTimer = null;
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      document.getElementById('toastMsg').textContent = msg;
+      t.classList.add('show');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        t.classList.remove('show');
+      }, 3000);
+    }
+
+    function saveDraft() {
+      showToast('仅设计演示：草稿已暂存，本页刷新后重置');
+    }
+  </script>
+</body>
+</html>

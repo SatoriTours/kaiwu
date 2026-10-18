@@ -35,19 +35,106 @@ async function cleanup(page:Page){
 test.describe('真实 Go 服务的自动交付界面',()=>{
  test.beforeEach(async({page})=>{await login(page);await cleanup(page)});
 
- test('一次配置有明确授权、只读预检且保存真实后端策略',async({page})=>{
+ test('交付设置概览与向导、禁用启用、保存真实草稿重开核验及只读预检',async({page})=>{
   await page.getByRole('button',{name:'当前项目',exact:true}).click();await page.getByRole('menuitem',{name:/交付设置/}).click();
-  const dialog=page.getByRole('dialog',{name:'开发与交付设置'});await expect(dialog).toBeVisible();
-  await dialog.getByLabel(/规范仓库地址/).fill('https://github.com/owner/repo.git');
-  await dialog.getByLabel('Owner',{exact:true}).fill('owner');await dialog.getByLabel('Repository Name',{exact:true}).fill('repo');await dialog.getByLabel(/Repository ID/).fill('42');
-  await dialog.locator('textarea').nth(0).fill(JSON.stringify([{id:'test',argv:['true'],dir:'.',timeoutSeconds:300}]));
-  await dialog.locator('textarea').nth(1).fill(JSON.stringify([{id:1,jobs:['test']}]));await dialog.locator('textarea').nth(2).fill(JSON.stringify([{id:2,jobs:['test']}]));
-  await dialog.getByLabel(/启用本项目/).check();await expect(dialog).toContainText('任务分支');await expect(dialog).toContainText('部署或发包');
-  await dialog.getByLabel(/我确认授权/).check();await dialog.getByRole('button',{name:'保存设置',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:/自动交付/});await expect(dialog).toBeVisible();
+
+  // 1. 验证首屏：暂未开放自动交付提示与禁用“启用自动交付”按钮
+  await expect(dialog).toContainText('当前版本暂未开放自动交付');
+  const activateBtn = dialog.getByRole('button',{name:'启用自动交付',exact:true});
+  await expect(activateBtn).toBeDisabled();
+
+  // 2. 验证概览精简：无旧四步流程图，包含简短用途说明
+  await expect(dialog).toContainText('代码交付设置，不是网站部署');
+  await expect(dialog.locator('.flow-steps')).toHaveCount(0);
+
+  // 3. 验证交付方式单选切换
+  const manualCard = dialog.locator('#modeCardManual');
+  const autoCard = dialog.locator('#modeCardAuto');
+  await autoCard.click();
+  await expect(autoCard).toHaveClass(/selected/);
+  await manualCard.click();
+  await expect(manualCard).toHaveClass(/selected/);
+
+  // 4. 打开向导调整目标仓库
+  await dialog.getByTestId('configure-repository').click();
+  await expect(dialog.getByTestId('wizard-view')).toBeVisible();
+  await dialog.getByLabel('GitHub 仓库规范地址').fill('https://github.com/owner/repo.git');
+  await dialog.getByLabel('目标主分支').fill('main');
+
+  // 下一步：通过标准
+  await dialog.getByTestId('wizard-next').click();
+  await expect(dialog.getByText('本地检查命令')).toBeVisible();
+  // 添加或修改本地检查
+  const progInput = dialog.locator('#checkProgram_0');
+  if (await progInput.count() === 0) {
+    await dialog.getByRole('button',{name:'+ 添加本地检查'}).click();
+  }
+  await dialog.locator('#checkProgram_0').fill('true');
+  // 如果有多余参数，清空或不添加参数
+  const removeArgBtns = dialog.locator('.arg-row button');
+  while (await removeArgBtns.count() > 0) {
+    await removeArgBtns.first().click();
+  }
+
+  // 下一步：失败处理与授权摘要
+  await dialog.getByTestId('wizard-next').click();
+  await expect(dialog.getByText('最大自动修复次数')).toBeVisible();
+  await dialog.locator('#maxRepairs').selectOption('3');
+  // 验证授权风险提示包含任务/主分支推送
+  await expect(dialog.locator('.auth-summary-card')).toContainText('任务分支或主分支推送均可能触发已有自动化构建或发包');
+  await expect(dialog.locator('#authRepairTimes')).toHaveText('3');
+
+  // 完成调整返回概览
+  await dialog.getByTestId('wizard-finish').click();
+  await expect(dialog.getByTestId('wizard-view')).not.toBeVisible();
+  await expect(dialog.getByTestId('overview')).toBeVisible();
+  await expect(dialog.locator('#summaryRepoDetail')).toContainText('owner/repo · 主分支 main');
+
+  // 5. 保存草稿
+  await dialog.getByRole('button',{name:'保存草稿',exact:true}).click();
   await expect(dialog).not.toBeVisible();
-  const info=await evidence(page.request),res=await page.request.get('/api/delivery/policy?projectId='+info.projectId);const {policy}=await res.json();expect(policy.enabled).toBe(true);expect(policy.repository.id).toBe(42);expect(policy.authorizedAt).not.toMatch(/^0001/);
-  const count=info.pushes.length;
-  await page.getByRole('button',{name:'当前项目',exact:true}).click();await page.getByRole('menuitem',{name:/交付设置/}).click();await page.getByRole('button',{name:'执行只读预检'}).click();await expect(page.getByRole('dialog')).toContainText('预检通过');expect((await evidence(page.request)).pushes.length).toBe(count);
+
+  // 6. 重新打开核验草稿真实保留在 SQLite 中，验证 Go 后端读回数据规范性
+  const evInfo = await evidence(page.request);
+  const policyRes = await page.request.get('/api/delivery/policy?projectId=' + evInfo.projectId);
+  expect(policyRes.ok()).toBeTruthy();
+  const { policy: savedPolicy } = await policyRes.json();
+  expect(savedPolicy).toBeDefined();
+  expect(savedPolicy.enabled).toBe(false);
+  expect(savedPolicy.authorizedAt).toBe('0001-01-01T00:00:00Z');
+  expect(savedPolicy.checks.length).toBe(1);
+  expect(savedPolicy.checks[0].argv).toEqual(['true']);
+
+  await page.getByRole('button',{name:'当前项目',exact:true}).click();
+  await page.getByRole('menuitem',{name:/交付设置/}).click();
+  const reopened=page.getByRole('dialog',{name:/自动交付/});
+  await expect(reopened).toBeVisible();
+  await expect(reopened.locator('#summaryRepoDetail')).toContainText('owner/repo · 主分支 main');
+
+  // 6.1 验证清空仓库地址：清空 url/owner/name/id 但保留目标主分支
+  await reopened.getByTestId('configure-repository').click();
+  await reopened.getByLabel('GitHub 仓库规范地址').fill('');
+  await reopened.getByTestId('wizard-next').click(); // 进入 Step 2
+  await reopened.getByRole('button', { name: '返回概览' }).click(); // 返回概览，触发同步
+  await expect(reopened.locator('#summaryRepoDetail')).toContainText('尚未配置 GitHub 仓库');
+
+  // 恢复有效仓库以进行后续测试
+  await reopened.getByTestId('configure-repository').click();
+  await reopened.getByLabel('GitHub 仓库规范地址').fill('https://github.com/owner/repo.git');
+  await reopened.getByRole('button', { name: '返回概览' }).click();
+  await expect(reopened.locator('#summaryRepoDetail')).toContainText('owner/repo · 主分支 main');
+
+  // 7. 只读预检核验（明确检查的是已保存策略）
+  await reopened.locator('details.advanced-box summary').click();
+  const preflightBtn = reopened.getByRole('button',{name:'执行只读预检'});
+  await expect(preflightBtn).toBeVisible();
+  await preflightBtn.click();
+  await expect(reopened).toContainText(/预检/);
+
+  // 8. 关闭弹窗
+  await reopened.getByRole('button',{name:'取消'}).click();
+  await expect(reopened).not.toBeVisible();
  });
 
  test('人工验收后真实推主分支；刷新和换卡不重发，保留原会话',async({page})=>{

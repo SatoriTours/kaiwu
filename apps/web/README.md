@@ -61,13 +61,15 @@ export KAIWU_PI_THINKING='medium'
 - 通用 Go 编排桥、自动派发、通用工具审批与真实模型完整验收尚未实现；五态角标与聊天运行状态分开，不把模型回复结束当任务完成。
 - 默认本机回环 HTTP；用户现已要求并启用指定私网 IP 的局域网访问，仍必须令牌 Cookie 登录。公网／TLS／设备配对需后续设计；PC 三平台和 Android 目标保留。
 
-## 自动开发与交付（隔离实现，安全验收不通过）
+## 自动交付设置（当前仅开放草稿）
 
-项目菜单新增“交付设置”：一次配置仓库／主分支、本地 argv 检查、任务／主分支必需 workflows、人工效果验收和有限预算，只引用服务器凭据，不在浏览器填写 Token。启用说明任务分支会先上传、主 Push 可能触发已有部署／发包，必须显式确认范围；旧项目默认关闭、旧任务不追溯。
+项目菜单打开“交付设置”，概览只保留用途、交付方式和三个入口：**目标仓库**（交到哪里）、**通过标准**（哪些检查通过才合格）、**失败处理**（最多让 AI 修几次）。不再放没有操作能力的四步流程图；详细配置用分步普通表单，高级参数默认折叠。不向普通用户展示 JSON、内部仓库编号或凭据引用名，也不在浏览器填写 Token。
+
+**当前版本暂未开放自动交付，启用按钮禁用**。只能保存未启用、未授权的配置草稿；草稿通过原 WebSocket／Go 接口真实保存到 SQLite，失败保留输入。已有启用策略只读保护，不能因保存草稿而静默关闭或改写授权。保留项目实际主分支，不强制改成 main。服务器尚未提供仓库／workflow 元数据发现接口时显示未配置，不虚构列表或凭据就绪。预检只读取已保存配置，不检查尚未保存的输入，也不会提交／推送。任务和主分支推送均可能触发已有部署／发包，人工效果验收与技术检查仍独立。
 
 卡片／聊天区分功能结果、Git 和交付阶段；已启用任务通过本地及任务 CI 后按配置等待“效果验收通过”，随后服务串行集成与主 CI。没有人工验收的周期明确显示“未人工验收”，不自动把旧任务标 completed。支持暂停后原会话修改、候选重验、下一轮模型及只读技术记录；活动周期不显示旧手动合并／确认入口。
 
-**上述是开发中的界面与隔离流程，不可据此启用真实自动上传。** 独立后端审查仍有远程凭据／冻结定义、恢复与主线隔离阻塞；详细状态及续接见[验证记录](../../docs/development/web-automated-delivery-verification.md)与[未关闭问题](../../docs/development/web-automated-delivery-review-resolution.md)。本轮没有更新 7331、调用真实模型或 GitHub，不把临时 bare／假 Actions 结果当作真实验收。
+**上述是开发中的界面与隔离流程，不可据此启用真实自动上传。** 独立后端审查仍有远程凭据／冻结定义、恢复与主线隔离阻塞；详细状态及续接见[验证记录](../../docs/development/web-automated-delivery-verification.md)与[未关闭问题](../../docs/development/web-automated-delivery-review-resolution.md)。此前界面已部署到 7331，但真实交付 worker 未装配；本次精简改版的实现、验收及发布状态见[改版验证记录](../../docs/development/web-delivery-settings-redesign.md)。不把临时 bare／假 Actions 结果当作真实验收。
 
 ## 卡片合并到主分支
 
@@ -127,6 +129,6 @@ GOTOOLCHAIN=local go -C server test -race ./...
 
 本机当前运行地址为 http://192.168.2.122:7331 ，后台 PID 记录在 `.kaiwu/web-server.pid`，日志在 `.kaiwu/web-server.log`，登录令牌保存在 `.kaiwu/web-access-token`（私有忽略文件）。已自动发现 pi，可在 Web 查询并选择当前 43 个可用模型；尚未替用户保存选择或发起模型请求。原 `127.0.0.1:7331` 已切换为指定私网地址。
 
-当前运行二进制为 `server/bin/kaiwu-server-chat-latest`，由 Paseo 托管终端“开悟网页服务7331”运行；2026-10-17 已更新固定 7331，沿用原令牌、数据库和会话。最新滚动调整前端状态 16/16、Chromium 32/32、Go 全量与构建通过；实际旧任务桌面／手机的打开、刷新与切回均定位到底部，原登录／项目／任务／消息保留，未调用真实模型。[滚动验证](../../docs/development/web-chat-latest-scroll-verification.md) · [此前顶栏菜单验证](../../docs/development/web-project-menu-verification.md)。此前任务成果预览的完整 race／vet 与独立验收属于前一批；旧任务没有预览配置时仍展示运行结果，可明确补充说明。[成果预览验证](../../docs/development/web-task-result-preview-verification.md) · [该批独立验收](../../docs/development/web-task-result-preview-review.md)。
+当前运行二进制为 `server/bin/kaiwu-server-f7c0232`，由 Paseo 当前 Workspace 的托管终端“开悟网页服务7331”运行；2026-10-18 已按用户要求更新固定 7331，沿用原令牌、数据库和会话，schema 已备份后迁移到2。启动器 `.kaiwu/start-web-delivery-ui.py` 对本次服务移除 GitHub 自动交付环境项，实际预检返回503，**真实自动交付未启用**。桌面／手机及登录重开通过、原消息／会话／19条登录记录保留；见[本次部署记录与回滚注意](../../docs/development/web-automated-delivery-deployment.md)。以下滚动批次验证保留为历史：2026-10-17 使用的二进制是 `kaiwu-server-chat-latest`。最新滚动调整前端状态 16/16、Chromium 32/32、Go 全量与构建通过；实际旧任务桌面／手机的打开、刷新与切回均定位到底部，原登录／项目／任务／消息保留，未调用真实模型。[滚动验证](../../docs/development/web-chat-latest-scroll-verification.md) · [此前顶栏菜单验证](../../docs/development/web-project-menu-verification.md)。此前任务成果预览的完整 race／vet 与独立验收属于前一批；旧任务没有预览配置时仍展示运行结果，可明确补充说明。[成果预览验证](../../docs/development/web-task-result-preview-verification.md) · [该批独立验收](../../docs/development/web-task-result-preview-review.md)。
 
 每次明确发送的用户消息都会带上中文及排版要求，覆盖常驻和恢复的 pi 会话；原用户消息、会话身份和原始历史保留，不自动翻译已保存的英文，也不额外发起翻译请求。

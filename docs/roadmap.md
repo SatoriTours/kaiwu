@@ -2,6 +2,10 @@
 
 ## 当前实际状态
 
+- [x] 自动交付设置界面按用户反馈精简为三项交付设置和分步表单，真实草稿保存、旧参数与身份保留、固定底栏及禁用启用通过独立复验；本批发布／7331更新待执行。真实自动交付安全门禁仍未通过，不因此开放。[改版验证](development/web-delivery-settings-redesign.md)。
+
+- [x] 2026-10-18 用户要求部署：Web `f7c0232` 已运行于原指定 `192.168.2.122:7331`；备份／迁移与原数据／登录保留、实际桌面／手机烟测通过。仅界面及已验证修正部署，自动交付 worker 未装配、真实自动上传未启用，安全阻塞仍需修正。[部署与回滚注意](development/web-automated-delivery-deployment.md)。
+
 - [x] 名称：开悟 / kaiwu。
 - [x] 本地 main Git 仓库、origin HTTPS 和 GitHub 公开仓库。
 - [x] Paseo 项目及两个固定 local 沟通入口。

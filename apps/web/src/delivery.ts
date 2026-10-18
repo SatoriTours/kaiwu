@@ -246,7 +246,10 @@ export function buildSavePolicyPayload(
       ? !isZeroTime(draft.authorizedAt)
         ? draft.authorizedAt
         : new Date().toISOString()
-      : "",
+      : "0001-01-01T00:00:00Z",
+    revokedAt: draft.revokedAt && !isZeroTime(draft.revokedAt)
+      ? draft.revokedAt
+      : "0001-01-01T00:00:00Z",
   };
 
   return {

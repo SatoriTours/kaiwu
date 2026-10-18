@@ -439,3 +439,66 @@ test('DeliveryStep history merging sorts and deduplicates by id', () => {
  assert.equal(all[1].summary, 'step 20'); // recent overrides paged
  assert.equal(all[2].id, 'step-21');
 });
+
+test('parseArgsString and formatArgsString handle spaces, quotes, tabs and roundtrip without loss', async () => {
+ const { parseArgsString, formatArgsString, checksToUI, uiToChecks, parseGitHubRepo, generateNextCheckId, isEquivalentRepo } = await import('../src/delivery-settings.ts');
+
+ assert.deepEqual(parseArgsString('test ./...'), { args: ['test', './...'] });
+ assert.deepEqual(parseArgsString('run --name "hello world" --flag'), { args: ['run', '--name', 'hello world', '--flag'] });
+ assert.deepEqual(parseArgsString("run 'single quote with space'"), { args: ['run', 'single quote with space'] });
+ assert.deepEqual(parseArgsString(''), { args: [] });
+
+ // 严格检验未闭合错误与转义错误
+ assert.match(parseArgsString('run "unclosed').error || '', /未闭合的双引号/);
+ assert.match(parseArgsString("run 'unclosed").error || '', /未闭合的单引号/);
+ assert.match(parseArgsString('run trailing\\').error || '', /未完成的反斜杠转义/);
+
+ // 无损 roundtrip 集合（含引号、tab、空串、反斜杠）
+ const cases = [
+  ['test', './...'],
+  ['run', '--name', 'hello world'],
+  ['echo', 'a"b'],
+  ['echo', "it's"],
+  ['run', '', 'x'],
+  ['echo', 'a\tb'],
+  ['echo', 'a\\b'],
+  ['echo', 'a\\"b'],
+  ['go', 'test', '-run', 'Test"X'],
+  ['echo', '"leading'],
+  ['printf', 'a b\tc'],
+ ];
+ for (const c of cases) {
+  const formatted = formatArgsString(c);
+  const parsed = parseArgsString(formatted);
+  assert.equal(parsed.error, undefined);
+  assert.deepEqual(parsed.args, c);
+ }
+
+ const checks = [{ id: 'test', argv: ['go', 'test', '-run', 'Test With Space'], dir: '.', timeoutSeconds: 300 }];
+ const ui = checksToUI(checks);
+ assert.equal(ui.length, 1);
+ assert.equal(ui[0].program, 'go');
+ assert.deepEqual(ui[0].args, ['test', '-run', 'Test With Space']);
+
+ const convertedBack = uiToChecks(ui);
+ assert.deepEqual(convertedBack[0].argv, ['go', 'test', '-run', 'Test With Space']);
+
+ // 唯一 ID 生成
+ assert.equal(generateNextCheckId([]), 'check-1');
+ assert.equal(generateNextCheckId([{ id: 'check-1' }, { id: 'check-2' }]), 'check-3');
+ assert.equal(generateNextCheckId([{ id: 'check-2' }]), 'check-3'); // 删去 check-1 后新增应为 check-3，绝不重复 check-2
+ assert.equal(generateNextCheckId([{ id: 'check-1' }, { id: 'custom' }]), 'check-2');
+
+ // 仓库解析与等价判定
+ assert.deepEqual(parseGitHubRepo('https://github.com/acme/sample.git'), { owner: 'acme', name: 'sample' });
+ assert.deepEqual(parseGitHubRepo('git@github.com:foo/bar.git'), { owner: 'foo', name: 'bar' });
+ assert.deepEqual(parseGitHubRepo('ssh://git@github.com/foo/bar.git'), { owner: 'foo', name: 'bar' });
+ assert.deepEqual(parseGitHubRepo('https://github.com/foo/bar'), { owner: 'foo', name: 'bar' });
+ assert.deepEqual(parseGitHubRepo('invalid-url'), { owner: '', name: '' });
+
+ assert.equal(isEquivalentRepo('https://github.com/foo/bar.git', 'https://github.com/foo/bar'), true);
+ assert.equal(isEquivalentRepo('https://github.com/foo/bar.git', 'git@github.com:foo/bar.git'), true);
+ assert.equal(isEquivalentRepo('https://github.com/foo/bar.git', 'ssh://git@github.com/foo/bar.git'), true);
+ assert.equal(isEquivalentRepo('https://github.com/foo/bar.git', 'https://github.com/foo/other.git'), false);
+ assert.equal(isEquivalentRepo('https://github.com/foo/bar.git', ''), false);
+});
