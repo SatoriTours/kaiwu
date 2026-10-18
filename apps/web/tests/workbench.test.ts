@@ -192,3 +192,250 @@ test('reply links preserve complete HTTP targets outside the short summary and i
  assert.deepEqual(replyLinks(message),['http://192.168.2.122:8000/hello?name=world','http://192.168.2.122:8000/hello-json']);
  assert.ok(replySummary(message).includes('\n- 接口已验证'));
 });
+
+test('deliveryView pure projection maps phases, repairs, block reasons, and safe action links', async () => {
+ const { deliveryView, canAcceptDelivery } = await import('../src/delivery.ts');
+ assert.equal(deliveryView(undefined).active, false);
+ assert.equal(deliveryView(undefined).label, '未启用');
+
+ const summary: any = {
+  id: 'del_1',
+  projectId: 'p1',
+  taskId: 't1',
+  phase: 'task_ci',
+  candidateSHA: '11223344556677889900aabbccddeeff11223344',
+  requireAcceptance: true,
+  repairsUsed: 1,
+  repairsLimit: 3,
+  steps: [{ sequence: 1, kind: 'check', summary: 'local passed' }],
+  ci: [{ stage: 'task', status: 'completed', conclusion: 'failure', url: 'https://github.com/org/repo/actions/runs/123' }],
+ };
+ const view = deliveryView(summary);
+ assert.equal(view.active, true);
+ assert.equal(view.phase, 'task_ci');
+ assert.equal(view.label, '任务 CI 中');
+ assert.equal(view.repairsText, '1/3 次修复');
+ assert.equal(view.ciFailed, true);
+ assert.equal(canAcceptDelivery(summary), false);
+ assert.equal(view.ciRuns[0].url, 'https://github.com/org/repo/actions/runs/123');
+});
+
+test('snapshot handles optional deliveries and deliveryPolicies without breaking legacy projects', () => {
+ const local = createLocalState();
+ const legacySnapshot: any = {
+  revision: 1,
+  projects: {},
+  topics: [],
+  tasks: {},
+  conversations: {},
+  profile: { provider: '', model: '', thinking: '' },
+ };
+ mergeSnapshot(local, legacySnapshot);
+ assert.equal(local.snapshot?.deliveries, undefined);
+ assert.equal(local.snapshot?.deliveryPolicies, undefined);
+
+ const deliverySnapshot: any = {
+  revision: 2,
+  projects: {},
+  topics: [],
+  tasks: {},
+  conversations: {},
+  profile: { provider: '', model: '', thinking: '' },
+  deliveries: { t1: { id: 'd1', phase: 'local_checking', repairsUsed: 0, repairsLimit: 3 } },
+  deliveryPolicies: { p1: { version: 1, enabled: true, requireAcceptance: true } },
+ };
+ mergeSnapshot(local, deliverySnapshot);
+ assert.equal(local.snapshot?.deliveries?.t1.phase, 'local_checking');
+ assert.equal(local.snapshot?.deliveryPolicies?.p1.enabled, true);
+});
+
+test('CI red light is not masked by task.status=completed and human acceptance is independent', async () => {
+ const { deliveryView, canAcceptDelivery } = await import('../src/delivery.ts');
+ const summary: any = {
+  id: 'del_fail',
+  phase: 'blocked',
+  blockCode: 'main_ci_failed',
+  blockReason: '主分支 CI 门禁失败',
+  candidateSHA: 'abc',
+  localMainSHA: 'abc',
+  requireAcceptance: false,
+  repairsUsed: 3,
+  repairsLimit: 3,
+  ci: [{ stage: 'main', status: 'completed', conclusion: 'failure', url: 'https://github.com/org/repo/actions/runs/456' }],
+ };
+ const view = deliveryView(summary);
+ assert.equal(view.active, true);
+ assert.equal(view.blocked, true);
+ assert.equal(view.ciFailed, true);
+ assert.equal(view.blockReason, '主分支 CI 门禁失败');
+ assert.equal(canAcceptDelivery(summary), false);
+});
+
+test('exact accept condition requires awaiting_acceptance and valid token', async () => {
+ const { canAcceptDelivery, deliveryView } = await import('../src/delivery.ts');
+ const waiting: any = {
+  id: 'del_wait',
+  version: 3,
+  phase: 'awaiting_acceptance',
+  requireAcceptance: true,
+  acceptanceToken: 'tok_secret_123',
+  candidateSHA: '11223344556677889900aabbccddeeff11223344',
+  repairsUsed: 0,
+  repairsLimit: 3,
+ };
+ assert.equal(canAcceptDelivery(waiting), true);
+ assert.equal(deliveryView(waiting).canAccept, true);
+
+ const noToken = { ...waiting, acceptanceToken: '' };
+ assert.equal(canAcceptDelivery(noToken), false);
+
+ const falseMode = { ...waiting, requireAcceptance: false };
+ assert.equal(canAcceptDelivery(falseMode), false);
+});
+
+test('safe Actions links filter unsafe or credentialed URLs and budget uses repairsLimit', async () => {
+ const { deliveryView } = await import('../src/delivery.ts');
+ const summary: any = {
+  id: 'del_safe',
+  phase: 'succeeded',
+  repairsUsed: 2,
+  repairsLimit: 5,
+  ci: [
+   { stage: 'task', url: 'https://github.com/foo/bar/actions/runs/999' },
+   { stage: 'task', url: 'javascript:alert(1)' },
+   { stage: 'main', url: 'https://user:pass@github.com/foo/bar/actions/runs/888' },
+   { stage: 'main', url: 'http://insecure.example.com' },
+  ],
+ };
+ const view = deliveryView(summary);
+ assert.equal(view.repairsText, '2/5 次修复');
+ assert.equal(view.ciRuns.length, 1);
+ assert.equal(view.ciRuns[0].url, 'https://github.com/foo/bar/actions/runs/999');
+});
+
+test('validatePolicyDraft checks repository, checks, workflows and credentials without sending token', async () => {
+ const { validatePolicyDraft, defaultPolicyDraft } = await import('../src/delivery.ts');
+ const d = defaultPolicyDraft('proj_1');
+ assert.equal(d.enabled, false);
+ assert.equal(d.maxRepairs, 3);
+ assert.equal(d.requireAcceptance, true);
+
+ // Disabled draft can be saved even if incomplete
+ const errDisabled = validatePolicyDraft(d);
+ assert.equal(errDisabled, null);
+
+ // Enabled draft requires full configuration
+ d.enabled = true;
+ assert.match(validatePolicyDraft(d) ?? '', /授权/);
+
+ d.authorized = true;
+ assert.match(validatePolicyDraft(d) ?? '', /仓库地址/);
+
+ d.repository.url = 'https://github.com/org/repo.git';
+ d.repository.owner = 'org';
+ d.repository.name = 'repo';
+ d.repository.id = 12345;
+ d.repository.mainBranch = 'main';
+ assert.match(validatePolicyDraft(d) ?? '', /本地检查/);
+
+ d.checks = [{ id: 'test', argv: ['npm', 'test'], dir: '.', timeoutSeconds: 300 }];
+ assert.match(validatePolicyDraft(d) ?? '', /workflow/);
+
+ d.taskWorkflows = [{ id: 101, jobs: ['build'] }];
+ d.mainWorkflows = [{ id: 102, jobs: ['deploy'] }];
+ assert.match(validatePolicyDraft(d) ?? '', /凭据引用/);
+
+ d.gitCredentialRef = 'server_github_https';
+ d.apiCredentialRef = 'server_github_api';
+ assert.equal(validatePolicyDraft(d), null);
+});
+
+test('validatePolicyDraft rejects non-array argv, null inputs, and credentialed URLs even when disabled', async () => {
+ const { validatePolicyDraft, defaultPolicyDraft } = await import('../src/delivery.ts');
+ const d = defaultPolicyDraft('proj_1');
+
+ // Credentialed URL must be rejected even when disabled (no leaking token in disabled draft)
+ d.repository.url = 'https://user:pass@github.com/org/repo.git';
+ assert.match(validatePolicyDraft(d) ?? '', /凭据/);
+
+ d.repository.url = 'https://github.com/org/repo.git';
+ d.enabled = true;
+ d.authorized = true;
+ d.repository.owner = 'org';
+ d.repository.name = 'repo';
+ d.repository.id = 123;
+ d.repository.mainBranch = 'main';
+ d.gitCredentialRef = 'server_github_https';
+ d.apiCredentialRef = 'server_github_api';
+ d.taskWorkflows = [{ id: 1, jobs: [] }];
+ d.mainWorkflows = [{ id: 2, jobs: [] }];
+
+ // Malformed checks: non-array, null, or argv elements not string
+ d.checks = null as any;
+ assert.match(validatePolicyDraft(d) ?? '', /本地检查/);
+
+ d.checks = [{ id: 'test', argv: 'npm test' as any, dir: '.', timeoutSeconds: 300 }];
+ assert.match(validatePolicyDraft(d) ?? '', /数组/);
+
+ d.checks = [{ id: 'test', argv: [123 as any], dir: '.', timeoutSeconds: 300 }];
+ assert.match(validatePolicyDraft(d) ?? '', /字符串/);
+
+ d.checks = [{ id: 'test', argv: ['npm', 'test'], dir: '../escape', timeoutSeconds: 300 }];
+ assert.match(validatePolicyDraft(d) ?? '', /工作区内/);
+
+ d.checks = [{ id: 'test', argv: ['npm', 'test'], dir: '.', timeoutSeconds: 300 }];
+ assert.equal(validatePolicyDraft(d), null);
+});
+
+test('buildSavePolicyPayload packages operationId, expectedVersion and policy object', async () => {
+ const { buildSavePolicyPayload, defaultPolicyDraft } = await import('../src/delivery.ts');
+ const draft = defaultPolicyDraft('proj_x');
+ draft.version = 4;
+ const payload = buildSavePolicyPayload('op_save_1', draft);
+ assert.equal(payload.operationId, 'op_save_1');
+ assert.equal(payload.expectedVersion, 4);
+ assert.equal(payload.policy.projectId, 'proj_x');
+ assert.equal(payload.policy.version, 4);
+});
+
+test('isZeroTime checks Go zero time string and empty states correctly', async () => {
+ const { isZeroTime } = await import('../src/delivery.ts');
+ assert.equal(isZeroTime('0001-01-01T00:00:00Z'), true);
+ assert.equal(isZeroTime('0001-01-01T00:00:00.000Z'), true);
+ assert.equal(isZeroTime(''), true);
+ assert.equal(isZeroTime(undefined), true);
+ assert.equal(isZeroTime('2026-10-18T12:00:00Z'), false);
+});
+
+test('canPauseDelivery checks phase validity according to backend rules', async () => {
+ const { canPauseDelivery } = await import('../src/delivery.ts');
+ assert.equal(canPauseDelivery('task_ci'), true);
+ assert.equal(canPauseDelivery('local_checking'), true);
+ assert.equal(canPauseDelivery('awaiting_acceptance'), true);
+ assert.equal(canPauseDelivery('blocked'), false);
+ assert.equal(canPauseDelivery('paused'), false);
+ assert.equal(canPauseDelivery('succeeded'), false);
+ assert.equal(canPauseDelivery('cancelled'), false);
+});
+
+test('DeliveryStep history merging sorts and deduplicates by id', () => {
+ const recentSteps = [
+  { id: 'step-20', sequence: 20, kind: 'budget', summary: 'step 20', startedAt: '2026-10-18T10:00:00Z', exitKnown: true, exitCode: 0 },
+  { id: 'step-21', sequence: 21, kind: 'ci', summary: 'step 21', startedAt: '2026-10-18T10:05:00Z', exitKnown: true, exitCode: 0 },
+ ];
+ const pagedSteps = [
+  { id: 'step-1', sequence: 1, kind: 'local', summary: 'step 1', startedAt: '2026-10-18T09:00:00Z', exitKnown: true, exitCode: 0 },
+  { id: 'step-20', sequence: 20, kind: 'budget', summary: 'step 20 updated', startedAt: '2026-10-18T10:00:00Z', exitKnown: true, exitCode: 0 },
+ ];
+
+ const map = new Map<string, any>();
+ for (const s of pagedSteps) map.set(s.id, s);
+ for (const s of recentSteps) map.set(s.id, s);
+ const all = Array.from(map.values()).sort((a, b) => a.sequence - b.sequence);
+
+ assert.equal(all.length, 3);
+ assert.equal(all[0].id, 'step-1');
+ assert.equal(all[1].id, 'step-20');
+ assert.equal(all[1].summary, 'step 20'); // recent overrides paged
+ assert.equal(all[2].id, 'step-21');
+});

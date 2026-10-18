@@ -6,6 +6,8 @@
 
 ## 当前状态
 
+- **2026-10-18 续接：隔离流程已推进，安全验收未通过**。已有后端本地提交 `1c76c0a`（81 个文件），未推送；已接入交付设置、任务状态／验收和下一轮模型，主控复跑前端 27 项、Chromium 42 项（原有 32＋交付 10）、Go 全量／race／vet／构建及信号烟测通过，历史分页与丢回执核查已补回归。真实 Go＋临时 bare＋假 pi／Actions 六场景（含两卡隔离）及 race 通过。独立审查发现真实 pi 兼容和安全缺口，本轮已修部分回归，但仍有 **2 Critical、14 Important、1 Minor** 待关闭；配置保存未知回执等 UI 续接项也未关闭；**不可启用真实自动上传或视为产品完成**。详见[验证](docs/development/web-automated-delivery-verification.md)与[续接清单](docs/development/web-automated-delivery-review-resolution.md)。7331 未更新，真实模型／GitHub 未联调。
+
 - **固定自动开发交付流程（2026-10-17，规格／计划已审核，Tasks 1–12 已实现并通过隔离测试，闭环未完成）**：项目一次配置，任务独立 worktree 开发，本地检查、自动提交／推送任务分支、CI、串行集成及主分支 CI；代码问题有限自动修复，效果验收按项目配置。见[设计](docs/superpowers/specs/2026-10-17-automated-delivery-design.md)与[计划](docs/superpowers/plans/2026-10-17-automated-delivery.md)。配置校验、SQLite 原子周期、Actions 只读客户端、凭据桥、远程 Git 收据、写权租约／候选冻结／本地检查与单 worker 状态机、原会话自动修复与下一轮模型切换、失败分类与修复闭环、持久 FIFO 集成队列与候选重验、主分支快进集成与主 CI 隔离、每步骤崩溃核查（intent／回执、唯一可证补记、真实 Linux SIGKILL 重启恢复）、Web 交付 Socket（固定方法、认证／Origin／会话、操作回放、preflight 只读、set_next_profile）与生产装配（auth／remote／actions／delivery 注入、启动先恢复、关闭顺序、凭据不入库）均已通过 Go 全量／race／vet 审查；界面与真实浏览器闭环（Tasks 13–14）未实施，真实模型／GitHub／Actions 未联调。见[执行记录](docs/development/web-automated-delivery-ledger.md)，7331 未更新，不授权本开发会话执行远程写入。
 
 - 已创建本地 Git 仓库、GitHub 公开仓库与 Paseo 项目入口；2026-10-13 按用户授权建立首个本地代码提交；2026-10-17 用户明确授权提交当前已完成代码并推送 GitHub 的 `main` 分支。

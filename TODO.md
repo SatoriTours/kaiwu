@@ -8,8 +8,11 @@
 - [x] 编写并自查[14项实施计划](docs/superpowers/plans/2026-10-17-automated-delivery.md)，明确接口／失败测试／恢复边界及实际模型切换缺口。
 - [x] 用户回复“ok”审核计划并选择当前会话串行实现＋最终独立只读验收。
 - [x] Task 1、2：配置／领域校验、schema v2、周期／步骤／快照事务与回执；Go 全量、workbench race／vet 通过，见[执行记录](docs/development/web-automated-delivery-ledger.md)。
-- [ ] Task 3：官方 API／OpenAPI 资料被 fake-IP 安全检查阻断，取得可核对官方资料后恢复，不绕过防护。
-- [ ] Task 4–14：凭据、远程 Git、调度／CI／修复、界面、整体与独立验收；产品闭环未完成，7331 未更新。
+- [x] Task 3：官方契约取证阻塞已解除；Actions 只读客户端与合成契约测试已实现。
+- [x] Task 4–12：凭据桥、远程 Git、原会话修复／模型下一轮、FIFO 集成、崩溃恢复、业务 Socket 与生产装配；隔离 Go 测试通过。
+- [x] 2026-10-18 核对未提交成果：本地提交 `1c76c0a`，81 文件；Go 全量与前端原有 16 项复跑通过，未推送。两项 extra-*.txt 历史测试残留保留但未提交。
+- [ ] Task 13：前端按实际 Pi Gemini UI profile 实现，主控已验前端27/27、Chromium42/42（含10项真实服务交付场景）；真实Go＋临时bare＋假pi／Actions六场景race通过。配置保存未知回执等边界仍待收口，不能把页面功能与隔离测试当作整体可上线。
+- [ ] Task 14：独立后端审查已完成但不通过；主控修复 2 Critical、3 Important，证伪 1 Important，另 1 项部分修复。仍有 2 Critical／14 Important／1 Minor，见[续接清单](docs/development/web-automated-delivery-review-resolution.md)。Go 全量／race／vet／构建／烟测与六场景夹具 race 已复验；不宣称真实闭环已可用，不启用真实上传，7331 未更新。
 - [ ] 真实 GitHub／Actions／模型联调另行说明费用、副作用并获准。
 
 # 当前批次：正式 Web 服务

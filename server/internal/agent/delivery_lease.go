@@ -95,6 +95,12 @@ func (m *Manager) AcquireDeliveryLease(ctx context.Context, deliveryID, scope st
 		m.mu.Unlock()
 	}
 	l := &deliveryLease{clear: clearRes}
+	// A real effect preview owns the same execution lock. Stop and reap it
+	// outside Agent/Store locks before reserving the task for delivery.
+	if e := m.stopTaskPreview(ctx, d.TaskID); e != nil {
+		clearRes()
+		return nil, e
+	}
 	release, e := m.reserveTask(ctx, d.TaskID)
 	if e != nil {
 		clearRes()

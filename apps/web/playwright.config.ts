@@ -1,7 +1,10 @@
 import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests",
-  testMatch: "browser.spec.ts",
+  projects: [
+    { name: "existing", testMatch: "browser.spec.ts" },
+    { name: "delivery", testMatch: "delivery.browser.spec.ts", use: { baseURL: "http://127.0.0.1:17332" } },
+  ],
   workers: 1,
   timeout: 30000,
   use: {
@@ -12,11 +15,9 @@ export default defineConfig({
     },
     headless: true,
   },
-  webServer: {
-    command: "node tests/server.mjs",
-    url: "http://127.0.0.1:17331/healthz",
-    timeout: 90000,
-    reuseExistingServer: false,
-  },
+  webServer: [
+    { command: "node tests/server.mjs", url: "http://127.0.0.1:17331/healthz", timeout: 90000, reuseExistingServer: false },
+    { command: "node tests/delivery.server.mjs", url: "http://127.0.0.1:17332/healthz", timeout: 90000, reuseExistingServer: false },
+  ],
   reporter: "list",
 });

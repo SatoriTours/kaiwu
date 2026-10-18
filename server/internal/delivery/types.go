@@ -47,7 +47,7 @@ type Config struct {
 // delivery setup. It never commits or pushes; blockers only state what a
 // machine may not prove about write access.
 type Preflight struct {
-	Ready       bool
-	Fingerprint string
-	Blockers    []string
+	Ready       bool     `json:"ready"`
+	Fingerprint string   `json:"fingerprint"`
+	Blockers    []string `json:"blockers"`
 }

@@ -82,7 +82,7 @@ func (m *Manager) stagePreparingIntegration(d workbench.Delivery) (workbench.Del
 	if err != nil {
 		return m.block(d, "main_remote_unavailable", "远程主分支不可读："+err.Error())
 	}
-	cand, err := gitops.SyncCandidate(m.ctx, p, t, x, d.BaseMainSHA, gitRunnerFunc)
+	cand, err := gitops.SyncCandidate(m.ctx, p, t, x, d.BaseMainSHA, gitRunnerFunc, m.cfg.DataDir)
 	if err != nil {
 		if strings.Contains(err.Error(), "冲突") {
 			return m.block(d, "integration_conflict", "任务候选与主分支冲突，需人工处理："+err.Error())
@@ -138,7 +138,7 @@ func (m *Manager) stageIntegrating(d workbench.Delivery) (workbench.Delivery, bo
 	}
 	lease := m.leaseFor(d.ID)
 	if lease == nil {
-		acquired, err := m.cfg.Agent.AcquireDeliveryLease(m.ctx, d.ID, "integration")
+		acquired, err := m.cfg.Agent.AcquireDeliveryLease(m.ctx, d.ID, "project_task")
 		if err != nil {
 			return d, false
 		}

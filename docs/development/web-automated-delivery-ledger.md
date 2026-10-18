@@ -4,9 +4,9 @@
 
 ## 授权和当前状态
 
-用户已审核[规格](../superpowers/specs/2026-10-17-automated-delivery-design.md)、[14项计划](../superpowers/plans/2026-10-17-automated-delivery.md)，选择当前会话串行实现、最后独立只读验收。实现仍在当前 checkout，不创建新 Paseo 空间／Git worktree，不提交、合并、推送或更新 7331。
+用户已审核[规格](../superpowers/specs/2026-10-17-automated-delivery-design.md)、[14项计划](../superpowers/plans/2026-10-17-automated-delivery.md)，选择当前会话串行实现、最后独立只读验收。实现仍在当前 checkout，不创建新 Paseo 空间／Git worktree。2026-10-18 用户要求核对并提交后继续，已有后端成果已本地提交 `1c76c0a`；仍不合并／推送或更新 7331。
 
-**Task 1、2 基础层已实现并自测通过；Task 3–12 已按计划完成并通过隔离测试（真实模型／GitHub／Actions 仍未联调）；Task 13–14 未实施。** 自动修复闭环、持久 FIFO 集成队列与候选重验、主分支快进集成与主 CI 隔离、每步骤崩溃核查（真实 Linux SIGKILL 重启恢复）、Web 交付 Socket 与生产装配（auth／remote／actions／delivery 注入、启动恢复、关闭顺序）均已隔离验证；界面与真实浏览器闭环仍缺，不可作为用户可用功能验收。最终独立审查尚未进行。
+**Tasks 1–12 后端已实现并通过限定隔离测试；Task 13 主体界面与真实服务浏览器 10 场景通过（前端27/27、完整 Chromium42/42），配置未知回执等续接项尚未关闭；Task 14 独立审查已进行但不通过。** 本轮已修复真实 pi 模型对象握手、私密历史／DataDir、真实 index／commit tree、预览交权与缺省身份等回归，仍有 2 Critical、14 Important（含部分修复项）及 1 Minor 未关闭；见[实际验证](web-automated-delivery-verification.md)、[原审查](web-automated-delivery-review.md)与[裁决／下一步](web-automated-delivery-review-resolution.md)。**不得以 Go／浏览器绿灯替代安全验收，不具备真实联调或上线条件。** 真实模型／GitHub／Actions 未联调，7331 未更新。
 
 ## Task 1：领域规则
 
@@ -97,9 +97,9 @@ TDD：缺失类型／方法的 RED → GREEN；额外的禁用草稿凭据 URL �
 - `GOTOOLCHAIN=local go -C server vet ./internal/workbench`：通过。
 - 新增 7 项顶层交付规则／存储测试，另含输入表驱动子测试；真实 GitHub／模型／Actions、浏览器新流程与最终独立审查均未执行。
 
-完整临时输出和任务 brief 在本计划专属 `.superpowers/sdd/2026-10-17-automated-delivery/`，不清理此目录，后续从 Task 3 恢复，不重复 Task 1、2。
+完整临时输出和任务 brief 在本计划专属 `.superpowers/sdd/2026-10-17-automated-delivery/`，不清理此目录。Task 3 历史取证阻塞已解除，当前从 Task 13 继续，不重复 Tasks 1–12。
 
-## 阻塞：Task 3 官方接口契约
+## 历史阻塞：Task 3 官方接口契约（已解除，见文末 Task 3–7）
 
 按已批准计划，Actions 实现前必须核对官方 run/job/log/attempt API 和固定版本；不能仅凭搜索摘要编造协议。
 
@@ -142,4 +142,18 @@ Task 8：新增 `workbench/delivery_repair.go`（PrepareDeliveryRepair／ClaimDe
 
 - 预检为只读（Inspect＋workflow 存在性），不宣称写权限，不调用 Git 网络。
 - 阶段链之间插入 40ms 节奏（仅为外部可见性，与截止时间无关）；deadline 全部由持久记录加注入时钟驱动，无真实 sleep。
-- `webapi` 的 start_task 仍走原直发路径，装配到 Wake 分流属于 Task 12。
+- 该阶段 `webapi` 的 start_task 仍走原直发路径；本应归属 Task 12 的 Wake 分流在 2026-10-18 真实串联中发现遗漏并补上，见下文。
+
+## 2026-10-18：核对、基线提交与 Task 13 接续
+
+- 核对实际 Git 与文档：20 个已修改、63 个未跟踪文件。排除两项内容为 `cycle-two` 的历史 `extra-*.txt` 测试残留，81 个源码／测试／设计文件本地提交为 `1c76c0a`，未推送。残留保留，不作破坏性清理。
+- 新鲜基线验证：`GOTOOLCHAIN=local go -C server test ./...` 通过；`npm --prefix apps/web test` 原有 16/16 通过。旧记录中 Task 3 仍阻塞的入口已修正，保留当时取证历史。
+- 遵循当前项目实际 UI profile，将 Task 13 前端有界实现交给 Paseo 当前 Workspace 的 Pi `cliproxy/gemini-3.8-flash-high`；主控负责 Go 夹具／后端串联／文档和验收，文件范围不重叠。与早先 inline 方式的差异记入 SDD ledger，不另建 Workspace/worktree。
+- 新增 `server/internal/delivery/testdata/webfixture/`：实际 Store／agent.Manager／delivery／webapi、临时真实 Git/bare、隔离假 pi、只接管 GitHub HTTP 的测试 transport。Go 夹具不编入生产；新增 mjs 仅启动测试进程，17332 回环端口，既有 17331 浏览器服务保留。
+- `TestDeliveryStartDispatchOwnedByWorker` 先失败（HTTP 直接 Send／worker 缺失仍接纳）→ 修正已启用任务只 Wake，缺 worker 返回 503 且不保存周期。
+- `TestDeliveryDispatchPrecedesWorkspacePreparation` 先失败（`workspace_missing`）→ queued 先允许原 Agent.Send 创建任务工作区，提前冻结主分支基线；后续检查仍要求真实归属／租约。
+- 新夹具完整服务链先失败（停在 integrating）→ 追溯真实 Agent 租约仅接受 task/project_task，修正 integration 阶段错误的 `integration` 参数；不是放宽租约。
+- `TestDeliveryPolicyReadOverSocketAndPreflightWireContract` 分别在缺只读映射／大写字段失败 → 增加固定 policy GET 查询及 lowerCamelCase 预检字段；拒绝额外／重复查询参数。
+- `TestDeliveryCandidateWritesRequirePause` 在七个活动阶段先失败 → 普通消息／resume 必须先暂停交付，不允许并发改候选；paused 后仍按旧会话规则接回。
+- `GOTOOLCHAIN=local go -C server test ./internal/delivery/testdata/webfixture -count=1 -v`：正常、人工效果验收、修复一次成功、3 次额度停止、主分支 CI 修复五场景通过。核对真实 bare 的 main SHA、任务／main push 数量及不伪造任务 completed；这些是假模型／假 Actions，不是 GitHub 联调。
+- 最终 Go 全量／race／vet／mod verify／build、六条真实服务夹具的 race、两次信号烟测、关键崩溃与新回归 `-count=10` 均通过。前端27/27、完整 Chromium42/42通过，新截图仅合成项目。独立审查未通过且仍有阻塞，不据此声明 Task 13–14 整体验收完成；详见验证与审查裁决。没有启动或重启 7331，也未使用任何真实远程凭据。

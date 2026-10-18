@@ -80,7 +80,7 @@ Web、PC、Android 围绕同一任务流程设计。Web 是已确认的主要开
 
 用户要求把开发、完成、合并、Push 统一成按项目配置的固定流程，不让每张任务卡片逐项手动操作；推送后检查 GitHub Actions，代码问题由 AI 修复并继续提交。每功能继续使用独立 worktree／分支／原 pi 会话，同仓库主分支集成串行。功能效果验收与技术交付分别记录，是否保留人工效果验收按项目配置，不伪造人工认可。
 
-已审核[书面规格](superpowers/specs/2026-10-17-automated-delivery-design.md)：Go 固定状态机、项目授权快照、任务／主分支精确 SHA CI、有限修复、失败与重启核查。默认次数、凭据及门禁规则见规格，[实施计划](superpowers/plans/2026-10-17-automated-delivery.md)及串行实现方式亦已审核；基础 Task 1、2 已实现，但 Task 3 官方接口资料取证受阻，完整交付与修复能力尚未实现，见[执行记录](development/web-automated-delivery-ledger.md)。不把本次方向确认视为当前仓库提交／推送或真实模型／Actions 调用授权，也不改变未启用项目的现有本地审核流程。
+已审核[书面规格](superpowers/specs/2026-10-17-automated-delivery-design.md)：Go 固定状态机、项目授权快照、任务／主分支精确 SHA CI、有限修复、失败与重启核查。默认次数、凭据及门禁规则见规格，[实施计划](superpowers/plans/2026-10-17-automated-delivery.md)及串行实现方式亦已审核；Tasks 1–12 后端已实现并通过隔离测试；官方接口资料阻塞已解除，当前继续 Task 13 界面及真实 Go 服务浏览器闭环，Task 14 整体独立验收尚未完成，见[执行记录](development/web-automated-delivery-ledger.md)。不把本次方向确认视为当前仓库提交／推送或真实模型／Actions 调用授权，也不改变未启用项目的现有本地审核流程。
 
 ## 5. 配置与模型规则
 

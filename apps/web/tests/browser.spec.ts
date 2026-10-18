@@ -902,7 +902,7 @@ test("lost merge response and missing receipt retry the same operation", async (
   await expect(page.getByRole("dialog")).toContainText("合并完成");
 });
 
-test("pi models: discover, filter, save defaults and choose an existing empty conversation", async ({ page, context }) => {
+test("pi models: discover, choose an empty conversation and expose next-round selection", async ({ page, context }) => {
   await enterStart(page, context);
   await page.getByRole('button', { name: '默认模型', exact: true }).click();
   const picker = page.getByRole('dialog', { name: '默认模型', exact: true });
@@ -939,7 +939,10 @@ test("pi models: discover, filter, save defaults and choose an existing empty co
   expect(JSON.stringify(selected)).not.toContain('must-not-reach-browser');
   await page.locator('#send').click();
   await expect(page.locator('#messages')).toContainText('[隔离协议测试] 已收到：选择模型时保留的草稿');
-  await expect(page.getByRole('button', { name: '选择会话模型', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '选择会话模型', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: '选择会话模型', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('下一轮');
+  await page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }).click();
 });
 
 test("pi models: errors, empty catalog and mobile selection retain draft", async ({ page, context }) => {

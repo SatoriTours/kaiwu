@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import type { Project } from './types.ts';
 
 const props = defineProps<{ projects: Project[]; currentId: string }>();
-const emit = defineEmits<{ choose: [id: string]; add: []; git: []; refresh: [] }>();
+const emit = defineEmits<{ choose: [id: string]; add: []; git: []; delivery: []; refresh: [] }>();
 const root = ref<HTMLElement>();
 const trigger = ref<HTMLButtonElement>();
 const menu = ref<HTMLElement>();
@@ -33,10 +33,11 @@ function choose(id: string) {
   // Clicking the current project must not discard the selected task or draft.
   if (id !== props.currentId) emit('choose', id);
 }
-function action(kind: 'add' | 'git' | 'refresh') {
+function action(kind: 'add' | 'git' | 'delivery' | 'refresh') {
   close(true);
   if (kind === 'add') emit('add');
   else if (kind === 'git') emit('git');
+  else if (kind === 'delivery') emit('delivery');
   else emit('refresh');
 }
 function keydown(event: KeyboardEvent) {
@@ -100,6 +101,10 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside));
         <button type="button" role="menuitem" tabindex="-1" @click="action('git')">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 3-.6 2.2-2 .9-2-.6-2 3.5L5 10.6v2.8l-1.6 1.6 2 3.5 2-.6 2 .9L10 21h4l.6-2.2 2-.9 2 .6 2-3.5-1.6-1.6v-2.8L20.6 9l-2-3.5-2 .6-2-.9L14 3Z" /><circle cx="12" cy="12" r="3" /></svg>
           <span>Git 设置</span>
+        </button>
+        <button type="button" role="menuitem" tabindex="-1" @click="action('delivery')">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" /></svg>
+          <span>交付设置</span>
         </button>
         <button type="button" role="menuitem" tabindex="-1" @click="action('refresh')">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9" /></svg>

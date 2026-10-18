@@ -29,11 +29,12 @@ func TestFakePi(t *testing.T) {
 		if data, ok := response["data"].(map[string]any); ok {
 			// Mirror the launch argv so a different profile launch is
 			// verifiable without a real provider; absence means unknown.
-			data["model"] = fixtureArg("--model")
-			data["provider"] = fixtureArg("--provider")
+			model := fixtureArg("--model")
 			if os.Getenv("KAIWU_AGENT_FAIL_MODEL") == "1" {
-				data["model"] = "wrong-model"
+				model = "wrong-model"
 			}
+			// RpcSessionState.model is a Model object, never a string.
+			data["model"] = map[string]any{"id": model, "provider": fixtureArg("--provider"), "contextWindow": 200000}
 		}
 		if c["type"] == "prompt" {
 			response["data"] = map[string]any{"disposition": "started"}

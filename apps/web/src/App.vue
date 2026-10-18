@@ -16,6 +16,7 @@ import {safePreviewURL} from "./preview.ts";
 import TaskDialog from "./TaskDialog.vue";
 import MergeDialog from "./MergeDialog.vue";
 import ModelDialog from "./ModelDialog.vue";
+import DeliverySettings from "./DeliverySettings.vue";
 import { isMergeRequest } from "./git.ts";
 import {taskState} from "./task-state.ts";
 import { SocketClient } from "./socket.ts";
@@ -30,7 +31,16 @@ import type {
   Conversation,
   Profile,
   TaskPreview,
+  ProjectDeliveryPolicy,
+  DeliverySummary,
 } from "./types.ts";
+import {
+  buildAcceptPayload,
+  buildControlPayload,
+  buildSavePolicyPayload,
+  isDeliveryActive,
+  type PolicyDraft,
+} from "./delivery.ts";
 import {
   createLocalState,
   selectConversation,
@@ -65,6 +75,9 @@ let previewEpoch=0,previewTimer:ReturnType<typeof setTimeout>|undefined;
 const mergePreview = ref<MergePreview>();
 const modelTarget = ref<{ scope: string; projectId?: string; conversationId?: string; taskId?: string; profile?: Profile }>();
 const modelSaving = ref(false), modelError = ref("");
+const deliverySettingsOpen = ref(false);
+const deliverySaving = ref(false);
+const deliveryError = ref("");
 const mergeTarget = ref<Task>();
 const mergeError = ref(""),
   mergeSaving = ref(false),
@@ -339,33 +352,49 @@ async function reconcile(retryOriginal = false) {
   await refresh();
   if (epoch !== authEpoch) return;
   for (const [scope, operation] of [...operations]) {
-    const body = JSON.parse(operation.signature) as Record<string, string>;
     try {
       let receipt: Receipt;
       try {
         receipt = await api<Receipt>("operations/" + operation.id);
       } catch (e) {
         if (epoch !== authEpoch) return;
-        if (
-          retryOriginal &&
-          e instanceof APIError &&
-          e.status === 404 &&
-          state.value
-        ) {
-          receipt = await api<Receipt>("commands", {
-            ...body,
-            operationId: operation.id,
-            revision: state.value.revision,
-            structureRevision: state.value.structureRevision ?? 0,
-          });
-        } else throw e;
+        // 如果是 404，说明服务端尚未记录或已丢弃该 operationId
+        if (e instanceof APIError && e.status === 404) {
+          if (retryOriginal && state.value) {
+            // 区分 delivery_accept / delivery_control / commands
+            if (scope.startsWith("delivery_accept:")) {
+              const body = JSON.parse(operation.signature);
+              receipt = await api<Receipt>("delivery/accept", body);
+            } else if (scope.startsWith("delivery_control:")) {
+              const body = JSON.parse(operation.signature);
+              receipt = await api<Receipt>("delivery/control", body);
+            } else {
+              const body = JSON.parse(operation.signature) as Record<string, string>;
+              receipt = await api<Receipt>("commands", {
+                ...body,
+                operationId: operation.id,
+                revision: state.value.revision,
+                structureRevision: state.value.structureRevision ?? 0,
+              });
+            }
+          } else {
+            throw e;
+          }
+        } else {
+          throw e;
+        }
       }
       if (epoch !== authEpoch) return;
       operations.delete(scope);
-      if (body.type === "send_message" || body.type === "start_task") {
-        const d = local.drafts[body.conversationId!];
-        if (d && operation.draftRevision !== undefined)
-          acceptSent(local, body.conversationId!, operation.draftRevision);
+      if (scope.startsWith("delivery_accept:") || scope.startsWith("delivery_control:")) {
+        // delivery 相关的 operation 完成
+      } else {
+        const body = JSON.parse(operation.signature) as Record<string, string>;
+        if (body.type === "send_message" || body.type === "start_task") {
+          const d = local.drafts[body.conversationId!];
+          if (d && operation.draftRevision !== undefined)
+            acceptSent(local, body.conversationId!, operation.draftRevision);
+        }
       }
       error.value = receipt.notice ?? "";
       await refresh();
@@ -384,7 +413,16 @@ function open(kind: string, topic = "") {
   formError.value = "";
 }
 function openModels(c?: Conversation) {
-  modelTarget.value = c ? { scope: c.id, projectId: c.projectId, conversationId: c.id, taskId: c.taskId, profile: { ...(c.profile.model ? c.profile : state.value?.profile) } as Profile } : { scope: 'default', profile: state.value?.profile };
+  const isStarted = !!c && (c.messages.length > 0 || !!c.sessionFile || c.runState !== 'idle');
+  modelTarget.value = c
+    ? {
+        scope: isStarted ? 'next' : c.id,
+        projectId: c.projectId,
+        conversationId: c.id,
+        taskId: c.taskId,
+        profile: { ...(c.pendingProfile?.model ? c.pendingProfile : c.profile.model ? c.profile : state.value?.profile) } as Profile,
+      }
+    : { scope: 'default', profile: state.value?.profile };
   modelError.value = "";
 }
 async function saveModel(values: Record<string, string>) {
@@ -392,11 +430,184 @@ async function saveModel(values: Record<string, string>) {
   if (!target || modelSaving.value) return;
   modelSaving.value = true; modelError.value = "";
   try {
-    await command({ ...values, type: target.scope === 'default' ? 'set_default_profile' : 'set_conversation_profile', projectId: target.projectId ?? '', conversationId: target.conversationId ?? '', taskId: target.taskId ?? '' });
+    const cmdType = target.scope === 'default'
+      ? 'set_default_profile'
+      : target.scope === 'next'
+        ? 'set_next_profile'
+        : 'set_conversation_profile';
+    await command({
+      ...values,
+      type: cmdType,
+      projectId: target.projectId ?? '',
+      conversationId: target.conversationId ?? '',
+      taskId: target.taskId ?? '',
+    });
     if (epoch === authEpoch && modelTarget.value?.scope === target.scope) modelTarget.value = undefined;
   } catch (e) { if (epoch === authEpoch) modelError.value = e instanceof Error ? e.message : '模型保存失败'; }
   finally { if (epoch === authEpoch) modelSaving.value = false; }
 }
+async function saveDeliveryPolicy(draft: PolicyDraft, operationId: string) {
+  const epoch = authEpoch;
+  const currentProject = projectID.value;
+  deliverySaving.value = true;
+  deliveryError.value = "";
+  try {
+    const payload = buildSavePolicyPayload(operationId, draft);
+    await api("delivery/policy", payload);
+    if (epoch !== authEpoch) return;
+    if (projectID.value === currentProject) {
+      deliverySettingsOpen.value = false;
+    }
+    await refresh();
+  } catch (e) {
+    if (epoch === authEpoch) {
+      deliveryError.value = e instanceof Error ? e.message : "保存交付配置失败";
+    }
+  } finally {
+    if (epoch === authEpoch) deliverySaving.value = false;
+  }
+}
+
+async function acceptDelivery(summary: DeliverySummary) {
+  const epoch = authEpoch;
+  if (!summary || !summary.id || !summary.acceptanceToken || !online.value) return;
+  const scope = "delivery_accept:" + summary.id;
+  const existing = operations.get(scope);
+  if (existing) {
+    // 已经有在途或未知状态的操作，用户再次点击时先只读查询 operations/{id}
+    local.pending[summary.id] = true;
+    error.value = "";
+    try {
+      await api<Receipt>("operations/" + existing.id);
+      if (epoch !== authEpoch) return;
+      operations.delete(scope);
+      await refresh();
+      return;
+    } catch (e) {
+      if (epoch !== authEpoch) return;
+      if (e instanceof APIError && e.status === 404) {
+        error.value = "上一操作暂无回执，未在服务端落地；可点击上方“确认上一操作”以原标识重试";
+      } else if (e instanceof APIError && e.status === 0) {
+        error.value = "网络仍未连通，无法核实上一操作结果";
+      } else {
+        operations.delete(scope);
+        report(e);
+      }
+      return;
+    } finally {
+      if (epoch === authEpoch) local.pending[summary.id] = false;
+    }
+  }
+
+  const operationId = createOperationID();
+  const payload = buildAcceptPayload(
+    operationId,
+    summary.id,
+    summary.acceptanceToken,
+    summary.version,
+  );
+  operations.set(scope, { id: operationId, signature: JSON.stringify(payload) });
+  local.pending[summary.id] = true;
+  error.value = "";
+  try {
+    await api("delivery/accept", payload);
+    if (epoch !== authEpoch) return;
+    operations.delete(scope);
+    await refresh();
+  } catch (e) {
+    if (epoch === authEpoch) {
+      if (e instanceof APIError && e.status === 0) {
+        // 网络中断导致结果未知：立即尝试通过 operations/{id} 查一次看是否已落地
+        try {
+          await api<Receipt>("operations/" + operationId);
+          if (epoch !== authEpoch) return;
+          operations.delete(scope);
+          await refresh();
+          return;
+        } catch {
+          if (epoch !== authEpoch) return;
+          error.value = "验收操作结果未知，请检查网络或点击重试确认";
+        }
+      } else {
+        operations.delete(scope);
+        report(e);
+      }
+    }
+  } finally {
+    if (epoch === authEpoch) local.pending[summary.id] = false;
+  }
+}
+
+async function controlDelivery(summary: DeliverySummary, action: 'pause' | 'resume' | 'cancel' | 'extend_budget') {
+  const epoch = authEpoch;
+  if (!summary || !summary.id || !online.value) return;
+  const scope = "delivery_control:" + summary.id + ":" + action;
+  const existing = operations.get(scope);
+  if (existing) {
+    // 已经有在途或未知状态的操作，用户再次点击时先只读查询 operations/{id}
+    local.pending[summary.id] = true;
+    error.value = "";
+    try {
+      await api<Receipt>("operations/" + existing.id);
+      if (epoch !== authEpoch) return;
+      operations.delete(scope);
+      await refresh();
+      return;
+    } catch (e) {
+      if (epoch !== authEpoch) return;
+      if (e instanceof APIError && e.status === 404) {
+        error.value = "上一操作暂无回执，未在服务端落地；可点击上方“确认上一操作”以原标识重试";
+      } else if (e instanceof APIError && e.status === 0) {
+        error.value = "网络仍未连通，无法核实上一操作结果";
+      } else {
+        operations.delete(scope);
+        report(e);
+      }
+      return;
+    } finally {
+      if (epoch === authEpoch) local.pending[summary.id] = false;
+    }
+  }
+
+  const operationId = createOperationID();
+  const payload = buildControlPayload(
+    operationId,
+    summary.id,
+    action,
+    summary.version,
+  );
+  operations.set(scope, { id: operationId, signature: JSON.stringify(payload) });
+  local.pending[summary.id] = true;
+  error.value = "";
+  try {
+    await api("delivery/control", payload);
+    if (epoch !== authEpoch) return;
+    operations.delete(scope);
+    await refresh();
+  } catch (e) {
+    if (epoch === authEpoch) {
+      if (e instanceof APIError && e.status === 0) {
+        // 网络中断导致结果未知：立即尝试通过 operations/{id} 查一次看是否已落地
+        try {
+          await api<Receipt>("operations/" + operationId);
+          if (epoch !== authEpoch) return;
+          operations.delete(scope);
+          await refresh();
+          return;
+        } catch {
+          if (epoch !== authEpoch) return;
+          error.value = "控制动作结果未知，请检查网络或点击重试确认";
+        }
+      } else {
+        operations.delete(scope);
+        report(e);
+      }
+    }
+  } finally {
+    if (epoch === authEpoch) local.pending[summary.id] = false;
+  }
+}
+
 async function save(values: Record<string, string>) {
   const epoch = authEpoch;
   saving.value = true;
@@ -475,6 +686,16 @@ async function send() {
     ["starting", "running"].includes(conv.runState)
   )
     return;
+
+  // 如果当前任务有进行中的自动交付（且未暂停），提示用户先暂停交付
+  if (conv.taskId) {
+    const delivery = state.value?.deliveries?.[conv.taskId];
+    if (delivery && isDeliveryActive(delivery.phase) && delivery.phase !== "paused") {
+      error.value = "自动交付正在管理该候选，请先暂停交付再发送新消息或接回会话";
+      return;
+    }
+  }
+
   const text = d.text,
     revision = d.revision;
   local.pending[id] = true;
@@ -816,6 +1037,7 @@ onBeforeUnmount(() => {
         @choose="chooseProject"
         @add="open('project')"
         @git="open('git')"
+        @delivery="deliverySettingsOpen = true"
         @refresh="pollGit(true)"
       />
       <div class="global-actions" role="group" aria-label="全局操作">
@@ -856,6 +1078,7 @@ onBeforeUnmount(() => {
         <KanbanBoard v-else
           :executions="state?.executions??{}"
           :git="state?.taskGit ?? {}"
+          :deliveries="state?.deliveries"
           :topics="topics"
           :tasks="tasks"
           :unread="unread"
@@ -883,9 +1106,10 @@ onBeforeUnmount(() => {
               ? state?.executions?.[task.executionId]
               : undefined
           "
+          :delivery="task ? state?.deliveries?.[task.id] : undefined"
           :project-name="project.name"
           :draft="draft"
-          :pending="!!local.pending[local.current]"
+          :pending="!!local.pending[local.current] || (task ? !!local.pending[state?.deliveries?.[task.id]?.id ?? ''] : false)"
           :online="online"
           :agent-available="
             agentAvailable &&
@@ -904,6 +1128,11 @@ onBeforeUnmount(() => {
           @confirm-result="confirmResult"
           @preview-result="openResult"
           @model="openModels(conversation)"
+          @accept-delivery="acceptDelivery"
+          @pause-delivery="s => controlDelivery(s, 'pause')"
+          @resume-delivery="s => controlDelivery(s, 'resume')"
+          @cancel-delivery="s => controlDelivery(s, 'cancel')"
+          @extend-budget-delivery="s => controlDelivery(s, 'extend_budget')"
         />
         <aside v-else class="chat">
           <p class="error">聊天目标无效。请显式选择项目或任务。</p>
@@ -924,6 +1153,15 @@ onBeforeUnmount(() => {
       @recheck="recheckMerge"
     />
     <ModelDialog v-if="modelTarget" :key="modelTarget.scope" :scope="modelTarget.scope" :profile="modelTarget.profile" :saving="modelSaving" :error="modelError" @close="modelTarget = undefined" @submit="saveModel" />
+    <DeliverySettings
+      v-if="deliverySettingsOpen && project"
+      :key="'delivery-settings-' + project.id"
+      :project="project"
+      :saving="deliverySaving"
+      :error="deliveryError"
+      @close="deliverySettingsOpen = false"
+      @save="saveDeliveryPolicy"
+    />
     <TaskDialog
       v-if="dialog"
       :kind="dialog"

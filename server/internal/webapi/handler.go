@@ -369,6 +369,17 @@ func (h *handler) command(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "agent_unavailable", "服务未找到 pi，请检查服务 PATH 或设置 KAIWU_PI_PROGRAM 后重启；输入已保留")
 		return
 	}
+	if c.Type == "start_task" && h.cfg.Delivery == nil {
+		policy, err := h.store.DeliveryPolicy(c.ProjectID)
+		if err != nil {
+			h.failure(w, err)
+			return
+		}
+		if policy.Enabled {
+			fail(w, 503, "delivery_unavailable", "自动交付未装配，请检查服务器凭据；任务尚未启动")
+			return
+		}
+	}
 	if c.Type == "start_task" && !pirpc.ProcessGroupsSupported() {
 		fail(w, 503, "execution_unavailable", "当前平台尚不支持开发执行")
 		return
@@ -388,7 +399,13 @@ func (h *handler) command(w http.ResponseWriter, r *http.Request) {
 	if !receipt.Replay && h.agent != nil {
 		switch receipt.Type {
 		case "send_message", "start_task":
-			e = h.agent.Send(receipt.ConversationID, receipt.CreatedID)
+			if receipt.DeliveryID != "" {
+				// The worker owns dispatch and its durable intent. The HTTP
+				// path must not launch a second, untracked request.
+				h.cfg.Delivery.Wake()
+			} else {
+				e = h.agent.Send(receipt.ConversationID, receipt.CreatedID)
+			}
 		case "resume":
 			e = h.agent.Resume(receipt.ConversationID)
 		}

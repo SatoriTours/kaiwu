@@ -12,7 +12,7 @@ import (
 // must re-run against. A main that is already contained is a no-op: the
 // current workspace is captured unchanged. Conflicts are never auto-resolved:
 // the merge is aborted and the worktree is handed back untouched.
-func SyncCandidate(ctx context.Context, p workbench.Project, t workbench.Task, x workbench.Execution, baseSHA string, runner Runner) (Candidate, error) {
+func SyncCandidate(ctx context.Context, p workbench.Project, t workbench.Task, x workbench.Execution, baseSHA string, runner Runner, serviceRoots ...string) (Candidate, error) {
 	if x.Workspace == "" {
 		return Candidate{}, errors.New("任务执行缺少工作区")
 	}
@@ -40,7 +40,7 @@ func SyncCandidate(ctx context.Context, p workbench.Project, t workbench.Task, x
 			return Candidate{}, errors.New("主分支与任务分支冲突，自动合并被中止，请人工处理")
 		}
 	}
-	return CaptureCandidate(ctx, p, t, x)
+	return CaptureCandidate(ctx, p, t, x, serviceRoots...)
 }
 
 // IntegrateCandidate fast-forwards the project's local main branch onto the

@@ -116,7 +116,7 @@ func captureFingerprint(ctx context.Context, dir string, protected []string, lea
 // CaptureCandidate freezes the task working state with every protection used
 // by merge review: ownership, private paths, unfinished Git operations,
 // deduped staged files and commit scope.
-func CaptureCandidate(ctx context.Context, p workbench.Project, t workbench.Task, x workbench.Execution) (Candidate, error) {
+func CaptureCandidate(ctx context.Context, p workbench.Project, t workbench.Task, x workbench.Execution, serviceRoots ...string) (Candidate, error) {
 	c := Candidate{}
 	if x.Workspace == "" {
 		return c, errors.New("任务执行缺少工作区")
@@ -124,7 +124,7 @@ func CaptureCandidate(ctx context.Context, p workbench.Project, t workbench.Task
 	if e := validateOwner(ctx, p, t, x); e != nil {
 		return c, e
 	}
-	protected, e := privateScope(p, x, nil)
+	protected, e := privateScope(p, x, serviceRoots)
 	if e != nil {
 		return c, e
 	}
@@ -139,10 +139,15 @@ func CaptureCandidate(ctx context.Context, p workbench.Project, t workbench.Task
 		if e = eligible(ctx, x.Workspace, files, protected...); e != nil {
 			return c, e
 		}
-		head, _ := Head(ctx, x.Workspace, "HEAD")
-		if e = committedScope(ctx, x.Workspace, x.BaseSHA, head, protected...); e != nil {
-			return c, e
-		}
+	}
+	// A clean final tree can still contain private data in reachable commits.
+	// Inspect every introduced history, not only currently dirty candidates.
+	head, err := Head(ctx, x.Workspace, "HEAD")
+	if err != nil {
+		return c, err
+	}
+	if e = committedScope(ctx, x.Workspace, x.BaseSHA, head, protected...); e != nil {
+		return c, e
 	}
 	return captureFingerprint(ctx, x.Workspace, protected, nil)
 }
@@ -166,6 +171,15 @@ func CaptureWorkspaceSnapshot(ctx context.Context, dir string, lease ProcessLeas
 func CommitCandidate(ctx context.Context, x workbench.Execution, c Candidate, message, name, email string, runner Runner) (string, error) {
 	if x.Workspace == "" {
 		return "", errors.New("任务执行缺少工作区")
+	}
+	if name == "" {
+		name, _ = output(ctx, x.Workspace, "config", "--local", "--get", "user.name")
+	}
+	if email == "" {
+		email, _ = output(ctx, x.Workspace, "config", "--local", "--get", "user.email")
+	}
+	if name == "" || email == "" {
+		name, email = "Kaiwu", "kaiwu@localhost"
 	}
 	if strings.ContainsAny(name+email, "\r\n\x00<>") || strings.TrimSpace(name) == "" || strings.TrimSpace(email) == "" {
 		return "", errors.New("提交身份无效，请在高级设置中修改")
@@ -215,15 +229,26 @@ func CommitCandidate(ctx context.Context, x workbench.Execution, c Candidate, me
 	if now != c.HEAD {
 		return "", errors.New("任务提交在写入前已变化，请重新检查")
 	}
-	tree, e := workingTree(ctx, x.Workspace, nil)
+	// The real index is what git commit consumes. Rebuilding a temporary
+	// index from the worktree cannot detect an index-only race on a clean file.
+	tree, e := output(ctx, x.Workspace, "write-tree")
 	if e != nil {
 		return "", e
 	}
 	if tree != c.Tree {
-		return "", errors.New("候选 tree 与检查证据不一致；未创建提交")
+		return "", errors.New("实际暂存 tree 与检查证据不一致；未创建提交")
 	}
 	if _, e := runner(ctx, x.Workspace, "-c", "user.name="+name, "-c", "user.email="+email, "commit", "--no-gpg-sign", "-m", message); e != nil {
 		return "", errors.New("候选提交未确认成功，请检查工作区；未自动重试")
 	}
-	return Head(ctx, x.Workspace, "HEAD")
+	sha, err := Head(ctx, x.Workspace, "HEAD")
+	if err != nil {
+		return "", err
+	}
+	committedTree, treeErr := output(ctx, x.Workspace, "rev-parse", sha+"^{tree}")
+	parent, parentErr := output(ctx, x.Workspace, "rev-parse", sha+"^1")
+	if treeErr != nil || parentErr != nil || committedTree != c.Tree || parent != c.HEAD {
+		return "", errors.New("提交 parent/tree 与已检查候选不符；保留现场，禁止上传")
+	}
+	return sha, nil
 }

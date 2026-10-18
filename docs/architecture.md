@@ -65,7 +65,7 @@ Vue 卡片及聊天展示服务器检查结果，审核框只显示目标、SHA�
 
 用户已审核统一项目配置的开发交付[书面规格](superpowers/specs/2026-10-17-automated-delivery-design.md)，[实施计划](superpowers/plans/2026-10-17-automated-delivery.md)及串行实现方式已获审核。计划由纯 Go `delivery` 固定状态机协调原任务 pi、`gitops` 和只读 GitHub Actions REST 适配；任务分支检查通过后串行集成，主分支 CI 通过才标记技术交付。源码修复在原任务 worktree／会话进行，不把 Git／CI 生命周期交给浏览器或仅靠模型提示词。
 
-交付记录、有限修复预算、配置授权快照和持久逻辑队列独立于现有轮次人工确认／实际 Git 状态；副作用意图先落库，重启先核查精确 refs／SHA／run attempt。Task 1、2 的领域校验、schema v2 和原子周期／步骤／摘要已实现，Go 全量／workbench race、vet 通过；Task 3 官方接口资料取证被 fake-IP 安全检查阻断，见[执行记录](development/web-automated-delivery-ledger.md)。调度／远程凭据接入／自动推送和整体独立验收均未完成。现有本地手动合并的授权与恢复规则继续有效。
+交付记录、有限修复预算、配置授权快照和持久逻辑队列独立于现有轮次人工确认／实际 Git 状态；副作用意图先落库，重启先核查精确 refs／SHA／run attempt。Tasks 1–12 的配置／持久化、只读 Actions、凭据桥、受控远程 Git、原任务修复、FIFO 集成、崩溃核查与服务装配已实现并通过隔离测试。官方资料阻塞已解除；2026-10-18 接续 Task 13，并用真实 Store／agent／delivery／webapi＋临时 bare＋假 pi／Actions 验证五条服务链路。界面和最终独立验收尚未完成，真实模型／GitHub 未联调；见[执行记录](development/web-automated-delivery-ledger.md)。现有本地手动合并的授权与恢复规则继续有效。
 
 ## 任务成果与受控 HTTP 预览
 

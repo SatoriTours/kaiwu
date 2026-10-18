@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from "vue";
-import type { Conversation, Task, Execution, GitStatus, Message } from "./types.ts";
+import type { Conversation, Task, Execution, GitStatus, Message, DeliverySummary } from "./types.ts";
 import { isStartRequest } from "./workbench.ts";
 import {taskState} from "./task-state.ts";
 import MergeIcon from "./MergeIcon.vue";
@@ -10,12 +10,15 @@ import ProgressCard from "./ProgressCard.vue";
 import AssistantReply from "./AssistantReply.vue";
 import {groupChatMessages} from './chat-messages.ts';
 import MarkdownContent from "./MarkdownContent.vue";
+import DeliveryStatus from "./DeliveryStatus.vue";
+import { isDeliveryActive } from "./delivery.ts";
 const props = defineProps<{
   conversation: Conversation;
   tasks:Task[];
   task?: Task;
   git?: GitStatus;
   execution?: Execution;
+  delivery?: DeliverySummary;
   projectName: string;
   draft: string;
   pending: boolean;
@@ -34,8 +37,14 @@ const emit = defineEmits<{
   model: [];
   confirmResult:[string];
   previewResult:[string];
+  acceptDelivery: [summary: DeliverySummary];
+  pauseDelivery: [summary: DeliverySummary];
+  resumeDelivery: [summary: DeliverySummary];
+  cancelDelivery: [summary: DeliverySummary];
+  extendBudgetDelivery: [summary: DeliverySummary];
 }>();
 const taskStatus=computed(()=>props.task?taskState(props.task,props.conversation,props.execution).status:'idle');
+const deliveryActive=computed(()=>props.delivery?isDeliveryActive(props.delivery.phase):false);
 const chatEntries=computed(()=>groupChatMessages(props.conversation.messages));
 const messages = ref<HTMLElement>();
 async function showLatestReply(messageID?:string){
@@ -150,7 +159,7 @@ const deliveryLabels: Record<string, string> = {
       </div>
       <div v-if="task" class="chat-actions">
         <button
-          v-if="task.executionId"
+          v-if="task.executionId && !deliveryActive"
           class="merge-task"
           aria-label="合并到主分支"
           :title="git?.reason || '合并到主分支'"
@@ -161,7 +170,7 @@ const deliveryLabels: Record<string, string> = {
         </button>
         <button class="return" @click="emit('project')">← 返回项目对话</button>
         <button
-          v-if="['idle', 'failed', 'interrupted'].includes(taskStatus)"
+          v-if="['idle', 'failed', 'interrupted'].includes(taskStatus) && !deliveryActive"
           class="start-task"
           :aria-label="
             pending
@@ -205,7 +214,21 @@ const deliveryLabels: Record<string, string> = {
         <p>{{conversation.runState==='failed'?'会话接回失败，请检查原因后再次发送重试。':'发送下一条消息时会尝试自动接回原会话。'}}</p>
         <details><summary>查看原因</summary><p>{{conversation.error}}</p></details>
       </div>
-    <div class="progress-panel"><ProgressCard :conversation="conversation" :task="task" :tasks="tasks" :execution="execution" :git="git" :online="online" :pending="pending" :agent-available="agentAvailable" @resume="emit('resume')" @reply="showLatestReply" @confirm="id=>emit('confirmResult',id)" @merge="emit('merge')" @revise="focusEditor" @preview="id=>emit('previewResult',id)"/></div>
+    <div class="progress-panel">
+      <DeliveryStatus
+        v-if="delivery"
+        :summary="delivery"
+        :task-title="task?.title"
+        :accepting="pending"
+        :controlling="pending"
+        @accept="s => emit('acceptDelivery', s)"
+        @pause="s => emit('pauseDelivery', s)"
+        @resume="s => emit('resumeDelivery', s)"
+        @cancel="s => emit('cancelDelivery', s)"
+        @extendBudget="s => emit('extendBudgetDelivery', s)"
+      />
+      <ProgressCard :conversation="conversation" :task="task" :tasks="tasks" :execution="execution" :git="git" :delivery="delivery" :online="online" :pending="pending" :agent-available="agentAvailable" @resume="emit('resume')" @reply="showLatestReply" @confirm="id=>emit('confirmResult',id)" @merge="emit('merge')" @revise="focusEditor" @preview="id=>emit('previewResult',id)"/>
+    </div>
     <div
       class="messages"
       id="messages"
@@ -313,7 +336,7 @@ const deliveryLabels: Record<string, string> = {
           @input="emit('draft', ($event.target as HTMLTextAreaElement).value)"
         />
         <div class="row">
-          <button type="button" class="model-picker" aria-label="选择会话模型" :title="conversation.messages.length || conversation.sessionFile ? '会话已启动，保留原模型配置' : '选择当前会话的 pi 模型'" :disabled="pending || !online || !!conversation.messages.length || !!conversation.sessionFile || conversation.runState !== 'idle'" @click="emit('model')">pi · {{ conversation.profile.model || '选择模型' }}</button
+          <button type="button" class="model-picker" aria-label="选择会话模型" :title="conversation.profile.model ? `当前模型: ${conversation.profile.model}${conversation.pendingProfile ? ' (下一轮将变更为 ' + conversation.pendingProfile.model + ')' : ''}` : '选择当前会话的 pi 模型'" :disabled="pending || !online" @click="emit('model')">pi · {{ conversation.pendingProfile?.model ? `${conversation.pendingProfile.model} (待生效)` : (conversation.profile.model || '选择模型') }}</button
           ><button
             id="send"
             class="primary"

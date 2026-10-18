@@ -70,6 +70,12 @@ func (h *handler) socketCall(r *http.Request, input socketRequest) socketReply {
 			query = "refresh=1"
 		}
 	default:
+		if strings.HasPrefix(input.Method, "delivery/policy?") {
+			values, err := url.ParseQuery(strings.TrimPrefix(input.Method, "delivery/policy?"))
+			if err == nil && len(values) == 1 && len(values["projectId"]) == 1 && values.Get("projectId") != "" {
+				method, path, query = "GET", "/api/delivery/policy", values.Encode()
+			}
+		}
 		for _, prefix := range []string{"operations/", "git/operations/"} {
 			if strings.HasPrefix(input.Method, prefix) {
 				id := strings.TrimPrefix(input.Method, prefix)

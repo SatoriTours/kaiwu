@@ -32,7 +32,7 @@
 - [x] 用户评审设计后已要求开始实现：任务成果／受控 HTTP 效果预览、确认完成后的持久反馈与后续入口，含原 pi／执行锁交接、配置指纹与能力网关；[实现与验收记录](development/web-task-result-preview-verification.md)区分本机验证、独立审查和 7331 更新状态。
 - [x] 顶栏项目切换改为轻量菜单，集中 Git 设置／刷新与添加项目，全局操作靠右；支持键盘、保留任务／草稿及窄屏长名称。7331 已更新，前端 16/16、Chromium 32/32、Go 全量与实际页面只读烟测通过；[验证记录](development/web-project-menu-verification.md)。
 - [x] 聊天首次打开、刷新与切回时定位最新消息，取代旧阅读位置恢复；手动上翻暂停跟随，回到底部恢复。7331 更新、前端 16/16、Chromium 32/32、Go 全量及实际桌面／手机只读烟测通过；[验证](development/web-chat-latest-scroll-verification.md)。
-- [ ] 固定自动开发交付闭环：项目配置与授权快照、原任务 worktree／pi、自动检查／提交／推送、串行集成、精确 SHA 的 GitHub Actions 与有限自动修复。用户已审核[书面规格](superpowers/specs/2026-10-17-automated-delivery-design.md)，[实施计划](superpowers/plans/2026-10-17-automated-delivery.md)及串行实现方式亦已审核；基础 Task 1、2 已实现并通过 Go 全量／workbench race、vet，Task 3 官方接口取证受 fake-IP 安全检查阻塞，闭环未完成，见[执行记录](development/web-automated-delivery-ledger.md)；不等于真实远程写入或模型测试授权。
+- [ ] 固定自动开发交付闭环：项目配置与授权快照、原任务 worktree／pi、自动检查／提交／推送、串行集成、精确 SHA 的 GitHub Actions 与有限自动修复。用户已审核[书面规格](superpowers/specs/2026-10-17-automated-delivery-design.md)，[实施计划](superpowers/plans/2026-10-17-automated-delivery.md)及串行实现方式亦已审核；Tasks 1–12 后端已实现并通过隔离测试，官方接口取证阻塞已解除；2026-10-18 已提交后端基线 `1c76c0a` 并继续 Task 13 界面／浏览器闭环，Task 14 整体独立验收待完成，见[执行记录](development/web-automated-delivery-ledger.md)；不等于真实远程写入或模型测试授权。
 - [ ] pi 真实模型调用、自动主协调编排、完整任务验收与更多故障验证。
 - [ ] 提交构建与版本 Tag/Release 流水线设计、初始化和实际运行验证。
 

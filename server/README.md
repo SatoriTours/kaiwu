@@ -8,6 +8,23 @@
 
 语言基线：Go 1.25.0；直接依赖：`chi v5.2.3`、`coder/websocket v1.8.15`、`modernc.org/sqlite v1.46.1`。本机验收使用 `go1.27.0-X:nodwarf5`（Linux amd64），不冒充 Go 1.25 稳定工具链及其他系统验证。命令指定 `GOTOOLCHAIN=local`，不自动安装新工具链。
 
+## 自动交付（隔离实现，安全验收未通过）
+
+**目前不可在真实项目启用自动上传。** 独立审查仍有阻塞，下面的装配与凭据说明不是放行真实联调；见[原审查](../docs/development/web-automated-delivery-review.md)与[修正／续接清单](../docs/development/web-automated-delivery-review-resolution.md)。
+
+`internal/delivery`、`githubactions`、`githubauth` 与 SQLite schema v2 已实现固定流程；项目默认关闭，需显式配置并授权，不追溯旧任务。2026-10-18 已通过真实 Go 服务＋临时 bare＋假 pi／Actions 的正常、人工验收、修复与主 CI 隔离测试；这不是真实 GitHub／模型验证。界面与最终独立验收进展见[执行记录](../docs/development/web-automated-delivery-ledger.md)。
+
+凭据仅从服务环境读取，不填写到 Web／仓库 URL／SQLite：`server_github_api` 对应 `KAIWU_GITHUB_API_TOKEN`，HTTPS Git 引用 `server_github_https` 对应 `KAIWU_GITHUB_GIT_TOKEN`；SSH 引用对应 `KAIWU_GITHUB_SSH_KEY` 与受限 SSH 配置。API 读取能力不证明 Git 写入权限；启用前先核实目标仓库、必需 push 工作流及部署／发包等触发副作用。缺少 API 或 Git 凭据时交付 worker 不装配，普通看板与未启用项目仍可用。不要使用本文档擅自对真实远程执行联调。
+
+生产关闭顺序为 API／WebSocket → delivery → preview → agent → Store；浏览器连接不拥有服务端任务。已发出的 push 不能靠暂停撤销，未知结果必须核查，不能重复发送来试探。Linux 执行保护不等于 OS 沙箱。
+
+测试夹具不编入生产，另行执行：
+
+```bash
+GOTOOLCHAIN=local go -C server test ./internal/delivery/testdata/webfixture -count=1
+GOTOOLCHAIN=local go -C server test -race ./internal/delivery/testdata/webfixture -count=1
+```
+
 ## 命令
 
 从仓库根目录先进入模块：

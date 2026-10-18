@@ -24,8 +24,8 @@ onMounted(() => { dialog.value?.showModal(); void load(); });
 </script>
 <template>
   <dialog ref="dialog" aria-labelledby="model-dialog-title" @cancel.prevent="!saving && emit('close')">
-    <h2 id="model-dialog-title">{{ scope === 'default' ? '默认模型' : '选择会话模型' }}</h2>
-    <p>{{ scope === 'default' ? '用于之后创建的项目对话和任务，已有会话保留各自配置。' : '保存到当前会话及任务，首次发送前可以调整。' }}</p>
+    <h2 id="model-dialog-title">{{ scope === 'default' ? '默认模型' : scope === 'next' ? '切换下一轮模型' : '选择会话模型' }}</h2>
+    <p>{{ scope === 'default' ? '用于之后创建的项目对话和任务，已有会话保留各自配置。' : scope === 'next' ? '当前会话已启动，修改将在下一轮对话边界生效并持久化到任务，不中断当前运行。' : '保存到当前会话及任务。已启动会话将作为下一轮默认模型生效，不中断当前运行。' }}</p>
     <form @submit.prevent="selected && !loading && !loadError && emit('submit', { provider, model, thinking })">
       <div class="row"><span class="muted">{{ loading ? '正在检测服务器 pi…' : `检测到 ${models.length} 个可用模型` }}</span><button type="button" :disabled="loading || saving" @click="load(true)">重新检测</button></div>
       <p v-if="loadError" class="error" role="alert">{{ loadError }}</p>
@@ -36,7 +36,7 @@ onMounted(() => { dialog.value?.showModal(); void load(); });
       <label v-if="selected?.reasoning"><span>思考级别</span><select aria-label="思考级别" v-model="thinking" :disabled="saving"><option value="">沿用 pi 默认</option><option value="off">关闭</option><option value="minimal">最少</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">最高（模型须支持）</option></select></label>
       <p class="muted">选择后沿用服务器 pi 中该提供商的登录或服务 API Key。凭据仅保存在服务器的隔离会话，不传给浏览器；不加载个人扩展。检测不会发送模型请求。</p>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <div class="dialog-actions"><button type="button" :disabled="saving" @click="emit('close')">取消</button><button class="primary" :disabled="saving || loading || !!loadError || !selected">{{ saving ? '保存中…' : '保存模型' }}</button></div>
+      <div class="dialog-actions"><button type="button" :disabled="saving" @click="emit('close')">取消</button><button class="primary" :disabled="saving || loading || !!loadError || !selected">{{ saving ? '保存中…' : scope === 'next' ? '下一轮使用此模型' : '保存模型' }}</button></div>
     </form>
   </dialog>
 </template>

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.25.0；现有 net/http、chi v5.2.3、coder/websocket v1.8.15、modernc SQLite v1.46.1；Vue 3＋TypeScript＋Vite；现有 Node 原生测试和 Playwright。远程 HTTP 使用 Go 标准库，不新增生产 Node/TypeScript 宿主或 pi 扩展。
 
-**Spec:** [已获用户审核的书面规格](../specs/2026-10-17-automated-delivery-design.md)。2026-10-17 用户在规格交付后回复“ok”；本计划及当前会话串行实现＋最终独立验收方式已获用户“ok”确认。Task 1–3 已实现并自测（Task 3 的官方文档抓取阻塞已解除，契约见 `server/internal/githubactions/testdata/contracts.md`）；Task 4–14 实施中，见[执行记录](../../development/web-automated-delivery-ledger.md)。
+**Spec:** [已获用户审核的书面规格](../specs/2026-10-17-automated-delivery-design.md)。2026-10-17 用户在规格交付后回复“ok”；本计划及当前会话串行实现＋最终独立验收方式已获用户“ok”确认。Tasks 1–12 已实现并通过隔离测试（Task 3 官方文档阻塞已解除，契约见 `server/internal/githubactions/testdata/contracts.md`）；2026-10-18 后端基线已本地提交 `1c76c0a`，Task 13–14 继续实施，见[执行记录](../../development/web-automated-delivery-ledger.md)。
 
 ## Global Constraints
 
@@ -293,4 +293,4 @@ Go 命令从根目录使用 `GOTOOLCHAIN=local go -C server ...`；实现者每�
 
 建议**当前会话串行实现＋完成后一次独立只读验收**：原会话/锁/Store/队列接口依赖紧密，又有其他未提交UI成果，单写入更易集成、上下文成本较低。另一方式是逐任务子Agent实现＋独立逐项审查，审查更密但上下文成本更高；选用时仍须遵守实际profiles、同Workspace、文件边界与不并发写共享checkout的规则。
 
-用户已确认推荐执行方式并开始串行实施。当前停在 Task 3 的官方接口契约核对；不放宽网络安全检查，不调真实模型／GitHub，不提交代码，不更新 7331。恢复条件见执行记录，不重复已完成任务。
+用户已确认推荐执行方式并开始实施。Tasks 1–12 后端已完成隔离实现；2026-10-18 用户要求提交并继续，已有后端成果已本地提交 `1c76c0a`。续接按当前项目角色规则将 Task 13 前端交给已保存的 Pi Gemini UI profile；主控负责不重叠的 Go 夹具、串联修正及验收，差异与代价记入执行账本。不创建新 Workspace/worktree，不调用真实模型／GitHub，不推送、不更新 7331。Task 13–14 完成后仍需区分隔离验证与真实联调。

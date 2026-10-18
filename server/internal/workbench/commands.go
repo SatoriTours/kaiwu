@@ -182,6 +182,9 @@ func apply(st *State, c Command) (Receipt, error) {
 		if !ok || conversation.ProjectID != c.ProjectID || (c.TaskID != "" && c.TaskID != conversation.TaskID) {
 			return r, Missing()
 		}
+		if summary := st.Deliveries[conversation.TaskID]; DeliveryActive(summary.Phase) && summary.Phase != "paused" {
+			return r, Conflict("自动交付正在管理该候选，请先暂停交付再发送新消息或接回会话")
+		}
 		if conversation.RunState == "running" || conversation.RunState == "starting" {
 			return r, Conflict("会话正在运行，草稿已保留")
 		}

@@ -15,7 +15,14 @@ func main() {
 	session := "fixture"
 	sessionDir := ""
 	development := false
+	model, provider := "isolated-test", "fixture"
 	for i, arg := range os.Args {
+		if arg == "--model" && i+1 < len(os.Args) {
+			model = os.Args[i+1]
+		}
+		if arg == "--provider" && i+1 < len(os.Args) {
+			provider = os.Args[i+1]
+		}
 		if arg == "--session-id" && i+1 < len(os.Args) {
 			session = os.Args[i+1]
 		}
@@ -57,7 +64,7 @@ func main() {
 		if c["type"] == "prompt" {
 			c["message"] = strings.Split(fmt.Sprint(c["message"]), "\n\n<kaiwu-reply-requirements>")[0]
 		}
-		data := map[string]any{"sessionId": session, "sessionFile": file, "isStreaming": false, "isCompacting": false, "pendingMessageCount": 0}
+		data := map[string]any{"sessionId": session, "sessionFile": file, "isStreaming": false, "isCompacting": false, "pendingMessageCount": 0, "model": map[string]any{"id": model, "provider": provider, "contextWindow": 200000}}
 		if c["type"] == "prompt" {
 			data = map[string]any{"disposition": "started"}
 		}

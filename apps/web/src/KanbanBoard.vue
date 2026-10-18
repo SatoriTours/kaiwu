@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { Topic, Task, Conversation, GitStatus, Execution } from "./types.ts";
+import type { Topic, Task, Conversation, GitStatus, Execution, DeliverySummary } from "./types.ts";
 import {taskState} from "./task-state.ts";
+import {deliveryView, isDeliveryActive} from "./delivery.ts";
 import GitStatusView from "./GitStatus.vue";
 import MergeIcon from "./MergeIcon.vue";
 import TaskActionIcon from "./TaskActionIcon.vue";
@@ -8,6 +9,7 @@ const props = defineProps<{
   topics: Topic[];
   executions:Record<string,Execution>;
   git: Record<string, GitStatus>;
+  deliveries?: Record<string, DeliverySummary>;
   tasks: Task[];
   unread: Record<string, number>;
   selected: string;
@@ -120,7 +122,13 @@ function actionLabel(task: Task) {
             >
               <div class="task-top">
                 <span class="task-number">KW-{{ task.id.slice(0, 6) }}</span
-                ><span class="task-status" :data-status="presentation(task).status">{{
+                ><span
+                  v-if="deliveries?.[task.id]?.phase"
+                  class="task-delivery-badge"
+                  :class="deliveries[task.id].phase"
+                  :title="'自动交付: ' + deliveryView(deliveries[task.id]).label"
+                >{{ deliveryView(deliveries[task.id]).label }}</span>
+                <span class="task-status" :data-status="presentation(task).status">{{
                   presentation(task).label
                 }}</span>
               </div>
@@ -135,7 +143,7 @@ function actionLabel(task: Task) {
               <span class="owner"><span class="avatar">π</span>pi</span>
               <GitStatusView v-if="task.executionId" :status="git[task.id]" />
               <button
-                v-if="task.executionId"
+                v-if="task.executionId && !isDeliveryActive(deliveries?.[task.id]?.phase)"
                 class="merge-task"
                 aria-label="合并到主分支"
                 :title="git[task.id]?.reason || '合并到主分支'"
@@ -145,6 +153,7 @@ function actionLabel(task: Task) {
                 <MergeIcon />
               </button>
               <button
+                v-if="!isDeliveryActive(deliveries?.[task.id]?.phase)"
                 class="start-task"
                 :aria-label="actionLabel(task)"
                 :title="actionLabel(task)"

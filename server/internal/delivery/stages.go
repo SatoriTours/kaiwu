@@ -30,7 +30,10 @@ func dms(seconds int64) time.Duration { return time.Second * time.Duration(secon
 func (m *Manager) stageQueued(d workbench.Delivery) (workbench.Delivery, bool) {
 	st := m.store.Snapshot()
 	p, t, x, ok := executionOf(st, d)
-	if !ok || x.Workspace == "" {
+	// A new task's workspace is created by the original Agent.Send. Requiring
+	// it before dispatch makes first-time delivery impossible. The candidate
+	// and lease gates still require the prepared, owned workspace afterwards.
+	if !ok {
 		return m.block(d, "workspace_missing", "任务执行缺少可用工作区")
 	}
 	if _, found := m.roundSettled(st, d); !found {
@@ -59,10 +62,13 @@ func (m *Manager) stageQueued(d workbench.Delivery) (workbench.Delivery, bool) {
 		if err != nil {
 			return d, false
 		}
-		m.rememberDispatched(d.ID)
 		if err = m.cfg.Agent.Send(t.ConversationID, d.RoundID); err != nil {
-			return m.block(d, "dispatch_failed", "通知原会话失败："+err.Error())
+			// sent is the version after the durable intent. Blocking with the
+			// old d loses CAS and the next scan can invent developing without
+			// ever sending a request.
+			return m.block(sent, "dispatch_failed", "通知原会话失败，未标记为已派发："+err.Error())
 		}
+		m.rememberDispatched(d.ID)
 		dispatch.Phase = "observed"
 		dispatch.Summary = "已通知原 pi 会话执行本次任务"
 		// Same staged chain still holds the store's own version, so the
@@ -74,6 +80,9 @@ func (m *Manager) stageQueued(d workbench.Delivery) (workbench.Delivery, bool) {
 	next.CommonDir = common
 	next.Fingerprint = workbench.ProtectedDeliveryFingerprint(d.Policy)
 	next.BaseMainSHA = x.BaseSHA
+	if next.BaseMainSHA == "" {
+		next.BaseMainSHA = localMain
+	}
 	next.LocalMainSHA = localMain
 	next.TriggerDeadline = m.now().Add(dms(d.Policy.TriggerSeconds))
 	next.ActiveSince = m.now()
@@ -126,7 +135,7 @@ func (m *Manager) stageLocalChecking(d workbench.Delivery) (workbench.Delivery, 
 		m.holdLease(d.ID, acquired)
 		lease = acquired
 	}
-	cand, err := gitops.CaptureCandidate(m.ctx, p, t, x)
+	cand, err := gitops.CaptureCandidate(m.ctx, p, t, x, m.cfg.DataDir)
 	if err != nil {
 		return m.block(d, "candidate_unavailable", "任务候选无法冻结："+err.Error())
 	}

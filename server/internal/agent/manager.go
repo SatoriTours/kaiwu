@@ -175,8 +175,10 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 			IsStreaming  bool   `json:"isStreaming"`
 			IsCompacting bool   `json:"isCompacting"`
 			Pending      int    `json:"pendingMessageCount"`
-			Model        string `json:"model"`
-			Provider     string `json:"provider"`
+			Model        *struct {
+				ID       string `json:"id"`
+				Provider string `json:"provider"`
+			} `json:"model"`
 		}
 		restoring := c.SessionFile != "" && (hasHistory(c) || fileExists(c.SessionFile))
 		if e != nil || json.Unmarshal(response.Data, &state) != nil || state.SessionID != c.SessionID || state.IsStreaming || state.IsCompacting || state.Pending != 0 || m.validateLocation(c, state.SessionFile) != nil || ((restoring || fileExists(state.SessionFile)) && m.validateSession(c, state.SessionFile) != nil) || (restoring && state.SessionFile != c.SessionFile) {
@@ -187,9 +189,9 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 		// match the requested profile before this request is allowed to send.
 		// A mismatch can never be silently downgraded to the old model.
 		if pending != nil && messageID != "" {
-			honest := (state.Model == "" || state.Model == c.Profile.Model) && (state.Provider == "" || state.Provider == c.Profile.Provider)
+			honest := state.Model != nil && state.Model.ID == c.Profile.Model && state.Model.Provider == c.Profile.Provider
 			if !honest {
-				m.stopFailed(c.ID, entry, client, "实际模型与请求不符（报告 "+state.Model+"）；本轮请求未发送，模型切换请求保留", false)
+				m.stopFailed(c.ID, entry, client, "实际模型未报告或与请求不符；本轮请求未发送，模型切换请求保留", false)
 				return
 			}
 		}

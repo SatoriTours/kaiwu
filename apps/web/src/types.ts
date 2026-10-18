@@ -65,12 +65,15 @@ export interface Conversation {
   runState: string;
   error?: string;
   profile: Profile;
+  pendingProfile?: Profile;
   messages: Message[];
 }
 export interface Snapshot {
   structureRevision?: number;
   taskGit?: Record<string, GitStatus>;
   merges?: Record<string, MergeOperation>;
+  deliveries?: Record<string, DeliverySummary>;
+  deliveryPolicies?: Record<string, DeliveryPolicySummary>;
   revision: number;
   projects: Record<string, Project>;
   topics: Topic[];
@@ -144,4 +147,115 @@ export interface TaskPreview {
  path?: string;
  url?: string;
  logs?: string;
+}
+
+export interface DeliveryCheck {
+  id: string;
+  argv: string[];
+  dir: string;
+  timeoutSeconds: number;
+}
+export interface DeliveryWorkflow {
+  id: number;
+  jobs: string[];
+}
+export interface DeliveryRepository {
+  id: number;
+  owner: string;
+  name: string;
+  url: string;
+  mainBranch: string;
+}
+export interface ProjectDeliveryPolicy {
+  projectId: string;
+  version: number;
+  enabled: boolean;
+  requireAcceptance: boolean;
+  allowCreateMain: boolean;
+  repository: DeliveryRepository;
+  checks: DeliveryCheck[];
+  taskWorkflows: DeliveryWorkflow[];
+  mainWorkflows: DeliveryWorkflow[];
+  maxRepairs: number;
+  activeSeconds: number;
+  triggerSeconds: number;
+  ciSeconds: number;
+  gitCredentialRef: string;
+  apiCredentialRef: string;
+  authorizationDigest: string;
+  actor: string;
+  authorizedAt: string;
+  revokedAt?: string;
+}
+export interface DeliveryStep {
+  id: string;
+  deliveryId: string;
+  kind: string;
+  inputFingerprint: string;
+  phase: string;
+  beforeSHA?: string;
+  afterSHA?: string;
+  tree?: string;
+  ref?: string;
+  summary: string;
+  bootId?: string;
+  processGroup?: number;
+  exitCode?: number;
+  exitKnown?: boolean;
+  truncated?: boolean;
+  sequence: number;
+  startedAt: string;
+  finishedAt?: string;
+}
+export interface DeliveryCI {
+  deliveryId: string;
+  stage: string;
+  branch: string;
+  sha: string;
+  event: string;
+  status: string;
+  conclusion?: string;
+  url: string;
+  repositoryId?: number;
+  workflowId?: number;
+  runId?: number;
+  attempt?: number;
+  jobs?: Record<string, string>;
+  observedAt?: string;
+}
+export interface DeliverySummary {
+  id: string;
+  projectId: string;
+  taskId: string;
+  phase: string;
+  version: number;
+  cycle: number;
+  candidateSHA?: string;
+  localMainSHA?: string;
+  remoteMainSHA?: string;
+  requireAcceptance: boolean;
+  acceptanceToken?: string;
+  acceptedSHA?: string;
+  repairsUsed: number;
+  repairsLimit: number;
+  blockCode?: string;
+  blockReason?: string;
+  holdsTurn: boolean;
+  steps: DeliveryStep[];
+  ci: DeliveryCI[];
+}
+export interface DeliveryPolicySummary {
+  version: number;
+  enabled: boolean;
+  requireAcceptance: boolean;
+  repository: DeliveryRepository;
+}
+export interface DeliveryStepPage {
+  items: DeliveryStep[];
+  next: number;
+}
+export interface PreflightReport {
+  ready: boolean;
+  fingerprint: string;
+  blockers: string[];
 }
