@@ -1,6 +1,6 @@
 # 自动交付设置：简化界面与发布验证
 
-日期：2026-10-18。状态：界面改版及独立复验通过；本批提交发布与 7331 更新待执行。
+日期：2026-10-18。状态：界面改版及独立复验通过，代码 `ddc811f` 已推送 main 并部署到原 7331；真实自动交付仍禁用。
 
 ## 用户确认的范围
 
@@ -26,10 +26,22 @@
 - 修后复验实际执行：`npm --prefix apps/web test` 28/28；`npm --prefix apps/web run build` 通过；`cd apps/web && npx playwright test --project=delivery` 10/10（33.8 秒）。首轮完整 existing 32＋delivery 10 共 42/42，修后未机械重跑不受影响的 existing 32 项。
 - 主控已检查实际 diff、范围和独立复验证据，并查看修后 1440×900 与 390×844 合成截图。复验另覆盖 1440×1000、1280×720、360×800 和全部向导；固定底栏完整可见、dialog 不滚动、body 单一滚动，无横向溢出。
 - 保存失败保留输入、重开回显、已启用策略只读、零时间序列化、workflow/jobs 保留、预检真实回执且隔离 pushes 0→0，均经独立复验。新增 API 时间零值兼容仅为 disabled 草稿能被 Go 正确反序列化，无后端代码或存储 schema 改动。
-- 提交、远端同步与 GitHub Actions：待执行；开始前查询仓库默认主分支为 `main`，当前无 Actions workflows。
-- 7331 更新、登录与数据保留：待执行。
+- 代码提交：`ddc811f04bda2f51da7c0f21949b9dcc54687682`，已正常推送 `origin/main`，`git ls-remote` 核对一致。当前就在实际默认主分支 main，不制造额外合并提交，也不强推。GitHub workflows 数量为 0，该提交 Actions runs 为 `[]`，没有 CI 被触发，不能声称 CI 通过。
+- 7331 实际烟测：Chromium 检查新概览、保存草稿可用／启用禁用、1440/390/360px 布局、Cookie 登录重开与刷新、只读预检仍返回 503 `delivery_unavailable`，6 项通过，0 页面异常，0 commands／Git merge／交付验收控制／预览启动等副作用请求。主控已实际查看真实服务桌面与手机截图（仅存私有目录）。
+- 数据保留：SQLite 完整性检查 ok，原 1 项目／1 任务／2 会话／19 消息／19 登录记录保留；逐条消息摘要、会话 ID/sessionFile、原登录行、访问令牌摘要均一致，策略仍为0，未为了烟测保存真实项目配置。只创建并退出独立测试登录，不影响原登录。
 
 合成服务截图：[桌面](../design/web-service/delivery-settings-desktop.png)、[手机](../design/web-service/delivery-settings-mobile.png)。真实项目截图、令牌、Cookie、数据库及会话日志保留在私有忽略目录，不提交到 Git。
+
+## 本机部署与运行证据
+
+- 入口：`http://192.168.2.122:7331`；Paseo 托管终端沿用“开悟网页服务7331”。
+- 二进制：`server/bin/kaiwu-server-ddc811f`，SHA-256 `c8730a7e11b0e2cc3fbc092fab2e06b620f59daa45daabbce1bfab1c75a17a4c`。
+- 部署前实际运行 `npm --prefix apps/web run build` 与 `GOTOOLCHAIN=local go -C server build -o bin/kaiwu-server-ddc811f ./cmd/kaiwu-server`，均通过。真实首页引用 `index-DiJABmwr.js`／`index-DurnKtjX.css`，已与构建输出比对。
+- Go 构建元数据 revision 为上述代码提交；`vcs.modified=true` 因两份保留的未跟踪测试残留，构建时 tracked/index 无差异，没有伪造干净标记。本机工具链为 `go1.27.0-X:nodwarf5`，不代表稳定工具链或跨平台验证。
+- 部署前通过 SQLite backup API 与私有目录备份保存到 `.kaiwu/backups/before-delivery-settings-20261018T092152Z/`；重启前确认没有 starting/running 会话或活动交付，核对实际进程身份后 SIGTERM 正常停止，未按陈旧 PID 杀进程。本次 schema 保持2，无新迁移。
+- 首次启动被私有启动器的端口探测阻止：旧连接处于 TIME_WAIT，但无 LISTEN。核实后仅将探测 socket 的 `SO_REUSEADDR` 对齐 Go 监听行为，原端口重试一次成功；没有换端口、强杀或放宽监听范围。
+- 私有启动器 `.kaiwu/start-web-delivery-settings.py` 仍只读取原令牌并 exec Go，剥离本进程 `KAIWU_GITHUB_*`。实际 `/proc` 核验该类变量为空，真实只读预检503确认 worker 未装配；并非以预检绕过门禁。
+- 私有运行及保留证据：`.kaiwu/delivery-settings-{release-before,release-preservation,live-verification}.json`；实际项目截图仅 `.kaiwu/delivery-settings-live-{desktop,mobile}.png`。后续补记文档提交不改变已部署程序，运行代码版本以上述 `ddc811f` 为准。
 
 ## 保留的低危观察与未验证项
 
