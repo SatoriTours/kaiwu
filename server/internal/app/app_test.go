@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -480,4 +481,76 @@ func TestDeliveryAppLifecycle(t *testing.T) {
 			t.Fatal("service did not stop")
 		}
 	})
+}
+
+// TestVersionEndpointAppLifecycle proves the production assembly exposes the
+// authenticated version endpoint and reads the bounded deployment record from
+// the absolute KAIWU_DATA_DIR. The test binary carries no injected revision, so
+// it must report dev rather than a checkout HEAD.
+func TestVersionEndpointAppLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	addr := freeAddr(t)
+	token := strings.Repeat("k", 32)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, config.Config{ListenAddr: addr, Workbench: config.Workbench{Token: token, DataDir: dir}}, discardLogger())
+	}()
+	client := localClient(t)
+	waitForHealth(t, client, addr)
+	code, _, cookies := postJSON(t, client, "http://"+addr+"/api/login", "", `{"token":"`+token+`"}`)
+	if code != 200 || len(cookies) == 0 {
+		t.Fatalf("login failed: %d", code)
+	}
+	cookie := cookies[0].Name + "=" + cookies[0].Value
+	get := func() (int, http.Header, map[string]any) {
+		t.Helper()
+		req, err := http.NewRequest("GET", "http://"+addr+"/api/version", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Cookie", cookie)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		var parsed map[string]any
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("version body: %q", body)
+		}
+		return resp.StatusCode, resp.Header, parsed
+	}
+	if code, header, body := get(); code != 200 || header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("version endpoint: %d %v", code, header)
+	} else if body["revision"] != "dev" {
+		t.Fatalf("development build claimed a revision: %v", body)
+	} else if deployment, _ := body["deployment"].(map[string]any); deployment["status"] != "unknown" || body["deployedAt"] != "" {
+		t.Fatalf("missing record not reported unknown: %v", body)
+	}
+
+	other := strings.Repeat("a", 40)
+	record := `{"revision":"` + other + `","deployedAt":"2026-10-19T02:00:00Z","deployment":{"revision":"` + other + `","status":"failed","at":"2026-10-19T02:00:00Z"}}`
+	if err := os.WriteFile(filepath.Join(dir, "deployment-status.json"), []byte(record), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, body := get()
+	deployment, _ := body["deployment"].(map[string]any)
+	if deployment["status"] != "failed" || deployment["revision"] != other {
+		t.Fatalf("deployment record not read: %v", body)
+	}
+	if body["deployedAt"] != "" {
+		t.Fatalf("foreign revision claimed as deployed: %v", body)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not stop")
+	}
 }

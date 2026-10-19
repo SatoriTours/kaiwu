@@ -89,6 +89,10 @@ GOTOOLCHAIN=local go run ./cmd/kaiwu-server
 
 健康检查仅返回 `{"status":"ok","service":"kaiwu-server"}`，不是 Agent/数据库/客户端就绪证明。默认仅回环；现已按用户要求支持指定私网 IP＋令牌的局域网访问，不开放公网／通配监听；完整命令和配置见 [server README](server/README.md)。
 
+### 运行版本与本地自动部署
+
+登录后 `GET /api/version` 返回运行中的完整修订号、构建时间与最近一次部署结果；开发构建显示 `dev`，不读取 checkout `HEAD` 冒充版本。通用脚本位于 [scripts/](scripts/)，只在配置主分支的已提交快照通过全量测试后，经用户级 systemd 自动部署到本地目标；候选启动前先停自有服务并用 Node 内置 sqlite 备份数据库，失败时只在 schema 未变化时切回上一个发布，否则停止候选、保留现场等人工核对。配置模板、接口契约、状态文件与失败语义见[本地自动部署与运行版本](docs/development/local-deployment.md)。真实目标地址与凭据只放在被 Git 忽略的本地配置中，不进入仓库。
+
 ## 已确认技术方向
 
 | 部分 | 技术与范围 |

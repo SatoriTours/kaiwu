@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/SatoriTours/kaiwu/server/internal/agent"
+	"github.com/SatoriTours/kaiwu/server/internal/buildinfo"
 	"github.com/SatoriTours/kaiwu/server/internal/config"
 	"github.com/SatoriTours/kaiwu/server/internal/delivery"
 	"github.com/SatoriTours/kaiwu/server/internal/githubactions"
@@ -123,7 +124,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 			}
 		}
 		catalog := &pimodel.Catalog{Program: wb.Program, SourceDir: wb.PiAgentDir, DataDir: filepath.Join(wb.DataDir, "probes")}
-		handler = webapi.New(webapi.Config{Previews: previews, Models: catalog, Git: manager, Delivery: deliveryCommander(deliveryMgr), Context: ctx, Host: ln.Addr().String(), Token: wb.Token, Assets: webui.Files(), Health: handler, AgentAvailable: wb.Program != ""}, store, manager)
+		handler = webapi.New(webapi.Config{Previews: previews, Models: catalog, Git: manager, Delivery: deliveryCommander(deliveryMgr), Context: ctx, Host: ln.Addr().String(), Token: wb.Token, Assets: webui.Files(), Health: handler, AgentAvailable: wb.Program != "", Version: buildinfo.Current(), Status: func() buildinfo.DeploymentStatus { return buildinfo.ReadDeploymentStatus(wb.DataDir) }}, store, manager)
 		defer func() {
 			if closer, ok := handler.(interface{ Close() error }); ok {
 				result = errors.Join(result, closer.Close())

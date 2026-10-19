@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SatoriTours/kaiwu/server/internal/buildinfo"
 	"github.com/SatoriTours/kaiwu/server/internal/pimodel"
 	"github.com/SatoriTours/kaiwu/server/internal/pirpc"
 	"github.com/SatoriTours/kaiwu/server/internal/preview"
@@ -45,6 +46,11 @@ type Config struct {
 	Assets         fs.FS
 	Health         http.Handler
 	AgentAvailable bool
+	// Version is the running binary's own metadata; Status reads the bounded
+	// deployment record. Both may be zero: the endpoint then reports unknown
+	// instead of inventing a revision.
+	Version buildinfo.Info
+	Status  func() buildinfo.DeploymentStatus
 }
 type handler struct {
 	cfg           Config
@@ -200,6 +206,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.git(w, r)
 	case strings.HasPrefix(r.URL.Path, "/api/delivery/"):
 		h.delivery(w, r)
+	case r.URL.Path == "/api/version" && r.Method == "GET":
+		h.version(w, r)
 	case r.URL.Path == "/api/session" && r.Method == "GET":
 		respond(w, 200, map[string]bool{"ok": true})
 	case r.URL.Path == "/api/snapshot" && r.Method == "GET":

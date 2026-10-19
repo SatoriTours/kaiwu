@@ -17,6 +17,7 @@ import TaskDialog from "./TaskDialog.vue";
 import MergeDialog from "./MergeDialog.vue";
 import ModelDialog from "./ModelDialog.vue";
 import DeliverySettings from "./DeliverySettings.vue";
+import VersionBadge from "./VersionBadge.vue";
 import { isMergeRequest } from "./git.ts";
 import {taskState} from "./task-state.ts";
 import { SocketClient } from "./socket.ts";
@@ -1177,6 +1178,7 @@ onBeforeUnmount(() => {
         @refresh="pollGit(true)"
       />
       <div class="global-actions" role="group" aria-label="全局操作">
+        <VersionBadge />
         <button aria-label="默认模型" title="为新项目和任务选择默认模型" @click="openModels()">默认模型</button>
         <span class="connection" :class="{ off: !online }" role="status">{{
           online ? "● 已连接" : "○ 正在重连"

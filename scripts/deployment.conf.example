@@ -1,0 +1,74 @@
+# Kaiwu 本地自动部署配置模板。
+#
+# 复制到仓库内被 Git 忽略的 .kaiwu/local-deployment.conf 并替换占位符；
+# 所有值都不能包含空白或 shell 元字符。这里不放真实地址、机器名或任何凭据。
+#
+# 触发方式：
+#   scripts/install-hooks.sh
+#
+# 手动执行（不等待提交钩子）：
+#   scripts/deploy.sh
+#
+# 查看目标上的最近一次部署记录：
+#   scripts/deploy.sh --status
+
+# 触发部署的主分支名，只响应 refs/heads/<分支> 的提交（不是删除）。
+DEPLOY_BRANCH=main
+
+# 目标 SSH 主机，通常为 <用户>@<主机>。
+DEPLOY_SSH_HOST=<用户>@<主机>
+
+# 目标 SSH 端口。
+DEPLOY_SSH_PORT=22
+
+# 目标上的发布目录，绝对路径，必须与数据目录分离。
+DEPLOY_REMOTE_BASE=/home/<用户>/.local/share/kaiwu-deploy
+
+# 目标上的服务数据目录，绝对路径，存放 SQLite、部署状态与备份记录。
+DEPLOY_DATA_DIR=/home/<用户>/.local/share/kaiwu
+
+# 服务使用的 SQLite 文件名（位于 DEPLOY_DATA_DIR 内），用于备份与 schema 核对。
+DEPLOY_DB_NAME=workbench.db
+
+# systemd 用户服务名。
+DEPLOY_SERVICE_NAME=kaiwu-server
+
+# 服务监听地址，私网 IP 加固定端口。
+DEPLOY_LISTEN_ADDR=<私网IP>:7331
+
+# 交付给用户的实际访问入口，用于登录、版本与资源核对；只允许 http://地址:端口。
+DEPLOY_HEALTH_URL=http://<私网IP>:7331
+
+# 健康检查与版本核对的超时秒数。
+DEPLOY_HEALTH_TIMEOUT=60
+
+# 每次 HTTP 的连接超时与总超时秒数（curl --connect-timeout / --max-time）。
+DEPLOY_HTTP_CONNECT_TIMEOUT=5
+DEPLOY_HTTP_MAX_TIME=15
+
+# 等待其他部署结束的锁超时秒数。
+DEPLOY_LOCK_TIMEOUT=600
+
+# 停止自有服务后等待确定停止证据（inactive/dead、MainPID=0、cgroup 空）的秒数。
+# 取得证据前不会备份或切换；stop 失败、超时或状态未知一律视为未停。
+DEPLOY_STOP_TIMEOUT=20
+
+# 浏览器检查：1 必需（找不到 Chromium 即阻塞部署），0 显式记录本批未做 UI 验收。
+# 默认 1；不要在必需验收时静默关闭。
+DEPLOY_BROWSER_TESTS=1
+
+# 可选 Chromium 可执行文件的绝对路径；留空自动查找 /usr/bin/chromium 或 PATH。
+DEPLOY_CHROMIUM=
+
+# 浏览器测试使用的三个端口（existing、delivery、interaction），逗号分隔且不重复。
+# 与其他任务冲突时改成独立端口，部署不会接管占用端口的进程。
+DEPLOY_BROWSER_PORTS=17331,17332,17441
+
+# 版本浏览器套件（playwright.version.config.ts）使用的独立端口，不能与前三个重复。
+DEPLOY_VERSION_BROWSER_PORT=17551
+
+# 服务进程的 PATH，留空使用默认（用户级 pi、node 与系统路径）。
+DEPLOY_REMOTE_PATH=
+
+# 远端 Node 绝对路径（用于 node:sqlite 一致备份）；留空自动查找用户级 Node。
+DEPLOY_REMOTE_NODE=
