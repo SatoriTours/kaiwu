@@ -270,13 +270,13 @@ small {
 }
 .task-card:hover {
   background: white;
-  border-color: #b7c5d8;
+  border-color: #c4d3ca;
   box-shadow: none;
 }
 .task-card.selected {
-  border-color: #7d9bc6;
-  background: #f7faff;
-  box-shadow: 0 0 0 1px #7d9bc622;
+  border-color: #849e90;
+  background: #f4f7f5;
+  box-shadow: 0 0 0 1px #849e9033;
 }
 .task-top {
   display: flex;
@@ -506,8 +506,8 @@ small {
   outline: none;
 }
 .editor:focus-within {
-  border-color: #849fc3;
-  box-shadow: 0 0 0 2px #dce6f4;
+  border-color: #849e90;
+  box-shadow: 0 0 0 2px #edf3ee;
 }
 .editor .row {
   justify-content: space-between;
@@ -540,7 +540,8 @@ small {
   flex: 1;
 }
 .mobile-switch,
-.mobile-topic {
+.mobile-topic,
+.custom-select.mobile-topic {
   display: none;
 }
 dialog {
@@ -705,7 +706,8 @@ dialog textarea {
     font-size: 11px;
     padding: 6px 8px;
   }
-  .mobile-topic {
+  .mobile-topic,
+  .custom-select.mobile-topic {
     display: block;
     width: 100%;
     font-size: 12px;
@@ -837,7 +839,7 @@ dialog textarea {
   display: block;
 }
 #chat-title:focus-visible {
-  outline: 2px solid #456490;
+  outline: 2px solid #849e90;
 }
 .app.chat-visible .board-side {
   display: block;
@@ -985,7 +987,7 @@ h3 {
 .git-state[data-git-state=dirty],.git-state[data-git-state=unmerged]{color:#997a46}.git-state[data-git-state=unknown]{color:#b16b62}
 .task-bottom .git-state{margin-left:auto}.task-bottom .merge-task{margin-left:2px}
 .merge-task{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;padding:4px;border:0;background:transparent;color:#77818d;border-radius:6px;flex-shrink:0}
-.merge-task svg{width:17px;height:17px}.merge-task:hover:not(:disabled){background:#eef1f4;color:#34485c}.merge-task:disabled{opacity:.4}.merge-task:focus-visible{outline:2px solid #839ab1;outline-offset:2px}
+.merge-task svg{width:17px;height:17px}.merge-task:hover:not(:disabled){background:#edf3ee;color:#3e604b}.merge-task:disabled{opacity:.4}.merge-task:focus-visible{outline:2px solid #849e90;outline-offset:2px}
 .chat-git{padding:8px 16px;border-bottom:1px solid #edf0f2}.git-target{color:#6e7884}.git-reason{width:100%;margin:1px 0;line-height:1.5;overflow-wrap:anywhere}.git-checked{margin-left:auto;color:#9aa1aa}
 .merge-dialog{width:min(460px,calc(100vw - 32px))}.merge-task-title{font-size:13px;color:#717b86;margin-top:6px}.merge-target{display:flex;gap:10px;align-items:center;background:#f5f7f8;border-radius:7px;padding:10px 12px;font-size:12px;overflow-wrap:anywhere;flex-wrap:wrap}.merge-target strong{font-weight:550}.merge-files{max-height:180px;overflow:auto;padding:0;list-style:none;font-size:12px}.merge-files li{display:flex;gap:8px;line-height:1.6;padding:2px 0}.merge-files li span{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}.merge-files code{color:#87909a;white-space:pre;flex-shrink:0}.merge-dialog details{margin:14px 0}.merge-progress{padding:16px 0;font-size:13px}.merge-dialog .dialog-actions{margin-top:18px}.project-git-settings{font-size:16px}
 @media(max-width:480px){.top{gap:6px}.top .project-git-settings{width:22px}.top .connection{font-size:10px}.git-checked{margin-left:0;width:100%}.chat-actions{gap:5px}}

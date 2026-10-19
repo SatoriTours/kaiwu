@@ -7,6 +7,7 @@ import {taskState} from './task-state.ts';
 import {gitStatusLabel} from './git.ts';
 import {isDeliveryActive} from './delivery.ts';
 import {getRoundOptions} from './result-history.ts';
+import CustomSelect from './CustomSelect.vue';
 const props=defineProps<{conversation:Conversation;task?:Task;tasks:Task[];execution?:Execution;git?:GitStatus;delivery?:DeliverySummary;online:boolean;pending:boolean;agentAvailable:boolean}>();
 const emit=defineEmits<{confirm:[string];revise:[];merge:[];resume:[];reply:[string];preview:[string]}>();
 const media=window.matchMedia('(max-width:600px)');
@@ -74,9 +75,13 @@ function chooseTab(event:KeyboardEvent){const tabs=['plan','results','checks','r
      <details v-if="roundOptions.length>1" class="history-dropdown">
       <summary class="history-toggle" aria-label="往期记录">往期记录 ▾</summary>
       <div class="history-select-pop">
-       <select aria-label="查看历史记录" :value="round?.id" @change="selected=($event.target as HTMLSelectElement).value">
-        <option v-for="opt in roundOptions" :key="opt.id" :value="opt.id">{{opt.label}}</option>
-       </select>
+       <CustomSelect
+        aria-label="查看历史记录"
+        :model-value="round?.id"
+        :options="roundOptions.map(opt => ({ value: opt.id, label: opt.label }))"
+        compact
+        @update:model-value="selected = $event"
+       />
       </div>
      </details>
      <span class="progress-state">{{label}}</span>

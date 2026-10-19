@@ -80,7 +80,9 @@ test.describe('真实 Go 服务的自动交付界面',()=>{
   // 下一步：失败处理与授权摘要
   await dialog.getByTestId('wizard-next').click();
   await expect(dialog.getByText('最大自动修复次数')).toBeVisible();
-  await dialog.locator('#maxRepairs').selectOption('3');
+  const maxRepairsTrigger = dialog.locator('#maxRepairs');
+  await maxRepairsTrigger.click();
+  await dialog.locator('[role="option"]:has-text("3 次")').click();
   // 验证授权风险提示包含任务/主分支推送
   await expect(dialog.locator('.auth-summary-card')).toContainText('任务分支或主分支推送均可能触发已有自动化构建或发包');
   await expect(dialog.locator('#authRepairTimes')).toHaveText('3');
@@ -206,7 +208,12 @@ test.describe('真实 Go 服务的自动交付界面',()=>{
    if(width===1440||width===360){const dir=resolve('../../docs/design/web-service');mkdirSync(dir,{recursive:true});await page.screenshot({path:resolve(dir,width===1440?'automated-delivery-desktop.png':'automated-delivery-mobile.png'),fullPage:true})}
   }
   await page.setViewportSize({width:1440,height:900});await page.getByRole('button',{name:'选择会话模型',exact:true}).click();
-  const dialog=page.getByRole('dialog');await dialog.getByLabel('提供商',{exact:true}).selectOption('fixture');await dialog.getByLabel('模型',{exact:true}).selectOption('another-test');await dialog.getByRole('button',{name:/下一轮使用/}).click();
+  const dialog=page.getByRole('dialog');
+  await dialog.getByLabel('提供商',{exact:true}).click();
+  await dialog.locator('[role="option"]:has-text("fixture")').click();
+  await dialog.getByLabel('模型',{exact:true}).click();
+  await dialog.locator('[role="option"]:has-text("another-test")').click();
+  await dialog.getByRole('button',{name:/下一轮使用/}).click();
   await expect(page.getByRole('button',{name:'选择会话模型',exact:true})).toContainText('待生效');const st=await snapshot(page.request);expect(st.conversations[task.conversationId].pendingProfile.model).toBe('another-test');expect(st.profile.model).toBe('isolated-test');
  });
 });

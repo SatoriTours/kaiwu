@@ -4,6 +4,7 @@ export default defineConfig({
   projects: [
     { name: "existing", testMatch: "browser.spec.ts" },
     { name: "delivery", testMatch: "delivery.browser.spec.ts", use: { baseURL: "http://127.0.0.1:17332" } },
+    { name: "ui-consistency", testMatch: "ui-consistency.browser.spec.ts" },
   ],
   workers: 1,
   timeout: 30000,

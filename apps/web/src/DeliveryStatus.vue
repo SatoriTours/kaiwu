@@ -358,7 +358,7 @@ function formatTime(iso?: string) {
   color: #389e0d;
 }
 .ci-link {
-  color: #1890ff;
+  color: #476f64;
   text-decoration: none;
 }
 .ci-link:hover {

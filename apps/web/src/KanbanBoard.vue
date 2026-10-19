@@ -5,6 +5,7 @@ import {deliveryView, isDeliveryActive} from "./delivery.ts";
 import GitStatusView from "./GitStatus.vue";
 import MergeIcon from "./MergeIcon.vue";
 import TaskActionIcon from "./TaskActionIcon.vue";
+import CustomSelect from "./CustomSelect.vue";
 const props = defineProps<{
   topics: Topic[];
   executions:Record<string,Execution>;
@@ -60,17 +61,19 @@ function actionLabel(task: Task) {
         @click="emit('addTask', '')"
       >
         ＋ 任务</button
-      ><select
+      ><CustomSelect
         class="mobile-topic"
         aria-label="当前看板专题"
-        :value="mobileTopic"
-        @change="emit('topic', ($event.target as HTMLSelectElement).value)"
-      >
-        <option v-for="topic in topics" :key="topic.id" :value="topic.id">
-          {{ topic.name }} ·
-          {{ tasks.filter((t) => t.topicId === topic.id).length }}
-        </option>
-      </select>
+        :model-value="mobileTopic"
+        :options="
+          topics.map((topic) => ({
+            value: topic.id,
+            label: `${topic.name} · ${tasks.filter((t) => t.topicId === topic.id).length}`,
+          }))
+        "
+        compact
+        @update:model-value="emit('topic', $event)"
+      />
     </div>
     <div class="board" id="board">
       <section

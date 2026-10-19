@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import type { Topic, Project } from "./types.ts";
+import CustomSelect from "./CustomSelect.vue";
 const props = defineProps<{
   kind: string;
   project?: Project;
@@ -11,6 +12,10 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ close: []; submit: [Record<string, string>] }>();
 const dialog = ref<HTMLDialogElement>();
+const selectedTopicId = ref(props.topicID);
+const topicOptions = computed(() =>
+  props.topics.map((t) => ({ value: t.id, label: t.name }))
+);
 onMounted(() => dialog.value?.showModal());
 const titles: Record<string, string> = {
   git: "项目 Git 设置",
@@ -91,11 +96,14 @@ function submit(event: Event) {
       <template v-if="kind === 'task'"
         ><label
           ><span>功能专题</span
-          ><select name="topicId" :value="topicID">
-            <option v-for="topic in topics" :key="topic.id" :value="topic.id">
-              {{ topic.name }}
-            </option>
-          </select></label
+          ><CustomSelect
+            name="topicId"
+            aria-label="功能专题"
+            v-model="selectedTopicId"
+            :options="topicOptions"
+            :disabled="saving"
+            required
+        /></label
         ><label
           ><span>任务标题（可选）</span
           ><input name="title" maxlength="80" /></label

@@ -14,6 +14,7 @@ import {
   isEquivalentRepo,
   type CheckItemUI,
 } from './delivery-settings.ts';
+import CustomSelect from './CustomSelect.vue';
 
 const props = defineProps<{
   project: Project;
@@ -734,11 +735,16 @@ onMounted(() => {
           <div v-if="activeStep === 3" class="wizard-panel">
             <div class="form-group">
               <label for="maxRepairs">最大自动修复次数</label>
-              <select id="maxRepairs" v-model.number="draft.maxRepairs">
-                <option :value="1">1 次 (严格控制额度)</option>
-                <option :value="3">3 次 (推荐，兼顾成功率)</option>
-                <option :value="5">5 次</option>
-              </select>
+              <CustomSelect
+                id="maxRepairs"
+                v-model.number="draft.maxRepairs"
+                :options="[
+                  { value: 1, label: '1 次 (严格控制额度)' },
+                  { value: 3, label: '3 次 (推荐，兼顾成功率)' },
+                  { value: 5, label: '5 次' },
+                ]"
+                aria-label="最大自动修复次数"
+              />
             </div>
 
             <!-- 具体授权与风险提示摘要卡片 -->

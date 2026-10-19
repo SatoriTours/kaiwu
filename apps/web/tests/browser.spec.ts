@@ -907,10 +907,12 @@ test("pi models: discover, choose an empty conversation and expose next-round se
   await page.getByRole('button', { name: '默认模型', exact: true }).click();
   const picker = page.getByRole('dialog', { name: '默认模型', exact: true });
   await expect(picker).toContainText('检测到 3 个可用模型');
-  await picker.getByLabel('提供商', { exact: true }).selectOption('fixture');
+  await picker.getByLabel('提供商', { exact: true }).click();
+  await picker.locator('[role="option"]:has-text("fixture")').click();
   await picker.getByLabel('搜索模型', { exact: true }).fill('another');
-  await expect(picker.getByLabel('模型', { exact: true }).locator('option')).toHaveCount(2);
-  await picker.getByLabel('模型', { exact: true }).selectOption('another-test');
+  await picker.getByLabel('模型', { exact: true }).click();
+  await expect(picker.locator('[role="option"]')).toHaveCount(1);
+  await picker.locator('[role="option"]:has-text("another-test")').click();
   await expect(picker.getByLabel('思考级别', { exact: true })).toHaveCount(0);
   await picker.getByRole('button', { name: '保存模型' }).click();
   await expect(picker).toHaveCount(0);
@@ -924,9 +926,11 @@ test("pi models: discover, choose an empty conversation and expose next-round se
   await page.locator('#draft').fill('选择模型时保留的草稿');
   await page.getByRole('button', { name: '选择会话模型', exact: true }).click();
   const scoped = page.getByRole('dialog', { name: '选择会话模型', exact: true });
-  await expect(scoped.getByLabel('模型', { exact: true })).toHaveValue('another-test');
-  await scoped.getByLabel('提供商', { exact: true }).selectOption('second');
-  await scoped.getByLabel('模型', { exact: true }).selectOption('isolated-test');
+  await expect(scoped.getByLabel('模型', { exact: true })).toContainText('another-test');
+  await scoped.getByLabel('提供商', { exact: true }).click();
+  await scoped.locator('[role="option"]:has-text("second")').click();
+  await scoped.getByLabel('模型', { exact: true }).click();
+  await scoped.locator('[role="option"]:has-text("isolated-test")').click();
   await scoped.getByRole('button', { name: '保存模型' }).click();
   await expect(scoped).toHaveCount(0);
   await expect(page.locator('#draft')).toHaveValue('选择模型时保留的草稿');
@@ -959,12 +963,16 @@ test("pi models: errors, empty catalog and mobile selection retain draft", async
   probeFor(page).modelMode='';
   await picker.getByRole('button', { name: '重新检测' }).click();
   await expect(picker).toContainText('检测到 3 个可用模型');
-  await picker.getByLabel('提供商', { exact: true }).selectOption('fixture');
-  await picker.getByLabel('模型', { exact: true }).selectOption('isolated-test');
-  await picker.getByLabel('思考级别', { exact: true }).selectOption('medium');
+  await picker.getByLabel('提供商', { exact: true }).click();
+  await picker.locator('[role="option"]:has-text("fixture")').click();
+  await picker.getByLabel('模型', { exact: true }).click();
+  await picker.locator('[role="option"]:has-text("isolated-test")').click();
+  await picker.getByLabel('思考级别', { exact: true }).click();
+  await picker.locator('[role="option"]:has-text("中")').click();
   expect(await picker.evaluate(el => el.getBoundingClientRect().width)).toBeLessThanOrEqual(360);
   await picker.getByRole('button', { name: '保存模型' }).click();
   await expect(picker).toHaveCount(0);
+  probeFor(page).modelMode='';
   const snap = await page.evaluate(async () => (await (await fetch('/api/snapshot')).json()).state);
   expect(snap.profile.thinking).toBe('medium');
 });
@@ -1015,7 +1023,9 @@ test('structured progress uses bidirectional socket and keeps verification evide
  await expect(page.locator('.history-dropdown')).toBeVisible();
  await expect(page.getByRole('button',{name:'确认完成',exact:true})).toBeVisible();
  await page.locator('.history-dropdown summary').click();
- await page.getByRole('combobox',{name:'查看历史记录'}).selectOption(before.conversations[t.conversationId].rounds[0].id);
+ const historySelect = page.getByRole('combobox', { name: '查看历史记录' });
+ await historySelect.click();
+ await page.locator(`[role="option"][data-value="${before.conversations[t.conversationId].rounds[0].id}"]`).click();
  await expect(page.locator('.progress-card')).toContainText('历史记录');
  await expect(page.getByRole('button',{name:'返回最新'})).toBeVisible();
  await expect(page.getByRole('button',{name:'确认完成',exact:true})).toHaveCount(0);
@@ -1082,7 +1092,8 @@ test('legacy interrupted tasks explain automatic recovery and preserve useful mo
  await chooseMenuProject(page, { id: projectId });
  // The fixture task may be in the protected topic on a narrow screen.
  const fresh=(await (await page.request.get('/api/snapshot')).json()).state;
- await page.getByLabel('当前看板专题').selectOption(fresh.tasks[id].topicId);
+ await page.getByLabel('当前看板专题').click();
+ await page.locator(`[role="option"][data-value="${fresh.tasks[id].topicId}"]`).click();
  const card=page.locator('.task-card[data-taskid="'+id+'"]');await expect(card).toContainText('已中断');
  await card.getByRole('button',{name:'选择任务 中断任务核对',exact:true}).click();
  await expect(page.getByRole('button',{name:'恢复原会话',exact:true})).toHaveCount(0);
@@ -1102,6 +1113,9 @@ test('legacy interrupted tasks explain automatic recovery and preserve useful mo
  await page.getByRole('tab',{name:'记录',exact:true}).click();
  await expect(page.locator('.progress-card')).toContainText('write');
  expect(probeFor(page).calls.filter(r=>r.method==='commands')).toHaveLength(0);
+ probeFor(page).transform=null;
+ probeFor(page).holdType=null;
+ await page.unroute('**/api/snapshot');
 });
 
 test('result review opens a result view and completion remains visible after refresh',async({page})=>{
@@ -1154,6 +1168,8 @@ test('result review opens a result view and completion remains visible after ref
  await page.getByRole('button',{name:'返回任务对话',exact:true}).click();
  await expect(page.locator('#draft')).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ probeFor(page).transform=null;
+ await page.unroute('**/api/snapshot');
 });
 
 
@@ -1250,6 +1266,8 @@ test('late preview responses stay with their original task and absent previews d
  await expect(page.locator('#draft')).toHaveValue(/kaiwu-preview.json/);
  expect(probeFor(page).calls.filter(r=>r.method==='previews/start')).toHaveLength(0);
  expect(probeFor(page).calls.filter(r=>r.method==='commands'&&r.body?.type==='send_message')).toHaveLength(sendsBefore);
+ probeFor(page).holdMethod=null;
+ releaseFrames(page);
 });
 
 test('result history UI: compact completed bar, history toggle, request summary, heading without 第N轮, and mobile layout', async ({ page }) => {
@@ -1309,7 +1327,8 @@ test('result history UI: compact completed bar, history toggle, request summary,
  const latestState = (await (await page.request.get('/api/snapshot')).json()).state;
  const t = Object.values(latestState.tasks).find((task: any) => task.title === '历史UI测试任务') as any;
  const firstRoundId = latestState.conversations[t.conversationId].rounds[0].id;
- await historySelect.selectOption(firstRoundId);
+ await historySelect.click();
+ await page.locator(`[role="option"][data-value="${firstRoundId}"]`).click();
 
  // 明确标记历史记录且提供返回最新
  await expect(page.locator('.progress-card')).toContainText('历史记录');
