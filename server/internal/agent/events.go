@@ -37,8 +37,10 @@ func (m *Manager) consume(id string, entry *instance, client *pirpc.Client) {
 			continue
 		}
 		var v struct {
-			AssistantMessageEvent struct{ Type, Delta string }      `json:"assistantMessageEvent"`
-			Message               struct{ Role, StopReason string } `json:"message"`
+			AssistantMessageEvent struct{ Type, Delta string } `json:"assistantMessageEvent"`
+			Message               struct {
+				Role, StopReason, ErrorMessage string
+			} `json:"message"`
 		}
 		if json.Unmarshal(event.Raw, &v) != nil {
 			continue
@@ -113,6 +115,12 @@ func (m *Manager) consume(id string, entry *instance, client *pirpc.Client) {
 			if v.Message.Role == "assistant" {
 				m.mu.Lock()
 				entry.lastError = v.Message.StopReason == "error" || v.Message.StopReason == "aborted"
+				// Only a provider error carries a reason worth showing; pi's abort
+				// text is a fixed notice the fallback already says accurately.
+				entry.lastErrorDetail = ""
+				if v.Message.StopReason == "error" {
+					entry.lastErrorDetail = safeFailureDetail(v.Message.ErrorMessage)
+				}
 				responseID := entry.responseID
 				roundID := entry.messageID
 				if responseID != "" {

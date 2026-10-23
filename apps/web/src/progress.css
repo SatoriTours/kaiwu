@@ -10,8 +10,7 @@
 .progress-panel{max-height:40dvh;padding:10px 16px 0}
 .recovery-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .recovery-bar>div{flex:1;min-width:170px}.recovery-bar>button{flex-shrink:0}
-.recovery-reason{width:100%;font-size:10px}.recovery-reason summary{cursor:pointer}
-.recovery-reason p{margin:4px 0 0}.continuation-hint{line-height:1.7}
+.continuation-hint{line-height:1.7}
 .task-requirement{margin-top:8px;color:#56665a;font-size:11px;line-height:1.6}
 .task-requirement summary{overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;cursor:pointer}
 .task-requirement p{white-space:pre-wrap;overflow-wrap:anywhere;margin:7px 0}
@@ -25,7 +24,7 @@
 .chat-head{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;padding:10px 16px}
 .chat-head>.row{flex:1;min-width:190px}.chat-head small{display:none}.chat-head h2{font-size:13px}
 .chat-head .chat-actions{margin-top:0;gap:8px}.chat-head .return{font-size:10px;min-height:24px}
-.scope{padding:6px 16px;font-size:10px}.project-recovery{margin:10px 16px;flex-shrink:0}
+.scope{padding:6px 16px;font-size:10px}
 @media(max-width:600px){.progress-panel{max-height:34dvh;padding:8px 14px 0}.progress-top{padding:9px 12px}.chat-head{padding:9px 14px}.chat-head h2{font-size:12px}.scope{padding:5px 14px}.composer{padding:9px 14px 12px}.editor textarea{height:58px}.composer-tip{margin-top:4px}}
 .details-toggle{display:block;margin-top:7px;border:0;background:none;padding:0;min-height:20px;font-size:10px;color:#63806b}
 .progress-panel{max-height:46dvh}.result-preview{font-size:11px;color:#5d735f;margin:6px 0 0;padding-left:15px;line-height:1.7}.result-preview li{overflow-wrap:anywhere}

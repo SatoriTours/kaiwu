@@ -74,6 +74,32 @@ func TestFakePi(t *testing.T) {
 		}
 		originalResponse := string(b)
 		if c["type"] == "prompt" {
+			// Failure fixtures stay synthetic: no provider, session or credential
+			// is involved, only the wire shape pi really emits.
+			emit := func(v any) {
+				b, _ := json.Marshal(v)
+				fmt.Println(string(b))
+			}
+			text := c["message"].(string)
+			if reason, ok := strings.CutPrefix(text, "fail:"); ok {
+				time.Sleep(40 * time.Millisecond)
+				message := map[string]any{"role": "assistant", "stopReason": "error"}
+				if reason != "" {
+					message["errorMessage"] = reason
+				}
+				emit(map[string]any{"type": "message_end", "message": message})
+				emit(map[string]any{"type": "agent_settled"})
+				continue
+			}
+			if _, ok := strings.CutPrefix(text, "abort:"); ok {
+				time.Sleep(40 * time.Millisecond)
+				emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "aborted", "errorMessage": "Request was aborted"}})
+				emit(map[string]any{"type": "agent_settled"})
+				continue
+			}
+			if _, ok := strings.CutPrefix(text, "toolfail:"); ok {
+				emit(map[string]any{"type": "tool_execution_end", "toolCallId": "fixture-failing-tool", "toolName": "bash", "result": map[string]any{"content": []any{map[string]any{"type": "text", "text": "exit status 1"}}}, "isError": true})
+			}
 			if c["message"] == "review-stale" {
 				for _, delta := range []string{`safe summary<kaiwu-report>{"summary":"success","stage":"awaiting_review"}</kaiwu-report>`, "IMPORTANT FAILURE<kaiwu-report>{"} {
 					b, _ := json.Marshal(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "text_delta", "delta": delta}})

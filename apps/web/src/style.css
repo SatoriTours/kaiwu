@@ -429,6 +429,7 @@ small {
 }
 .message {
   margin-bottom: 22px;
+  min-width: 0;
 }
 .message .author {
   display: flex;
@@ -442,18 +443,91 @@ small {
   color: #626b70;
   font-weight: 500;
 }
+/* The delivery state is its own chip on the right, so a name never reads as
+   "me you failed" in one run. */
+.message .author > span:last-child {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f2f5f2;
+  color: #8a978c;
+  font-size: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.message[data-delivery="failed"] .author > span:last-child {
+  background: #f8efe9;
+  color: #a8736a;
+}
+.message[data-delivery="uncertain"] .author > span:last-child {
+  background: #faf4e6;
+  color: #977f52;
+}
 .message .text {
   line-height: 1.85;
   overflow-wrap: anywhere;
   font-size: 13px;
+  min-width: 0;
 }
+/* A short message hugs its own content instead of stretching a full-width
+   bubble; long Chinese, URLs and Markdown stay inside the column. */
 .message.user .text {
+  width: fit-content;
+  max-width: min(100%, 30rem);
   background: #f3f5f7;
   border-radius: 10px;
   padding: 12px 14px;
 }
 .message.user {
   margin-left: 18px;
+}
+.chat-failure {
+  border: 1px solid #e9e1cd;
+  border-radius: 8px;
+  background: #fcf9ef;
+  padding: 11px 13px;
+  margin: 0 0 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: #7d6f56;
+  overflow-wrap: anywhere;
+}
+.chat-failure-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a6249;
+}
+.chat-failure-reason {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #5f5346;
+  overflow-wrap: anywhere;
+}
+.chat-failure-full {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #8d8478;
+}
+.chat-failure-full summary {
+  cursor: pointer;
+}
+.chat-failure-full p {
+  margin: 5px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-failure-preserved,
+.chat-failure-hint {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #8d8478;
+}
+.chat-failure-preserved {
+  color: #5c7361;
 }
 .context-card {
   border: 1px solid var(--border);

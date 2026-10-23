@@ -44,8 +44,7 @@ function chooseTab(event:KeyboardEvent){const tabs=['plan','results','checks','r
 </script>
 <template>
  <div v-if="task&&!oldRound&&presentation?.needsResume&&!confirmable&&!presentation.resultConfirmed" class="progress-attention recovery-bar auto-recovery" role="status">
-  <div><strong>{{presentation.status==='completed'?'结果已保留':presentation.status==='failed'?'上次执行未完成':'上次执行已中断'}}</strong><p>{{conversation.runState==='failed'?'请检查下方原因，再次发送消息会尝试接回。':presentation.status==='completed'?'发送新消息时会尝试接回原会话，已有结果保留。':'直接发消息或点继续开发，系统会尝试接回原会话。已有记录和修改保留。'}}</p></div>
-  <details v-if="conversation.error" class="recovery-reason"><summary>中断原因</summary><p>{{conversation.error}}</p></details>
+  <div><strong>{{presentation.status==='completed'?'结果已保留':presentation.status==='failed'?'上次执行未完成':'上次执行已中断'}}</strong><p>{{conversation.runState==='failed'?'再次发送消息会尝试接回原会话；原因见对话中的失败提示。':presentation.status==='completed'?'发送新消息时会尝试接回原会话，已有结果保留。':'直接发消息或点继续开发，系统会尝试接回原会话。已有记录和修改保留。'}}</p></div>
  </div>
  <section v-if="confirmable" class="result-review" aria-label="本轮成果验收">
   <strong>开发已结束，先看看效果</strong><p>查看实际效果与运行结果，符合要求后再确认完成。</p>

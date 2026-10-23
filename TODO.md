@@ -1,3 +1,26 @@
+# 当前缺陷：任务失败原因与聊天局部布局
+
+- [x] 核对截图、现有数据流与样式：pi errorMessage 未被保留；任务错误仅在条件化折叠区显示；短用户消息气泡整行拉伸。
+- [x] 限定方案：保留具体错误，在所属聊天直接展示失败提示；短消息收紧，长内容／手机不溢出。不触发模型、提交或部署。
+- [x] 用户追加授权只读服务器日志取证：2026-10-20T16:49:00Z～16:49:14Z，该任务原 pi JSONL 连续 4 条 HTTP 429／rate_limit_error，MiniMax Token Plan 速率限制（2062）；无工具执行。Web DB 仅保存通用错误，服务仍 active，未重启／重试／改模型。真实会话留服务器，不复制入仓库。
+- [x] 用户质疑模型／套餐后追加只读核验：任务与服务器 pi Key 指纹一致、均 Token Plan Key；官方余额只读接口 status_code=0，当前窗口剩余 93%，不能认定额度耗尽。任务模型 `MiniMax-M3.1-Flash`、中国站 Anthropic 兼容端点；服务器 pi 1.3.0 用假 Key／合成消息／全局禁网＋拦截 fetch 的离线请求证实 `max_tokens=524288`、adaptive medium。过大输出预算可能触发 TPM，仅为待验证假设；未改配置、未真实请求。
+- [x] 后端执行与自测：`46bd7ddc-e4c0-4504-b6e4-7bbdc175fe92`，仅 `server/internal/agent/`；原会话已核对实际 diff。具体原因安全提取／限长／脱敏并写现有双错误通道；新轮次清旧错误。agent 包、race、构建与限定 vet 报告通过，后续独立验收已通过（见下）。测试hash见执行端完成报告，实际生产未更新。
+- [x] UI 备用实现与自测完成：原 Gemini 503 后，经用户明确授权由 `46bd7ddc-e4c0-4504-b6e4-7bbdc175fe92`（pi/opencode-go/deepseek-v4.1-flash）接续8文件；失败卡进入消息流、短气泡fit-content、状态独立，未改MiniMax配置。专用9单元／5浏览器、npm test/build、8交互／4UI一致性报告通过；版本套件2项is-outdated失败有基线复现，不在本批修复。实际diff与SHA256已核对，原会话保留独立验收关注项（发送／中断具体原因是否被隐藏）。
+- [x] 后端切片独立功能验收通过：`e7739791-8372-4466-8a57-7e429db68fde`（pi/opencode-go/glm-5.3-flash），13 项聚焦测试、agent 整包、vet 退出 0；原因双通道／脱敏限长／兜底／新轮次清理／已有结果保留覆盖。原会话实际 diff、验收范围、SHA256 与 `git diff --check` 已核对。7 文件 SHA256 前缀：failure.go `dd8f9154`、failure_test `3cf4f52b`、failure_events_test `46e60752`、events `dac8be81`、manager `3d8aaef9`、model_next `3485f59a`、manager_test `7ac94071`。观察项：含 `{` 的不可解析纯文本回退通用原因（安全兜底）；真实上游根因验证与 UI 不在通过范围。
+- [x] UI 独立验收通过：原验收 `e7739791-8372-4466-8a57-7e429db68fde` 实跑 `cd apps/web && node tests/failure.test.ts`（9/9）、`npm test`（29＋6）、`npx playwright test --config=playwright.failure.config.ts`（5/5）及临时DOM／视觉探针，退出均0。1440／390／360截图目视与无横向溢出、短气泡、角色状态分离、具体／空原因、任务隔离、待确认结果保留有证据。原会话核对8文件SHA256与diff-check一致。发送／中断当前后端只有固定状态句，未发现具体诊断被隐藏；保留低危文案观察：发送未达时“pi 未提供具体原因”可优化为中性措辞。截图与测试产物位于/tmp，非线上验收。
+- [ ] 本地修复及独立切片验收完成，未提交／部署；当前真实网页未更新。既有版本浏览器2项is-outdated失败保留，不宣称全套通过。实际 MiniMax 429根因仍未确认；用户后续明确要求验证，2026-10-21T04:56:25Z用同Key／模型／国内端点、medium、8192预算单次真实最小请求成功：1221ms、回复OK、225 token（212输入／13输出含9推理），无重试／工具／配置写入，非Web任务恢复。未做524288同期对照，不据此认定预算因果。证据见模型选择验证补记。
+- [x] 用户批准降低默认预算并验证原任务：服务器定义＋原任务隔离副本均持久化8192（备份留服务器），同一模型／medium、原session／worktree经现有set_next_profile同配置回收后继续。8次真实模型响应／13工具，本轮无429，生成5文件；最终waiting_user／awaiting_user，非完成。工作台未重启／部署，Git未提交。非缓存输入7465、缓存38017、输出4473，本地价表估算$0.0043547891，非实付；详见模型选择验证最新补记。
+- [x] 用户后续明确授权环境修复：从官方校验SHA256后用户级安装Go1.27.3，修复Git包装脚本从自身路径定位工具而非HOME；server／pi隔离HOME下git/go均可用。未改系统目录／认证／PATH／工作台程序。备份证据留服务器tool-updates/2026-10-21T11-52-09-937Z。
+- [x] 经原待答交互入口继续原pi：4项Go测试／vet／build及真实回环GET/HEAD/404通过，临时程序停止、端口释放；原5文件未改、未提交。任务needs_confirmation／awaiting_review，未代用户确认。此轮6次模型响应无error，非缓存输入11051、缓存读取50021、输出2314，价表估算$0.0037791787非账单。
+- [x] 环境与Go示例独立验收通过（e7739791）：官方归档校验／用户安装位置／Git脚本diff与隔离HOME工具可用核对，独立go build/vet/test退出0、4测试通过；真实回环34621的GET/hello200正文world、HEAD空体／未知404及Content-Type通过。测试进程／端口与临时产物已回收，5源码hash及Git无提交不变，工作台54851仍active。主控再次核对wrapper和5源码SHA256、服务PID与34621已释放。
+- [ ] 交付边界：原产品任务保留needs_confirmation／awaiting_review待用户确认，不新建Paseo空间，不将其5文件混入开悟源码。MiniMax输出预算8192已生效、本轮真实调用恢复且示例运行验收通过，但未做原大预算同期对照；工作台失败提示／布局源码仍未提交／部署。
+
+- [x] 2026-10-23 用户“提交代码”（重复口令合并一次）授权本批整合／push／部署；核实GitHub `SatoriTours/kaiwu` 默认main，远端及本地基线均e43b8bf。Actions工作流数0，不适用，沿用已安装的提交钩子干净归档部署，不伪称CI通过。
+- [x] 19文件限定暂存，无既有暂存内容；排除暂停子Agent实现、旧截图、假进程二进制和测试遗留。源码hash与独立验收一致。暂存树641e5a55导出的测试快照：agent包、专用单元9项、npm单元29＋6、前端构建及专用浏览器5项通过。归档浏览器首次漏传GOFLAGS导致VCS标记失败，按既有部署脚本传入-buildvcs=false后通过，无实现改动，不掩盖失败。
+- [ ] 交付执行：本批commit／push、干净归档完整部署门禁及实际7331入口核查；最终SHA和结果另存当前空间外。关联Paseo空间仅当前wks_6b8c83a60fa23afb，子Agent46bd7ddc／e7739791／4c2fea93同checkout且已停止。没有新增关联Workspace。服务器Go示例为原产品测试任务，保留原worktree与待确认状态，不进入开悟仓库。共享checkout尚有其他任务未提交／未跟踪／忽略成果，不满足安全归档，保留空间，不删除、stash或代交。
+
+协调空间：`wks_6b8c83a60fa23afb`，cwd `/home/jimxl/projects/kaiwu`，`main`，git-dir/index `.git`／`.git/index`。现有子 Agent 后端、截图等无关混合改动原地保留。角色消耗未知，修复轮次 0。
+
 # 当前设计：固定开发交付与 Actions 自动修复
 
 - [x] 核对现有 Git／worktree／会话／恢复机制，确认当前仅有本地审核集成。

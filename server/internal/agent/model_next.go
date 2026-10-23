@@ -60,6 +60,7 @@ func (m *Manager) recycleForModel(c workbench.Conversation, entry *instance, all
 	entry.lastResponseID = ""
 	entry.responseSequence = 0
 	entry.lastError = false
+	entry.lastErrorDetail = ""
 	entry.acknowledged = false
 	entry.settled = false
 	m.mu.Unlock()

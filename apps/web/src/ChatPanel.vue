@@ -9,6 +9,7 @@ import TaskActionIcon from "./TaskActionIcon.vue";
 import ProgressCard from "./ProgressCard.vue";
 import AssistantReply from "./AssistantReply.vue";
 import {groupChatMessages} from './chat-messages.ts';
+import {failureView} from './failure.ts';
 import MarkdownContent from "./MarkdownContent.vue";
 import DeliveryStatus from "./DeliveryStatus.vue";
 import { isDeliveryActive } from "./delivery.ts";
@@ -69,6 +70,9 @@ const emit = defineEmits<{
   retryInteraction: [payload: { conversationId: string; requestId: string; requestVersion: number }];
 }>();
 const taskStatus=computed(()=>props.task?taskState(props.task,props.conversation,props.execution).status:'idle');
+// The notice is derived from the selected conversation only, so switching scope
+// can never carry another conversation's reason.
+const failure=computed(()=>failureView(props.conversation,props.execution));
 const deliveryActive=computed(()=>props.delivery?isDeliveryActive(props.delivery.phase):false);
 const chatEntries=computed(()=>groupChatMessages(props.conversation.messages));
 // Expiry is wall-clock driven: a pending native request past its deadline must
@@ -265,10 +269,6 @@ const deliveryLabels: Record<string, string> = {
         · {{ states[conversation.runState] ?? conversation.runState }}</span
       >
     </div>
-      <div v-if="!task&&conversation.error" class="context-card project-recovery" role="status">
-        <p>{{conversation.runState==='failed'?'会话接回失败，请检查原因后再次发送重试。':'发送下一条消息时会尝试自动接回原会话。'}}</p>
-        <details><summary>查看原因</summary><p>{{conversation.error}}</p></details>
-      </div>
     <div class="progress-panel">
       <DeliveryStatus
         v-if="delivery"
@@ -297,6 +297,7 @@ const deliveryLabels: Record<string, string> = {
         class="message"
         :data-message-id="entry.message.id"
         :class="entry.message.role"
+        :data-delivery="entry.message.delivery"
       >
         <div class="author">
           <span class="avatar">{{ entry.message.role === "user" ? "我" : "π" }}</span
@@ -311,6 +312,18 @@ const deliveryLabels: Record<string, string> = {
         </div>
         <AssistantReply v-if="entry.message.role==='assistant'" :message="entry.message" :updates="entry.updates"/><MarkdownContent v-else class="text" :text="entry.message.text" />
       </article>
+
+      <!-- A settled failure belongs where it happened: in the conversation,
+           with its cause readable without opening the progress details. -->
+      <div v-if="failure" class="chat-failure" :data-kind="failure.kind" role="alert" aria-label="本轮失败原因">
+        <strong class="chat-failure-title">{{failure.title}}</strong>
+        <p class="chat-failure-reason">{{failure.hasReason?failure.reason:'pi 未提供具体原因。'}}</p>
+        <details v-if="failure.detail" class="chat-failure-full">
+          <summary>展开完整原因</summary><p>{{failure.detail}}</p>
+        </details>
+        <small v-if="failure.resultPreserved" class="chat-failure-preserved">此前的结果仍然保留，可在上方查看或确认。</small>
+        <small class="chat-failure-hint">{{failure.hint}}</small>
+      </div>
       <div v-if="!conversation.messages.length" class="context-card">
         <strong>{{ task ? "开始这个任务的沟通" : "从一个想法开始" }}</strong>
         <p>

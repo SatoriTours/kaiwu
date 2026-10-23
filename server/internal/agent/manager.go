@@ -18,6 +18,7 @@ type instance struct {
 	lastResponseID        string
 	responseSequence      int
 	lastError             bool
+	lastErrorDetail       string
 	acknowledged, settled bool
 	runID                 string
 	generation            int
@@ -106,6 +107,7 @@ func (m *Manager) begin(conversationID, messageID string) error {
 	entry.lastResponseID = ""
 	entry.responseSequence = 0
 	entry.lastError = false
+	entry.lastErrorDetail = ""
 	entry.acknowledged = false
 	entry.settled = false
 	if messageID != "" {
@@ -248,6 +250,9 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 	if e := m.store.Update(func(st *workbench.State) error {
 		v := st.Conversations[c.ID]
 		v.RunState = "running"
+		// A new round replaces the previous failure: keeping its reason would
+		// show a stale cause next to a request that is running now.
+		v.Error = ""
 		st.Conversations[c.ID] = v
 		setExecutionPhase(st, c.ID, "running", "")
 		return nil
@@ -300,7 +305,7 @@ func (m *Manager) finishLocked(id string, entry *instance) error {
 		return nil
 	}
 	if entry.lastError {
-		m.failed(id, "模型调用失败或被中断；已有内容保留", false)
+		m.failed(id, failureMessage(entry.lastErrorDetail), false)
 		entry.busy = false
 		return nil
 	}
