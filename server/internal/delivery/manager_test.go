@@ -127,7 +127,12 @@ type remoteState struct {
 }
 
 func (r *remoteState) transport(store *workbench.Store, taskID string) gitops.RemoteTransportFunc {
-	return func(_ context.Context, _ string, target gitops.RemoteTarget, args []string, _ string, _ gitops.ProcessLease) (string, error) {
+	return func(_ context.Context, _ string, target gitops.RemoteTarget, args []string, _ string, lease gitops.ProcessLease) (string, error) {
+		// This transport is an in-memory remote: it spawns nothing, so the lease
+		// may be told there is no process instead of guessing later.
+		if f, ok := lease.(interface{ NoProcess() }); ok {
+			f.NoProcess()
+		}
 		if len(args) == 0 {
 			return "", fmt.Errorf("no args")
 		}

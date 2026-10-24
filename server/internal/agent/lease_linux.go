@@ -19,6 +19,13 @@ type executionLease struct {
 	marker            string
 	boot              string
 	attempted, closed bool
+	// groupKnown/groupPID remember the writer group this lease itself recorded,
+	// so a second launch can never overwrite the marker that still proves it.
+	groupKnown bool
+	groupPID   int
+	// poison marks a launch the lease knows exists but can never attribute, so
+	// no release may clear the marker for it.
+	poison bool
 }
 type processOwner struct {
 	Boot  string
@@ -81,6 +88,19 @@ func acquireLease(parent, lockName, markerName string) (*executionLease, error) 
 	return l, nil
 }
 
+// procStatGone reports whether a /proc/<pid>/stat read failure only means the
+// process disappeared between readdir and read. Linux returns ESRCH for a pid
+// that exited inside that window as well as ENOENT for one that never came
+// back, and os.IsNotExist recognises neither wrapper for ESRCH. Treating a
+// vanished unrelated process as an unverifiable Git group makes the lease
+// refuse ownership forever, so both "gone" signals are classified here.
+func procStatGone(err error) bool {
+	if err == nil {
+		return false
+	}
+	return os.IsNotExist(err) || errors.Is(err, syscall.ESRCH)
+}
+
 func groupAbsent(group int) (bool, error) {
 	entries, e := os.ReadDir("/proc")
 	if e != nil {
@@ -91,7 +111,7 @@ func groupAbsent(group int) (bool, error) {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
-		if os.IsNotExist(err) {
+		if procStatGone(err) {
 			continue
 		}
 		if err != nil {
@@ -135,9 +155,37 @@ func (l *executionLease) writeOwner(pid int) error {
 	}
 	return os.Rename(l.marker+".tmp", l.marker)
 }
+
+var errGroupUnproven = errors.New("上一个 Git 进程组未确认退出，未执行后续命令")
+
+// settle clears a previous writer group only when it is provably gone. An
+// unproven group keeps the durable marker, so a later launch of the same
+// operation can never overwrite it with an already reaped successor.
+func (l *executionLease) settle() error {
+	if !l.groupKnown {
+		return nil
+	}
+	gone, err := groupAbsent(l.groupPID)
+	if err != nil || !gone {
+		return errGroupUnproven
+	}
+	l.groupKnown, l.groupPID = false, 0
+	return nil
+}
 func (l *executionLease) attempt() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.closed {
+		return errors.New("执行归属已关闭，未记录 Git 启动")
+	}
+	if l.poison || (l.attempted && !l.groupKnown) {
+		// A launch window that recorded no process can never be reopened: the
+		// child may exist, so a new Attempt must not overwrite its record.
+		return errGroupUnproven
+	}
+	if e := l.settle(); e != nil {
+		return e
+	}
 	l.attempted = true
 	// Every launch has its own unknown window, including successive Git calls.
 	// Never leave a previous, already reaped process as proof of a new writer.
@@ -146,7 +194,62 @@ func (l *executionLease) attempt() error {
 func (l *executionLease) started(pid int) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.closed {
+		return errors.New("执行归属已关闭，未记录 Git 进程")
+	}
+	if l.poison {
+		return errGroupUnproven
+	}
+	if pid <= 0 {
+		l.poison = true
+		return errors.New("无法记录 Git 进程归属")
+	}
+	if e := l.settle(); e != nil {
+		return e
+	}
+	// Record ownership before the durable write, so a marker write failure still
+	// leaves this lease unable to claim its process group is gone.
+	l.groupKnown, l.groupPID, l.attempted = true, pid, true
 	return l.writeOwner(pid)
+}
+
+// noProcess clears the unknown launch window when the caller can prove no child
+// process was ever started (resolver or exec.Start failure). Without that proof
+// the marker stays, so a plain failure cannot silently free ownership.
+func (l *executionLease) noProcess() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return errors.New("执行归属已关闭，未记录未启动证明")
+	}
+	if l.poison {
+		// A launch the lease cannot attribute is never "nothing started"; only
+		// the process really exiting can resolve it.
+		return errors.New("存在未确认的 Git 进程归属，未记录未启动证明")
+	}
+	// A group this lease really recorded is only cleared by a proven exit; a
+	// caller-provided "no process" claim may never erase it.
+	if e := l.settle(); e != nil {
+		return e
+	}
+	l.groupKnown, l.groupPID, l.attempted = false, 0, false
+	if e := os.Remove(l.marker); e != nil && !os.IsNotExist(e) {
+		return e
+	}
+	return nil
+}
+
+// unproven reports whether this lease still owns a group it cannot prove gone,
+// independent of any controller flag or transport callback.
+func (l *executionLease) unproven() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.groupKnown {
+		gone, err := groupAbsent(l.groupPID)
+		return err != nil || !gone
+	}
+	// A launch that recorded no process is unknown, not empty.
+	return l.attempted
 }
 func (l *executionLease) unused() bool { l.mu.Lock(); defer l.mu.Unlock(); return !l.attempted }
 func (l *executionLease) release(confirmed bool) error {
@@ -156,12 +259,26 @@ func (l *executionLease) release(confirmed bool) error {
 		return nil
 	}
 	l.closed = true
+	gone := true
+	if l.groupKnown {
+		g, err := groupAbsent(l.groupPID)
+		gone = err == nil && g
+	}
+	// Only an unused lease or a recorded group proven gone may drop ownership.
+	// A launch window whose child was never attributed keeps the marker: the
+	// caller's confirmation is not evidence and cannot erase that window, and a
+	// poisoned launch is never cleared.
+	drop := !l.attempted || (l.groupKnown && gone)
+	_ = confirmed
 	var e error
-	if confirmed || !l.attempted {
+	switch {
+	case drop:
 		e = os.Remove(l.marker)
 		if os.IsNotExist(e) {
 			e = nil
 		}
+	case confirmed:
+		e = errors.New("Git 进程组未确认退出，已保留归属记录")
 	}
 	return errors.Join(e, l.file.Close())
 }

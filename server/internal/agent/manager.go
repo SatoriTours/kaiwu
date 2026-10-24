@@ -36,6 +36,7 @@ type Manager struct {
 	instances        map[string]*instance
 	seen             map[string]bool
 	previews         map[string]workbench.MergePreview
+	reviews          map[string]workbench.MergeReview
 	reserved         map[string]bool
 	deliveryReserved map[string]bool
 	refreshes        map[string]bool
@@ -47,7 +48,7 @@ type Manager struct {
 
 func New(ctx context.Context, store *workbench.Store, cfg Config) *Manager {
 	owned, cancel := context.WithCancel(ctx)
-	return &Manager{ctx: owned, cancel: cancel, store: store, cfg: cfg, instances: map[string]*instance{}, seen: map[string]bool{}, previews: map[string]workbench.MergePreview{}, reserved: map[string]bool{}, deliveryReserved: map[string]bool{}, refreshes: map[string]bool{}, gitSlots: make(chan struct{}, 2)}
+	return &Manager{ctx: owned, cancel: cancel, store: store, cfg: cfg, instances: map[string]*instance{}, seen: map[string]bool{}, previews: map[string]workbench.MergePreview{}, reviews: map[string]workbench.MergeReview{}, reserved: map[string]bool{}, deliveryReserved: map[string]bool{}, refreshes: map[string]bool{}, gitSlots: make(chan struct{}, 2)}
 }
 func (m *Manager) Count() int { m.mu.Lock(); defer m.mu.Unlock(); return len(m.instances) }
 func (m *Manager) Send(conversationID, messageID string) error {
@@ -150,14 +151,14 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 			m.release(c.ID, entry, true)
 			return
 		}
+		opts := pirpc.Options{}
 		if entry.lease != nil {
-			if e = entry.lease.attempt(); e != nil {
-				m.failed(c.ID, "无法保存启动归属，未启动 pi", false)
-				m.release(c.ID, entry, true)
-				return
-			}
+			// Record the real child identity at spawn time. Handshake failures then
+			// release against a known pid instead of an unattributable window.
+			lease := entry.lease
+			opts.OnStarted = lease.started
 		}
-		client, e = pirpc.Start(m.ctx, spec, pirpc.Options{})
+		client, e = pirpc.Start(m.ctx, spec, opts)
 		m.mu.Lock()
 		entry.client = client
 		// A fresh process invalidates every earlier native waiter in this
@@ -169,12 +170,6 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 			m.failed(c.ID, "pi 启动或协议握手失败，请检查配置后恢复", false)
 			m.release(c.ID, entry, true)
 			return
-		}
-		if entry.lease != nil {
-			if e = entry.lease.started(client.PID()); e != nil {
-				m.stopFailed(c.ID, entry, client, "无法保存执行进程归属，已停止启动", true)
-				return
-			}
 		}
 		response, e := client.Call(m.ctx, pirpc.Command{Type: "get_state"})
 		var state struct {

@@ -110,7 +110,7 @@ func verifyRemoteConfig(ctx context.Context, path, frozen string) error {
 	if e == nil && strings.TrimSpace(helper) != "" {
 		return errors.New("存在 remote helper 配置")
 	}
-	return nil
+	return rejectCredentialHelper(ctx, path)
 }
 
 // RemoteTransport executes one remote git command. Production uses the
@@ -164,7 +164,12 @@ func (r *RemoteRunner) run(ctx context.Context, dir string, target RemoteTarget,
 		return "", errors.New("远程地址不得携带凭据")
 	}
 	if r.transport != nil {
-		return r.transport.Run(ctx, dir, target, args, credentialRef, lease)
+		out, e := r.transport.Run(ctx, dir, target, args, credentialRef, lease)
+		// A transport reports its own process fate through the lease. Close the
+		// launch window only when the lease itself can prove nothing is running,
+		// so an abstract runner can neither hide a live group nor lock the
+		// workspace forever after a failed launch.
+		return out, e
 	}
 	return r.productionRun(ctx, dir, target, args, credentialRef, lease)
 }
@@ -175,15 +180,21 @@ func urlParse(raw string) (*url.URL, error) { return url.Parse(raw) }
 // and the inherited lease file, tracking the process group.
 func (r *RemoteRunner) productionRun(ctx context.Context, dir string, target RemoteTarget, args []string, credentialRef string, lease ProcessLease) (string, error) {
 	var extra []*os.File
+	var config []string
 	env := Env()
 	if r.resolver != nil && credentialRef != "" {
 		cred, e := r.resolver.Git(ctx, credentialRef, target.URL)
 		if e != nil {
+			// No child process was ever started, so the launch window is provably
+			// empty and must not keep ownership for a later writer.
+			finishNoProcess(lease)
 			return "", e
 		}
 		defer func() { _ = cred.Close() }()
 		env = append(env, cred.Env...)
-		// Credential pipe must be fd 3; the lease file follows.
+		// Only a credential the service resolver actually produced may install
+		// the controlled helper. The pipe stays fd 3; the lease file follows.
+		config = cred.Config
 		extra = append(extra, cred.Files...)
 	}
 	if lease != nil && lease.File() != nil {
@@ -191,7 +202,7 @@ func (r *RemoteRunner) productionRun(ctx context.Context, dir string, target Rem
 	}
 	ctx, cancel := context.WithTimeout(ctx, networkTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", Args(dir, args...)...)
+	cmd := exec.CommandContext(ctx, "git", bridgeArgs(dir, config, args...)...)
 	cmd.Env = env
 	cmd.ExtraFiles = extra
 	cmd.WaitDelay = time.Second
@@ -200,17 +211,62 @@ func (r *RemoteRunner) productionRun(ctx context.Context, dir string, target Rem
 	cmd.Stderr = &limitedBuffer{}
 	setupProcess(cmd)
 	if e := cmd.Start(); e != nil {
+		// exec.Start failed, so this command has no process group to account for.
+		finishNoProcess(lease)
 		return "", e
 	}
+	pid := 0
 	if lease != nil {
-		if e := lease.Started(cmd.Process.Pid); e != nil {
+		pid = cmd.Process.Pid
+		if e := lease.Started(pid); e != nil {
 			killProcess(cmd)
 			_ = waitProcess(cmd)
+			finishLease(lease, pid, groupGone(pid))
 			return "", e
 		}
 	}
 	e := waitProcess(cmd)
+	if lease != nil {
+		// Ownership may only be released when this writer's group is provably
+		// gone; a surviving group must keep the durable marker.
+		finishLease(lease, pid, groupGone(pid))
+	}
 	return out.String(), e
+}
+
+// leaseNoProcess is an optional extension of ProcessLease: proof that a launch
+// window produced no child process at all (resolver or exec.Start failure).
+type leaseNoProcess interface {
+	NoProcess()
+}
+
+func finishNoProcess(lease ProcessLease) {
+	if f, ok := lease.(leaseNoProcess); ok {
+		f.NoProcess()
+	}
+}
+
+// LeaseTrack builds the gitops.Run tracking callback for a lease, so a
+// transport that really spawns Git attributes the child it actually started.
+// Callers running real commands must not claim "no process" instead.
+func LeaseTrack(lease ProcessLease) func(int) error {
+	if lease == nil {
+		return nil
+	}
+	return lease.Started
+}
+
+// leaseFinisher is an optional extension of ProcessLease: a lease that wants to
+// know the fate of the writer's process group. Leases that do not implement it
+// keep their existing behaviour.
+type leaseFinisher interface {
+	Finished(pid int, groupGone bool)
+}
+
+func finishLease(lease ProcessLease, pid int, gone bool) {
+	if f, ok := lease.(leaseFinisher); ok {
+		f.Finished(pid, gone)
+	}
 }
 
 // Observe returns the current remote SHA of a ref, or "" when the ref does

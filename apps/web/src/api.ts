@@ -10,6 +10,9 @@ export class APIError extends Error {
 let socketRequest:((path:string,body?:unknown)=>Promise<any>)|undefined;
 export function setSocketRequest(request?:typeof socketRequest){socketRequest=request}
 export async function api<T>(path: string, body?: unknown): Promise<T> {
+  if (typeof window !== "undefined" && (window as any).__KAIWU_API_INTERCEPTOR__) {
+    await (window as any).__KAIWU_API_INTERCEPTOR__(path, body);
+  }
   if(socketRequest && !["login","logout"].includes(path)) return socketRequest(path,body) as Promise<T>;
  return httpAPI<T>(path,body);
 }

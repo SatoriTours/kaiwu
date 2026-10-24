@@ -46,6 +46,14 @@ func (l *deliveryLease) Started(pid int) error {
 	return errors.Join(first, l.task.started(pid))
 }
 
+// NoProcess clears the launch window when the runner proves no child started.
+func (l *deliveryLease) NoProcess() {
+	if l.project != nil {
+		_ = l.project.noProcess()
+	}
+	_ = l.task.noProcess()
+}
+
 // Release keeps unconfirmed launch windows failed closed (safe=false) and
 // only clears the reservation when it succeeds.
 func (l *deliveryLease) Release(safe bool) error {

@@ -26,6 +26,17 @@ func setupProcess(cmd *exec.Cmd) {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 }
+
+// groupGone reports whether the writer's process group no longer exists, so a
+// surviving descendant can never be mistaken for a finished writer.
+func groupGone(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	e := syscall.Kill(-pid, 0)
+	return e == syscall.ESRCH
+}
+
 func killProcess(cmd *exec.Cmd) {
 	if cmd.Process != nil {
 		_ = cmd.Cancel()

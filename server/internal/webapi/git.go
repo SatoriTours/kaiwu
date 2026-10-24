@@ -15,6 +15,43 @@ type GitCommander interface {
 	UpdateProjectGit(context.Context, workbench.Command) (workbench.Receipt, error)
 }
 
+// gitPreviewInput adds the optional review mode to the unchanged legacy
+// preview request. Unknown modes are refused instead of silently downgrading.
+type gitPreviewInput struct {
+	ProjectID string `json:"projectId"`
+	TaskID    string `json:"taskId"`
+	Mode      string `json:"mode,omitempty"`
+	RoundID   string `json:"roundId,omitempty"`
+}
+
+// reviewedGitCommander is the optional extension used for reviewed previews.
+// Keeping it separate leaves existing fake Git commanders unchanged.
+type reviewedGitCommander interface {
+	PreviewMergeReview(context.Context, workbench.MergeReviewRequest) (workbench.MergePreview, error)
+	PreviewPushReview(context.Context, workbench.MergeReviewRequest) (workbench.MergeReview, error)
+}
+
+func (h *handler) previewMerge(r *http.Request, input gitPreviewInput) (any, error) {
+	switch input.Mode {
+	case "":
+		return h.cfg.Git.PreviewMerge(r.Context(), input.ProjectID, input.TaskID)
+	case workbench.MergeModeLocal:
+		reviewed, ok := h.cfg.Git.(reviewedGitCommander)
+		if !ok {
+			return nil, workbench.Conflict("当前 Git 实现不支持审核式合并预览")
+		}
+		return reviewed.PreviewMergeReview(r.Context(), workbench.MergeReviewRequest{ProjectID: input.ProjectID, TaskID: input.TaskID, Mode: input.Mode, RoundID: input.RoundID})
+	case workbench.MergeModePush:
+		reviewed, ok := h.cfg.Git.(reviewedGitCommander)
+		if !ok {
+			return nil, workbench.Conflict("当前 Git 实现不支持远程审核")
+		}
+		return reviewed.PreviewPushReview(r.Context(), workbench.MergeReviewRequest{ProjectID: input.ProjectID, TaskID: input.TaskID, Mode: input.Mode, RoundID: input.RoundID})
+	default:
+		return nil, workbench.Conflict("不支持的审核模式")
+	}
+}
+
 func (h *handler) git(w http.ResponseWriter, r *http.Request) {
 	if h.cfg.Git == nil {
 		fail(w, 503, "git_unavailable", "Git 集成不可用")
@@ -34,14 +71,11 @@ func (h *handler) git(w http.ResponseWriter, r *http.Request) {
 		}
 		respond(w, 200, map[string]bool{"ok": true})
 	case r.URL.Path == "/api/git/preview" && r.Method == "POST":
-		var input struct {
-			ProjectID string `json:"projectId"`
-			TaskID    string `json:"taskId"`
-		}
+		var input gitPreviewInput
 		if !decode(w, r, &input) {
 			return
 		}
-		p, e := h.cfg.Git.PreviewMerge(r.Context(), input.ProjectID, input.TaskID)
+		p, e := h.previewMerge(r, gitPreviewInput{ProjectID: input.ProjectID, TaskID: input.TaskID, Mode: input.Mode, RoundID: input.RoundID})
 		if e != nil {
 			h.failure(w, e)
 			return

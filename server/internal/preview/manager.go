@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -34,10 +35,16 @@ type TaskPreview struct {
 	RoundID    string   `json:"roundId"`
 	State      string   `json:"state"`
 	Message    string   `json:"message"`
+	Kind       string   `json:"kind,omitempty"`
+	Root       string   `json:"root,omitempty"`
+	Entry      string   `json:"entry,omitempty"`
 	Command    []string `json:"command,omitempty"`
 	Path       string   `json:"path,omitempty"`
 	URL        string   `json:"url,omitempty"`
 	Logs       string   `json:"logs,omitempty"`
+	// Artifacts lists only the files this preview explicitly declares. It is
+	// empty for command previews and for a static manifest without artifacts.
+	Artifacts []Artifact `json:"artifacts,omitempty"`
 }
 
 // Lease is the same execution lock used by pi and Git integration. Its open
@@ -53,9 +60,13 @@ type Config struct {
 	Reserve func(context.Context, string) (Lease, error)
 }
 type entry struct {
-	req     Request
-	tree    string
-	hash    [32]byte
+	req  Request
+	tree string
+	hash [32]byte
+	// kind is "static" or "files" for a worktree-served entry. Such entries hold
+	// no process, port or writer lease, so stopEntry and every v1 lifecycle
+	// check must branch on it instead of touching cmd/process/lease.
+	kind    string
 	view    TaskPreview
 	cmd     *exec.Cmd
 	process *processGroup
@@ -157,45 +168,186 @@ func base(req Request, state, message string) TaskPreview {
 	return TaskPreview{TaskID: req.TaskID, RoundID: req.RoundID, State: state, Message: message}
 }
 func (m *Manager) describe(req Request) (TaskPreview, string, [32]byte, error) {
+	v, tree, hash, _, _, e := m.describeSnapshot(req)
+	return v, tree, hash, e
+}
+
+// describeSnapshot is describe plus the exact validated manifest snapshot the
+// verdict came from. A caller that later needs declared-file paths must use that
+// snapshot instead of reading the manifest again: the second read could already
+// describe a different configuration than the one the capability was checked
+// against. ok is false when there is no manifest snapshot (no worktree, an
+// invalid manifest, or the discovery fallback).
+func (m *Manager) describeSnapshot(req Request) (TaskPreview, string, [32]byte, manifest, bool, error) {
 	var hash [32]byte
+	var snap manifest
 	tree, e := m.target(req)
 	if e != nil {
-		return TaskPreview{}, "", hash, e
+		return TaskPreview{}, "", hash, snap, false, e
 	}
 	if tree == "" {
-		return base(req, "unavailable", "暂无网页效果：任务还没有独立工作区；已有成果仍可查看"), tree, hash, nil
+		return base(req, "unavailable", "暂无网页效果：任务还没有独立工作区；已有成果仍可查看"), tree, hash, snap, false, nil
 	}
 	v, h, e := readManifest(tree)
-	if os.IsNotExist(e) {
-		return base(req, "unavailable", "暂无网页效果：工作区没有 kaiwu-preview.json；已有运行结果仍可查看"), tree, hash, nil
+	if errors.Is(e, errManifestMissing) {
+		// Only a genuinely absent manifest falls back to the fixed
+		// four-candidate discovery. A present but invalid, linked, unreadable
+		// or non-regular manifest is authoritative and stays unavailable.
+		view, tree, hash, e := m.describeDiscovered(req, tree)
+		return view, tree, hash, snap, false, e
 	}
 	if e != nil {
-		return base(req, "unavailable", e.Error()), tree, hash, nil
+		// User-facing refusal: keep the server path and raw OS error out of the
+		// task panel while the returned error stays available for diagnosis.
+		return base(req, "unavailable", e.Error()), tree, hash, snap, false, nil
+	}
+	if worktreeKind(v.Kind) {
+		view, tree, hash, e := m.describeStatic(req, tree, v, h)
+		return view, tree, hash, v, true, e
 	}
 	view := base(req, "stopped", "仅支持只读 HTTP GET/HEAD；不支持应用登录、WebSocket/HMR 或跨源资源，根绝对资源路径可能不兼容。点击启动才执行命令。")
 	view.Command = append([]string{}, v.Command...)
 	view.Path = v.Path
 	view.ManifestID = hex.EncodeToString(h[:])
-	return view, tree, h, nil
+	return view, tree, h, snap, false, nil
 }
+
+// startStatic registers a static entry. It runs no argv[0], opens no socket,
+// takes no writer lease and never enters the v1 process/port lifecycle.
+func (m *Manager) startStatic(req Request, tree string) (TaskPreview, error) {
+	v, e := m.stateLocked(req)
+	if e != nil {
+		return TaskPreview{}, e
+	}
+	if !worktreeKind(v.Kind) || v.State == "unavailable" {
+		return TaskPreview{}, workbench.Conflict("静态预览配置已变化，请刷新后重试")
+	}
+	if e = m.ensureStatic(req, v, tree); e != nil {
+		return TaskPreview{}, e
+	}
+	return m.snapshot(m.entries[req.TaskID]), nil
+}
+
+// describeDiscovered offers the single unambiguous conventional entry without
+// requiring a manifest. Zero or multiple candidates stay unavailable with an
+// explicit reason: discovery never guesses and never writes a manifest.
+func (m *Manager) describeDiscovered(req Request, tree string) (TaskPreview, string, [32]byte, error) {
+	var hash [32]byte
+	entry, reason, e := discoverStatic(tree)
+	if e != nil {
+		return base(req, "unavailable", "暂无网页效果：无法读取任务工作区；已有运行结果仍可查看"), tree, hash, nil
+	}
+	if entry == "" {
+		return base(req, "unavailable", reason), tree, hash, nil
+	}
+	return m.describeStatic(req, tree, manifest{Kind: "static", Root: ".", Entry: entry, Path: "/"}, hash)
+}
+
+// describeStatic reuses one deterministic fingerprint and proves the entry is
+// actually openable, so a symlinked, private or oversized entry is shown as
+// unavailable rather than as a preview that would fail later.
+func (m *Manager) describeStatic(req Request, tree string, v manifest, hash [32]byte) (TaskPreview, string, [32]byte, error) {
+	view := base(req, "stopped", "静态网页预览：只读 GET/HEAD，脚本在无同源权限的 sandbox 中运行；应用登录、WebSocket/HMR 与跨源资源不可用。")
+	view.Kind = v.Kind
+	view.Root = v.Root
+	view.Entry = v.Entry
+	view.Path = v.Path
+	if v.Kind == "files" {
+		view.Path = ""
+		view.Message = "本次结果只有显式声明的文件产物，可下载查看；没有可展示的网页"
+	} else if f, _, _, e := openStaticFile(tree, v.Root, v.Entry); e != nil {
+		view.Kind, view.Root, view.Entry = "", "", ""
+		view.State = "unavailable"
+		view.Message = "暂无网页效果：静态入口无法安全打开；已有运行结果仍可查看"
+		return view, tree, hash, nil
+	} else {
+		f.Close()
+	}
+	artifacts, e := resolveArtifacts(tree, v.Artifacts)
+	if e != nil {
+		// A declared file that cannot be safely opened is authoritative: the
+		// whole preview stays unavailable instead of offering a broken download.
+		view.Kind, view.Root, view.Entry, view.Path = "", "", "", ""
+		view.State = "unavailable"
+		view.Message = "暂无网页效果：声明的文件产物无法安全打开；已有运行结果仍可查看"
+		return view, tree, hash, nil
+	}
+	view.Artifacts = make([]Artifact, len(artifacts))
+	for i, a := range artifacts {
+		view.Artifacts[i] = a.Artifact
+	}
+	view.ManifestID = staticFingerprint(tree, v, hash)
+	return view, tree, hash, nil
+}
+
+// staticFingerprint is deterministic for the same tree, root, entry and
+// manifest content, so repeated Status/Open calls keep one identity while a
+// changed entry or manifest yields a new one.
+func staticFingerprint(tree string, v manifest, hash [32]byte) string {
+	h := sha256.New()
+	h.Write([]byte(tree))
+	h.Write([]byte{0})
+	h.Write([]byte(v.Kind))
+	h.Write([]byte{0})
+	h.Write([]byte(v.Root))
+	h.Write([]byte{0})
+	h.Write([]byte(v.Entry))
+	h.Write([]byte{0})
+	for _, a := range v.Artifacts {
+		h.Write([]byte(a.Path))
+		h.Write([]byte{0})
+		h.Write([]byte(a.Name))
+		h.Write([]byte{0})
+		h.Write([]byte(a.Type))
+		h.Write([]byte{0})
+	}
+	h.Write(hash[:])
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// worktreeKind reports whether a preview is served straight from the task
+// worktree without a process. Both the web entry and the files-only result
+// share that lifecycle.
+func worktreeKind(kind string) bool { return kind == "static" || kind == "files" }
+
 func (m *Manager) snapshot(e *entry) TaskPreview {
 	v := e.view
 	v.Command = append([]string{}, v.Command...)
+	v.Artifacts = append([]Artifact{}, v.Artifacts...)
 	v.Logs = e.logs.String()
 	return v
 }
 func (m *Manager) stateLocked(req Request) (TaskPreview, error) {
-	v, tree, hash, err := m.describe(req)
+	v, _, _, e := m.stateLockedSnapshot(req)
+	return v, e
+}
+
+// stateLockedSnapshot is stateLocked plus the validated snapshot the state was
+// derived from, so one request never mixes two manifest reads.
+func (m *Manager) stateLockedSnapshot(req Request) (TaskPreview, manifest, bool, error) {
+	v, tree, hash, snap, ok, err := m.describeSnapshot(req)
 	if err != nil {
-		return v, err
+		return v, manifest{}, false, err
 	}
 	if e := m.entries[req.TaskID]; e != nil {
+		if worktreeKind(e.kind) {
+			// Static entries carry no process to probe: identity is the round,
+			// tree and deterministic manifest fingerprint.
+			if e.req.RoundID != req.RoundID || e.tree != tree || !worktreeKind(v.Kind) || e.view.ManifestID != v.ManifestID {
+				if err := m.stopEntry(e, "静态预览配置或轮次已变化，请重新打开"); err != nil {
+					return v, manifest{}, false, err
+				}
+				delete(m.entries, req.TaskID)
+				return v, snap, ok, nil
+			}
+			return m.snapshot(e), snap, ok, nil
+		}
 		if e.req.RoundID != req.RoundID || e.tree != tree || e.hash != hash {
 			if err := m.stopEntry(e, "预览配置或轮次已变化，请重新启动"); err != nil {
-				return TaskPreview{}, err
+				return TaskPreview{}, manifest{}, false, err
 			}
 			delete(m.entries, req.TaskID)
-			return v, nil
+			return v, snap, ok, nil
 		}
 		select {
 		case <-e.done:
@@ -211,9 +363,9 @@ func (m *Manager) stateLocked(req Request) (TaskPreview, error) {
 				e.view.State = "failed"
 			}
 		}
-		return m.snapshot(e), nil
+		return m.snapshot(e), snap, ok, nil
 	}
-	return v, nil
+	return v, snap, ok, nil
 }
 func (m *Manager) Status(req Request) (TaskPreview, error) {
 	m.mu.Lock()
@@ -262,6 +414,16 @@ func (m *Manager) Start(req Request) (TaskPreview, error) {
 	}
 	if replay || v.State == "running" || v.State == "starting" || v.State == "unavailable" {
 		return v, nil
+	}
+	if worktreeKind(v.Kind) {
+		// Static previews need no command approval: the displayed fingerprint
+		// still binds the exact root/entry, but nothing is executed and no
+		// writer lease, port or process is created.
+		tree, e := m.target(req)
+		if e != nil {
+			return v, e
+		}
+		return m.startStatic(req, tree)
 	}
 	active := 0
 	for _, e := range m.entries {
@@ -334,6 +496,11 @@ func (m *Manager) Start(req Request) (TaskPreview, error) {
 	if e = cmd.Start(); e != nil {
 		en.view.State = "failed"
 		en.view.Message = "预览命令启动失败：" + e.Error()
+		// cmd.Start really failed, so this launch window provably produced no
+		// child and may be closed instead of locking the workspace forever.
+		if f, ok := lease.(interface{ NoProcess() }); ok {
+			f.NoProcess()
+		}
 		cleanupErr := lease.Release(true)
 		lease = nil
 		en.lease = nil
@@ -405,7 +572,7 @@ func (m *Manager) stopEntry(e *entry, message string) error {
 			delete(m.tokens, key)
 		}
 	}
-	if e.lease == nil {
+	if worktreeKind(e.kind) || e.lease == nil {
 		e.view.State = "stopped"
 		e.view.Message = message
 		return nil
@@ -468,11 +635,31 @@ func (m *Manager) StopTask(ctx context.Context, taskID string) error {
 func (m *Manager) Open(req Request, login string) (TaskPreview, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.closed || m.ctx.Err() != nil {
+		return TaskPreview{}, workbench.Conflict("预览服务已关闭")
+	}
+	if login == "" {
+		return TaskPreview{}, workbench.Conflict("预览链接需要有效登录")
+	}
+	// Static previews are read-only, so opening one creates the entry itself;
+	// a v1 command preview still requires an explicit Start first.
+	displayed, tree, _, de := m.describe(req)
+	if de != nil {
+		return displayed, de
+	}
+	if displayed.State == "unavailable" {
+		return displayed, workbench.Conflict(displayed.Message)
+	}
+	if worktreeKind(displayed.Kind) {
+		if e := m.ensureStatic(req, displayed, tree); e != nil {
+			return displayed, e
+		}
+	}
 	v, e := m.stateLocked(req)
 	if e != nil {
 		return v, e
 	}
-	if v.State != "running" || login == "" {
+	if v.State != "running" {
 		return v, workbench.Conflict("预览未运行，请先明确启动")
 	}
 	for key, cap := range m.tokens {
@@ -488,10 +675,77 @@ func (m *Manager) Open(req Request, login string) (TaskPreview, error) {
 		return v, e
 	}
 	token := hex.EncodeToString(raw)
-	m.tokens[token] = &capability{m.entries[req.TaskID], login, time.Now().Add(30 * time.Minute)}
+	en := m.entries[req.TaskID]
+	if en == nil {
+		return v, workbench.Conflict("预览未运行，请先明确启动")
+	}
+	m.tokens[token] = &capability{en, login, time.Now().Add(30 * time.Minute)}
+	if v.Kind == "files" {
+		// A files-only result has no page: only artifacts are addressable.
+		for i := range v.Artifacts {
+			v.Artifacts[i].URL = "/preview/" + token + "/~download/" + v.Artifacts[i].ID
+		}
+		return v, nil
+	}
+	if v.Kind == "static" {
+		// The entry path itself is the short-lived URL, so relative CSS/JS/image
+		// requests stay under the same capability.
+		v.Path = "/" + v.Entry
+		v.URL = "/preview/" + token + v.Path
+		for i := range v.Artifacts {
+			v.Artifacts[i].URL = "/preview/" + token + "/~download/" + v.Artifacts[i].ID
+		}
+		return v, nil
+	}
 	v.URL = "/preview/" + token + v.Path
 	return v, nil
 }
+
+// ensureStatic makes exactly one current static entry, reusing the existing one
+// when round, tree and fingerprint still match and replacing it otherwise.
+func (m *Manager) ensureStatic(req Request, displayed TaskPreview, tree string) error {
+	if en := m.entries[req.TaskID]; en != nil && worktreeKind(en.kind) && en.req.RoundID == req.RoundID &&
+		en.tree == tree && en.view.ManifestID == displayed.ManifestID {
+		// A stopped entry keeps its identity but must not be handed out as a live
+		// capability; start it again instead of returning the stopped view.
+		if en.view.State == "running" {
+			return nil
+		}
+		en.view.State = "running"
+		en.view.Message = runningMessage(en.kind)
+		return nil
+	}
+	if en := m.entries[req.TaskID]; en != nil {
+		// Never drop an entry whose process/lease could not be reclaimed: that
+		// would lose the only ownership record. The failure is propagated and the
+		// original entry stays tracked; no static entry or capability is created.
+		if e := m.stopEntry(en, "静态预览配置或轮次已变化，请重新打开"); e != nil {
+			return e
+		}
+		select {
+		case <-en.done:
+		default:
+			if en.done != nil {
+				return errors.New("预览进程尚未可靠回收，请稍后重试")
+			}
+		}
+		delete(m.entries, req.TaskID)
+	}
+	en := &entry{req: req, tree: tree, kind: displayed.Kind, view: displayed}
+	en.view.State = "running"
+	en.view.Message = runningMessage(en.kind)
+	m.entries[req.TaskID] = en
+	return nil
+}
+
+// runningMessage describes what the live worktree preview actually offers.
+func runningMessage(kind string) string {
+	if kind == "files" {
+		return "文件产物可下载；仅支持 GET/HEAD，没有网页入口"
+	}
+	return "静态网页预览正在提供；仅支持 GET/HEAD，脚本运行在没有同源权限的 sandbox 中"
+}
+
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	m.closed = true

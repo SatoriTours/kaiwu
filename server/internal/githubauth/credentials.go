@@ -27,31 +27,62 @@ const (
 )
 
 // Config sources credentials from the service environment via Lookup.
+// Executable optionally overrides how the helper program path is resolved; tests
+// use it to point at a built binary, production leaves it nil.
 type Config struct {
-	Lookup func(string) (string, bool)
+	Lookup     func(string) (string, bool)
+	Executable func() (string, error)
+	// CanonicalHost overrides the frozen remote host. It exists only so tests can
+	// point the resolver at a loopback server; production leaves it empty and the
+	// canonical github.com host is enforced.
+	CanonicalHost string
 }
 
 // Resolver resolves references at request time. It holds no token strings.
 type Resolver struct {
-	lookup func(string) (string, bool)
+	lookup     func(string) (string, bool)
+	executable func() (string, error)
+	host       string
 }
 
 // GitCredential carries only non-secret plumbing for one remote operation.
 // Files are passed as extra files to the git process (the credential pipe).
+const (
+	// maxArrayFields and maxArrayValues bound the array-valued capability fields
+	// git may send on a 401 challenge.
+	maxArrayFields = 16
+	maxArrayValues = 64
+	// maxCredentialBytes bounds the whole credential request, not one line.
+	maxCredentialBytes = 64 << 10
+)
+
 type GitCredential struct {
 	Env   []string
 	Files []*os.File
-	Close func() error
+	// Config carries explicit git configuration for this invocation only. It is
+	// how the controlled credential helper is installed without touching any
+	// repository configuration.
+	Config []string
+	Close  func() error
 }
 
 func New(cfg Config) (*Resolver, error) {
 	if cfg.Lookup == nil {
 		return nil, errors.New("缺少环境查询")
 	}
-	return &Resolver{lookup: cfg.Lookup}, nil
+	return &Resolver{lookup: cfg.Lookup, executable: cfg.Executable, host: cfg.CanonicalHost}, nil
 }
 
 // Token resolves an API credential reference to a bearer token.
+// canonicalHost is the frozen remote host for this resolver. Production always
+// resolves to github.com; only tests inject another host.
+func (r *Resolver) canonicalHost() string {
+	if r.host != "" {
+		return r.host
+	}
+	return "github.com"
+}
+
 func (r *Resolver) Token(ctx context.Context, ref string) (string, error) {
 	if ref != RefAPI {
 		return "", fmt.Errorf("凭据引用 %q 不能用于 API 查询", ref)

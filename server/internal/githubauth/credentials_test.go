@@ -206,8 +206,16 @@ func TestCredentialBridge(t *testing.T) {
 		if _, handled, e := run(cred, []string{"internal-git-credential", "get"}, "url=https://evil.invalid/owner/repo.git\n"); e == nil || !handled {
 			t.Fatalf("wrong host must be refused: %v %v", handled, e)
 		}
-		if _, handled, e := run(cred, []string{"internal-git-credential", "store"}, ""); !handled || e == nil {
-			t.Fatalf("store must be refused explicitly: handled=%v err=%v", handled, e)
+		// store/erase are deliberate silent no-ops: real git calls store after a
+		// successful authentication and the bridge has no credential store.
+		for _, op := range []string{"store", "erase"} {
+			out, handled, e := run(cred, []string{"internal-git-credential", op}, "protocol=https\nhost=github.com\npassword=argv-secret\n\n")
+			if !handled || e != nil || out != "" {
+				t.Fatalf("%s must be a silent no-op: handled=%v err=%v out=%q", op, handled, e, out)
+			}
+		}
+		if _, handled, e := run(cred, []string{"internal-git-credential", "unknown-op"}, ""); !handled || e == nil {
+			t.Fatalf("unknown operation must be refused: handled=%v err=%v", handled, e)
 		}
 	})
 

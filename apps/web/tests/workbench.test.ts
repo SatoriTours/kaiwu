@@ -10,6 +10,35 @@ import {
   createOperationID,
   isStartRequest,
 } from "../src/workbench.ts";
+import { safePreviewURL, isWebPreviewable, isManifestApproved, recordManifestApproval, clearManifestApprovals } from "../src/preview.ts";
+
+test("preview helper safePreviewURL, clearManifestApprovals, and static/web detection", () => {
+  // safePreviewURL rejects traversal, hashes, and non-capability prefixes
+  assert.equal(safePreviewURL("/preview/" + "a".repeat(64) + "/index.html"), "/preview/" + "a".repeat(64) + "/index.html");
+  assert.equal(safePreviewURL("/preview/" + "a".repeat(64) + "/sub/page.html?v=1"), "/preview/" + "a".repeat(64) + "/sub/page.html?v=1");
+  assert.equal(safePreviewURL("/preview/" + "a".repeat(64) + "/../secret"), undefined);
+  assert.equal(safePreviewURL("http://evil.com/page"), undefined);
+
+  // isWebPreviewable helper: checks if a preview is available as static or runnable command web preview
+  assert.equal(isWebPreviewable({ state: 'stopped', kind: 'static', entry: 'index.html', message: 'ok', taskId: 't1', roundId: 'r1' }), true);
+  assert.equal(isWebPreviewable({ state: 'running', url: '/preview/' + 'a'.repeat(64) + '/', message: 'ok', taskId: 't1', roundId: 'r1' }), true);
+  assert.equal(isWebPreviewable({ state: 'stopped', command: ['npm', 'start'], message: 'ok', taskId: 't1', roundId: 'r1' }), true);
+  assert.equal(isWebPreviewable({ state: 'unavailable', message: '暂无网页', taskId: 't1', roundId: 'r1' }), false);
+  assert.equal(isWebPreviewable({ state: 'stopped', message: '纯后台工具', taskId: 't1', roundId: 'r1' }), false);
+  assert.equal(isWebPreviewable(undefined), false);
+
+  // In-memory manifest approval check & clearManifestApprovals
+  assert.equal(isManifestApproved('t1', 'r1', 'm1'), false);
+  recordManifestApproval('t1', 'r1', 'm1');
+  assert.equal(isManifestApproved('t1', 'r1', 'm1'), true);
+  // Different round or task does not share approval
+  assert.equal(isManifestApproved('t1', 'r2', 'm1'), false);
+  assert.equal(isManifestApproved('t2', 'r1', 'm1'), false);
+  // clearManifestApprovals wipes in-memory authorization across all tasks/rounds
+  clearManifestApprovals();
+  assert.equal(isManifestApproved('t1', 'r1', 'm1'), false);
+});
+
 test("only an explicit start phrase starts development", () => {
   for (const s of ["开始开发", " 开始开发！ ", "开始开发。"])
     assert.equal(isStartRequest(s), true);
@@ -163,20 +192,201 @@ test('only the scoped preview gateway can become an iframe target',async()=>{
  for(const value of ['https://example.com','//example.com','/api/snapshot','/preview/short/','/preview/'+'a'.repeat(64)+'/../../api/snapshot','/preview/'+'a'.repeat(64)+'/%2e%2e/api','/preview/'+'a'.repeat(64)+'/a%2fb',undefined])assert.equal(safePreviewURL(value),undefined);
 });
 
-import {groupChatMessages,replySummary,messageText,replyLinks} from '../src/chat-messages.ts';
-test('chat grouping preserves every message and separates progress across user turns and final replies',()=>{
- const messages=[
-  {id:'u1',role:'user',text:'开发接口',delivery:'complete'},
-  {id:'p1',role:'assistant',kind:'progress',text:'检查项目',delivery:'complete'},
-  {id:'p2',role:'assistant',kind:'progress',text:'验证接口',delivery:'complete'},
-  {id:'a1',role:'assistant',kind:'summary',text:'接口已完成',delivery:'complete'},
-  {id:'u2',role:'user',text:'继续修改',delivery:'complete'},
-  {id:'p3',role:'assistant',kind:'progress',text:'检查新要求',delivery:'complete'},
+import {groupChatMessages,replySummary,messageText,replyLinks,filterChatEntries,turnSummary} from '../src/chat-messages.ts';
+test('chat grouping merges all progress and final messages per user turn into one AI bubble', () => {
+ const messages = [
+  { id: 'u1', role: 'user', text: '开发接口', delivery: 'complete' },
+  { id: 'p1', role: 'assistant', kind: 'progress', text: '检查项目', delivery: 'complete' },
+  { id: 'p2', role: 'assistant', kind: 'progress', text: '验证接口', delivery: 'complete' },
+  { id: 'a1', role: 'assistant', kind: 'summary', text: '接口已完成', delivery: 'complete' },
+  { id: 'u2', role: 'user', text: '继续修改', delivery: 'complete' },
+  { id: 'p3', role: 'assistant', kind: 'progress', text: '检查新要求', delivery: 'complete' },
  ];
- const original=JSON.stringify(messages),entries=groupChatMessages(messages);
- assert.deepEqual(entries.map(e=>e.updates?.map(m=>m.id)??[e.message.id]),[['u1'],['p1','p2'],['a1'],['u2'],['p3']]);
- assert.equal(entries[1]!.message.id,'p2');
- assert.equal(JSON.stringify(messages),original);
+ const original = JSON.stringify(messages);
+ const entries = groupChatMessages(messages);
+ // Per-turn grouping:
+ // u1 -> single assistant bubble combining [p1, p2, a1]
+ // u2 -> assistant bubble containing [p3]
+ assert.deepEqual(entries.map(e => e.updates?.map(m => m.id) ?? [e.message.id]), [['u1'], ['p1', 'p2', 'a1'], ['u2'], ['p3']]);
+ assert.equal(entries[1]!.message.id, 'a1'); // latest message represents the bubble
+ assert.equal(entries[1]!.userMessage?.id, 'u1');
+ assert.equal(JSON.stringify(messages), original);
+});
+
+test('chat grouping creates placeholder for active running/starting turns without assistant message, and stops loading on interrupt/fail/waiting', () => {
+ const messages = [
+  { id: 'u1', role: 'user', text: '启动分析', delivery: 'accepted' },
+ ];
+ // Starting with no assistant reply yet:
+ const starting = groupChatMessages(messages, { runState: 'starting' });
+ assert.equal(starting.length, 2);
+ assert.equal(starting[1]!.role, 'assistant');
+ assert.equal(starting[1]!.isPlaceholder, true);
+ assert.equal(starting[1]!.loading, true);
+ assert.equal(starting[1]!.userMessage?.id, 'u1');
+
+ // Running with no assistant reply yet:
+ const running = groupChatMessages(messages, { runState: 'running' });
+ assert.equal(running[1]!.loading, true);
+
+ // Interrupted or failed: placeholder exists, loading stopped:
+ const interrupted = groupChatMessages(messages, { runState: 'interrupted' });
+ assert.equal(interrupted[1]!.loading, false);
+ assert.equal(interrupted[1]!.isPlaceholder, true);
+
+ const failed = groupChatMessages(messages, { runState: 'failed' });
+ assert.equal(failed[1]!.loading, false);
+
+ const waiting = groupChatMessages(messages, { runState: 'running', taskStatus: 'waiting_user' });
+ assert.equal(waiting[1]!.loading, false);
+});
+
+test('turnSummary uses report.summary when present, or 1-2 sentence status/reply without code blocks, without fake success', () => {
+ // Case 1: Structured report.summary
+ const entryWithReport: any = {
+  id: 'a1',
+  role: 'assistant',
+  message: { id: 'm1', role: 'assistant', text: '详细技术日志\n```go\ncode\n```', delivery: 'complete' },
+  round: { id: 'u1', report: { summary: '已完成接口开发，端口可通过本地访问。' } },
+ };
+ assert.equal(turnSummary(entryWithReport), '已完成接口开发，端口可通过本地访问。');
+
+ // Case 2: Running with progress message (currently doing, not implementation detail)
+ const entryRunning: any = {
+  id: 'a2',
+  role: 'assistant',
+  loading: true,
+  message: { id: 'p1', role: 'assistant', kind: 'progress', text: '正在验证接口路由与数据库连接。\n\n具体执行：npm test -- --grep route', delivery: 'complete' },
+ };
+ assert.equal(turnSummary(entryRunning), '正在验证接口路由与数据库连接。');
+
+ // Case 3: Placeholder running/starting
+ const entryPlaceholder: any = {
+  id: 'ph',
+  role: 'assistant',
+  isPlaceholder: true,
+  loading: true,
+  runState: 'starting',
+ };
+ assert.equal(turnSummary(entryPlaceholder), '正在准备启动…');
+
+ // Case 4: Raw text with code blocks stripped to 1-2 sentences
+ const entryCode: any = {
+  id: 'a3',
+  role: 'assistant',
+  message: { id: 'm3', role: 'assistant', text: '服务已正常运行。请在浏览器测试。\n```bash\ncurl http://localhost:8000\n```\n更多详情见日志。', delivery: 'complete' },
+ };
+ assert.equal(turnSummary(entryCode), '服务已正常运行。请在浏览器测试。');
+});
+
+test('turnSummary constraints: limits to 2 sentences, strips commands and implementation lists, and falls back cleanly without fake success', () => {
+ // Length > 200 chars and many sentences
+ const longSummary = '第一句话关于总体进展。第二句话关于测试情况。第三句话说明更多细节。第四句话关于后续规划。';
+ const entryLong: any = {
+  id: 'a-long',
+  role: 'assistant',
+  round: { id: 'u1', report: { summary: longSummary } },
+ };
+ const sLong = turnSummary(entryLong);
+ assert.equal(sLong, '第一句话关于总体进展。第二句话关于测试情况。');
+
+ // Non-fence shell commands and implementation task list
+ const commandSummary = `
+已完成当前模块修复。
+$ go test ./...
+> npm run build
+- 修复了模型参数转换
+* 完善了单元测试覆盖
+1. 第一项具体实现
+展开查看完整日志。
+`;
+ const entryCmd: any = {
+  id: 'a-cmd',
+  role: 'assistant',
+  message: { id: 'm-cmd', role: 'assistant', text: commandSummary, delivery: 'complete' },
+ };
+ const sCmd = turnSummary(entryCmd);
+ assert.equal(sCmd, '已完成当前模块修复。');
+ assert.ok(!sCmd.includes('go test'));
+ assert.ok(!sCmd.includes('npm run build'));
+ assert.ok(!sCmd.includes('修复了模型参数转换'));
+
+ // Empty text fallback
+ const entryEmpty: any = {
+  id: 'a-empty',
+  role: 'assistant',
+  message: { id: 'm-empty', role: 'assistant', text: '', delivery: 'complete' },
+ };
+ assert.equal(turnSummary(entryEmpty), '本条更新没有文字说明，展开查看记录。');
+});
+
+test('taskState correctly tracks confirmRoundId and resultRoundId across finished, confirmed, interrupted, and awaiting_user rounds with conversation', async () => {
+ const { taskState } = await import('../src/task-state.ts');
+ const task: any = { id: 't1', status: 'needs_confirmation', executionId: 'e1' };
+ const execution: any = { id: 'e1', phase: 'awaiting_review' };
+ const conversation: any = {
+  id: 'c1',
+  runState: 'idle',
+  rounds: [
+   { id: 'r1', phase: 'finished', report: { summary: '完成接口开发' } },
+  ],
+  messages: [{ id: 'r1', role: 'user', text: '开发接口' }],
+ };
+
+ // Case 1: Finished round with conversation -> confirmRoundId present
+ const stateFinished = taskState(task, conversation, execution);
+ assert.equal(stateFinished.status, 'needs_confirmation');
+ assert.equal(stateFinished.confirmRoundId, 'r1');
+
+ // Case 2: Confirmed round -> resultRoundId present and resultConfirmed true
+ const completedTask: any = { id: 't1', status: 'completed', executionId: 'e1' };
+ const confirmedConv: any = {
+  id: 'c1',
+  runState: 'idle',
+  rounds: [
+   { id: 'r1', phase: 'confirmed', report: { summary: '完成并已验收' } },
+  ],
+  messages: [{ id: 'r1', role: 'user', text: '开发接口' }],
+ };
+ const stateConfirmed = taskState(completedTask, confirmedConv, execution);
+ assert.equal(stateConfirmed.status, 'completed');
+ assert.equal(stateConfirmed.resultConfirmed, true);
+ assert.equal(stateConfirmed.resultRoundId, 'r1');
+
+ // Case 3: Interrupted after finish -> preserves result / confirmRoundId
+ const interruptedConv: any = {
+  ...conversation,
+  runState: 'interrupted',
+ };
+ const stateInterrupted = taskState(task, interruptedConv, execution);
+ assert.equal(stateInterrupted.confirmRoundId, 'r1');
+
+ // Case 4: Awaiting user / blocking interaction -> waiting_user, no confirmRoundId
+ const waitingConv: any = {
+  ...conversation,
+  interactions: [
+   { id: 'ix1', status: 'pending', blocking: true, expiresAt: new Date(Date.now() + 60000).toISOString() },
+  ],
+ };
+ const stateWaiting = taskState(task, waitingConv, execution);
+ assert.equal(stateWaiting.status, 'waiting_user');
+ assert.equal(stateWaiting.confirmRoundId, undefined);
+});
+
+test('filterChatEntries purely filters questions without mutating messages or losing data', () => {
+ const entries: any[] = [
+  { id: 'u1', role: 'user', message: { id: 'u1', role: 'user', text: '问题一' } },
+  { id: 'a1', role: 'assistant', message: { id: 'a1', role: 'assistant', text: '回答一' } },
+  { id: 'u2', role: 'user', message: { id: 'u2', role: 'user', text: '问题二' } },
+  { id: 'a2', role: 'assistant', message: { id: 'a2', role: 'assistant', text: '回答二' } },
+ ];
+ const all = filterChatEntries(entries, 'all');
+ assert.equal(all.length, 4);
+
+ const questions = filterChatEntries(entries, 'questions');
+ assert.equal(questions.length, 2);
+ assert.deepEqual(questions.map(q => q.id), ['u1', 'u2']);
+ assert.equal(entries.length, 4); // pure
 });
 test('reply summaries use the actual report when visible prose is empty and retain malformed reports in details',()=>{
  const report={id:'report',role:'assistant',delivery:'complete',displayText:'',text:'<kaiwu-report>{"summary":"已实现 hello 接口，正在核对浏览器访问。"}</kaiwu-report>'};

@@ -12,9 +12,27 @@ import KanbanBoard from "./KanbanBoard.vue";
 import ProjectMenu from "./ProjectMenu.vue";
 import ChatPanel from "./ChatPanel.vue";
 import ResultPreview from "./ResultPreview.vue";
-import {safePreviewURL} from "./preview.ts";
+import {safePreviewURL, preserveArtifactLinks, isWebPreviewable, isManifestApproved, recordManifestApproval, clearManifestApprovals} from "./preview.ts";
+import {
+  createPreviewIntent,
+  beginPreviewIntent,
+  invalidatePreviewIntent,
+  isPreviewIntentCurrent,
+  markPreviewNavigated,
+  releasePreviewIntent,
+  previewIntentKey,
+  previewStartOperation,
+  peekPreviewStart,
+  clearPreviewCompletion,
+  clearPreviewStarts,
+  settlePreviewStart,
+  reconcilePreviewStart,
+  type PreviewScope,
+} from "./preview-intent.ts";
 import TaskDialog from "./TaskDialog.vue";
 import MergeDialog from "./MergeDialog.vue";
+import { createMergeIntent, invalidateMergeIntent, beginMerge, settleMerge, rejectMerge, reconcileMerge, uncertainMergeOperation, reviewedRoundId, isPushOnlyReview } from "./merge-intent.ts";
+import { mergeFinished } from "./merge.ts";
 import ModelDialog from "./ModelDialog.vue";
 import DeliverySettings from "./DeliverySettings.vue";
 import VersionBadge from "./VersionBadge.vue";
@@ -28,6 +46,7 @@ import type {
   Task,
   Receipt,
   MergePreview,
+  MergeReview,
   MergeOperation,
   Conversation,
   Profile,
@@ -85,6 +104,11 @@ const taskPreview=ref<TaskPreview>();
 const previewBusy=ref(false),previewError=ref('');
 let previewEpoch=0,previewTimer:ReturnType<typeof setTimeout>|undefined;
 const mergePreview = ref<MergePreview>();
+const mergeReview = ref<MergeReview>();
+const mergeReceipt = ref<MergeOperation>();
+const mergeStale = ref(false);
+let mergeEpoch = 0;
+let mergeIntent = createMergeIntent();
 const modelTarget = ref<{ scope: string; projectId?: string; conversationId?: string; taskId?: string; profile?: Profile }>();
 const modelSaving = ref(false), modelError = ref("");
 const deliverySettingsOpen = ref(false);
@@ -101,10 +125,12 @@ let mergeRequest:
       taskId: string;
       previewId: string;
       commitMessage: string;
+      mode: "local" | "push";
+      roundId: string;
     }
   | undefined;
 let mergeDraft: { conversationId: string; revision: number } | undefined;
-const mergeOperation = computed(() => state.value?.merges?.[mergeOpID.value]);
+const mergeOperation = computed(() => state.value?.merges?.[mergeOpID.value] ?? mergeReceipt.value);
 let gitTimer: ReturnType<typeof setTimeout> | undefined,
   gitChecking = false;
 const unread = reactive<Record<string, number>>({});
@@ -164,10 +190,15 @@ function chooseProject(id: string) {
   chatVisible.value = false;
 }
 function clearIdentity() {
+  clearManifestApprovals();
+  invalidatePreview('auth');
+  previewBlockedURL.value = '';
   closeResult();
   authEpoch++;
  streamID="";
   authenticated.value = false;
+  closeResult();
+  clearManifestApprovals();
   online.value = false;
   loginBusy.value = false;
   showToken.value = false;
@@ -176,8 +207,8 @@ function clearIdentity() {
   modelTarget.value = undefined;
   modelSaving.value = false;
   modelError.value = "";
-  mergePreview.value = undefined;
-  mergeTarget.value = undefined;
+  closeMerge();
+  mergeIntent = createMergeIntent();
   mergeRequest = undefined;
   mergeDraft = undefined;
   mergeOpID.value = "";
@@ -929,142 +960,149 @@ async function pollGit(manual=false){
 function visibility(){void updateWatch()}
 watch([authenticated,projectID],()=>void updateWatch());
 watch(()=>tasks.value.map(t=>t.id+":"+t.status).join(","),()=>void pollGit());
-async function openMerge(
-  target: Task,
-  sent?: { conversationId: string; revision: number },
-) {
-  const epoch = authEpoch,
-    scope = projectID.value,
-    selection = taskID.value;
-  error.value = "";
-  try {
-    const previous = Object.values(state.value?.merges ?? {})
-      .filter(
-        (op) =>
-          op.taskId === target.id &&
-          [
-            "queued",
-            "preparing",
-            "committing",
-            "committed",
-            "merging",
-            "needs_check",
-          ].includes(op.phase),
-      )
-      .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
-    const preview =
-      previous?.preview ??
-      (await api<MergePreview>("git/preview", {
-        projectId: target.projectId,
-        taskId: target.id,
-      }));
-    if (
-      epoch !== authEpoch ||
-      scope !== projectID.value ||
-      selection !== taskID.value
-    )
-      return;
-    mergeTarget.value = target;
-    mergePreview.value = preview;
-    mergeError.value = "";
-    mergeSaving.value = false;
-    mergeOpID.value = previous?.id ?? "";
-    mergeRequest = undefined;
-    mergeDraft = sent;
-  } catch (e) {
-    if (epoch === authEpoch && scope === projectID.value) report(e);
-  }
+function mergeStamp(target: Task): string {
+  const round = state.value?.conversations[target.conversationId]?.rounds?.at(-1);
+  const git = state.value?.taskGit?.[target.id];
+  return JSON.stringify([projectID.value, taskID.value, round?.id, git?.state, git?.mainBranch, git?.mainSHA, git?.taskSHA, git?.dirtyFiles]);
 }
 function closeMerge() {
+  mergeEpoch++;
+  invalidateMergeIntent(mergeIntent); // retain uncertain writes, even across close/ABA
   mergePreview.value = undefined;
+  mergeReview.value = undefined;
   mergeTarget.value = undefined;
+  mergeReceipt.value = undefined;
+  mergeOpID.value = "";
+  mergeRequest = undefined;
   mergeError.value = "";
+  mergeSaving.value = false;
+  mergeStale.value = false;
+}
+function applyMergeReceipt(op: MergeOperation) {
+  mergeReceipt.value = op;
+  mergeOpID.value = op.id;
+  reconcileMerge(mergeIntent, { projectId: op.projectId, taskId: op.taskId, roundId: op.roundId ?? "", mode: op.mode === "push" ? "push" : "local" }, true);
+}
+async function openMerge(target: Task, sent?: { conversationId: string; revision: number }) {
+  closeMerge();
+  const generation = mergeEpoch, epoch = authEpoch, stamp = mergeStamp(target);
+  const current = () => generation === mergeEpoch && epoch === authEpoch && stamp === mergeStamp(target);
+  error.value = "";
+  try {
+    const uncertain = uncertainMergeOperation(mergeIntent, { projectId: target.projectId, taskId: target.id });
+    let previous = Object.values(state.value?.merges ?? {})
+      .filter(op => op.taskId === target.id && (!mergeFinished(op.phase) || op.phase === "needs_check"))
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+    if (uncertain) {
+      // 404 is not proof that a delayed original request can never arrive.
+      try { previous = await api<MergeOperation>("git/operations/" + uncertain); }
+      catch { throw new Error("合并回执尚未确认；只能稍后只读核查，不会重新发送操作。"); }
+      if (previous.id !== uncertain || previous.taskId !== target.id || previous.projectId !== target.projectId) throw new Error("合并回执不匹配");
+    }
+    if (previous) {
+      if (!current()) return;
+      mergeTarget.value = target;
+      mergePreview.value = previous.preview;
+      applyMergeReceipt(previous);
+      mergeDraft = sent;
+      return;
+    }
+    const conv = state.value?.conversations[target.conversationId];
+    const execution = state.value?.executions?.[target.executionId ?? ""];
+    const roundId = reviewedRoundId(conv, execution);
+    if (!roundId) throw new Error("请等待最新一轮执行结束后再审核合并");
+    const body = { projectId: target.projectId, taskId: target.id, roundId };
+    const preview = await api<MergePreview>("git/preview", { ...body, mode: "local" });
+    if (!current()) return;
+    let review: MergeReview | undefined, remoteError = "";
+    try { review = await api<MergeReview>("git/preview", { ...body, mode: "push" }); }
+    catch (e) {
+      if (e instanceof APIError && e.status === 401) throw e;
+      remoteError = "远程审核不可用：" + (e instanceof Error ? e.message : "请稍后重试");
+    }
+    if (!current()) return;
+    if (preview.roundId !== roundId || preview.mode !== "local" || (review && (review.roundId !== roundId || review.mode !== "push" || review.fingerprint !== preview.fingerprint))) throw new Error("审核期间成果或 Git 状态已变化，请重新审核");
+    mergeTarget.value = target;
+    mergePreview.value = preview;
+    mergeReview.value = review;
+    mergeError.value = remoteError;
+    mergeDraft = sent;
+  } catch (e) { if (current()) report(e); }
 }
 async function recheckMerge() {
   const target = mergeTarget.value;
-  const sent = mergeDraft;
-  closeMerge();
-  if (target) await openMergeFresh(target, sent);
-}
-async function openMergeFresh(
-  target: Task,
-  sent?: { conversationId: string; revision: number },
-) {
-  const epoch = authEpoch,
-    scope = projectID.value,
-    selection = taskID.value;
-  try {
-    const preview = await api<MergePreview>("git/preview", {
-      projectId: target.projectId,
-      taskId: target.id,
-    });
-    if (
-      epoch !== authEpoch ||
-      scope !== projectID.value ||
-      selection !== taskID.value
-    )
-      return;
-    mergeTarget.value = target;
-    mergePreview.value = preview;
-    mergeError.value = "";
-    mergeOpID.value = "";
-    mergeRequest = undefined;
-    mergeDraft = sent;
-  } catch (e) {
-    if (epoch === authEpoch) report(e);
+  if (!target || mergeSaving.value) return;
+  const op = mergeOperation.value;
+  if (op && (!mergeFinished(op.phase) || op.phase === "needs_check")) {
+    const generation = mergeEpoch;
+    try {
+      const fresh = await api<MergeOperation>("git/operations/" + op.id);
+      if (generation === mergeEpoch) { applyMergeReceipt(fresh); mergeError.value = ""; }
+    } catch (e) { if (generation === mergeEpoch) mergeError.value = e instanceof Error ? e.message : "只读核查失败"; }
+    return;
   }
+  await openMerge(target, mergeDraft);
 }
-async function confirmMerge(message: string) {
-  const preview = mergePreview.value,
-    target = mergeTarget.value,
-    epoch = authEpoch;
-  if (!preview || !target || mergeSaving.value) return;
-  mergeRequest ??= {
-    operationId: createOperationID(),
-    projectId: target.projectId,
-    taskId: target.id,
-    previewId: preview.id,
-    commitMessage: message,
-  };
-  const request = { ...mergeRequest },
-    sent = mergeDraft;
+async function confirmMerge(message: string, mode: "local" | "push") {
+  const target = mergeTarget.value;
+  const preview = mode === "push" ? mergeReview.value : mergePreview.value;
+  if (!target || !preview?.roundId || mergeSaving.value || mergeStale.value || mergeOperation.value || (mode === "push" ? !mergeReview.value?.canPush : !preview.canMerge)) return;
+  const scope = { projectId: target.projectId, taskId: target.id, roundId: preview.roundId, mode };
+  const began = beginMerge(mergeIntent, scope, createOperationID);
+  if (began.action === "wait") return;
+  if (began.action === "reconcile") { await openMerge(target, mergeDraft); return; }
+  const epoch = authEpoch, generation = mergeEpoch, intentEpoch = mergeIntent.epoch;
+  const request = { ...scope, operationId: began.operationId, previewId: preview.id, commitMessage: message };
+  mergeRequest = request;
+  const sent = mergeDraft;
   mergeSaving.value = true;
   mergeError.value = "";
   try {
-    let op: MergeOperation;
-    try {
-      op = await api<MergeOperation>("git/merge", request);
-    } catch (e) {
-      if (!(e instanceof APIError) || e.status !== 0) throw e;
-      try {
-        op = await api<MergeOperation>("git/operations/" + request.operationId);
-      } catch {
-        throw new APIError(
-          0,
-          "merge_uncertain",
-          "尚未查到合并回执；请以原操作标识重试确认",
-        );
-      }
-    }
+    const op = await api<MergeOperation>("git/merge", request);
     if (epoch !== authEpoch) return;
+    if (op.id !== request.operationId || op.taskId !== target.id || op.mode !== mode || op.roundId !== scope.roundId) throw new Error("合并回执不匹配，请只读核查");
+    settleMerge(mergeIntent, intentEpoch, scope, { operationId: op.id, ok: true });
     if (sent) acceptSent(local, sent.conversationId, sent.revision);
-    if (mergePreview.value?.id === preview.id) mergeOpID.value = op.id;
+    if (generation === mergeEpoch) applyMergeReceipt(op);
     await refresh();
     void pollGit();
   } catch (e) {
-    if (epoch === authEpoch && mergePreview.value?.id === preview.id) {
-      mergeError.value = e instanceof Error ? e.message : "合并请求未确认";
-      if (e instanceof APIError && e.status !== 0) mergeRequest = undefined;
-      report(e);
-    }
-  } finally {
-    if (epoch === authEpoch) mergeSaving.value = false;
-  }
+    if (epoch !== authEpoch) return;
+    const rejected = e instanceof APIError && [400, 403, 409, 422].includes(e.status);
+    if (rejected) rejectMerge(mergeIntent, intentEpoch, scope);
+    else settleMerge(mergeIntent, intentEpoch, scope, undefined);
+    if (generation !== mergeEpoch) return;
+    mergeStale.value = true;
+    mergeError.value = rejected ? "审核已失效，请重新审核后显式确认：" + (e as Error).message : "操作回执未知；重新检查只查询原操作，不会再次提交或推送。";
+    if (e instanceof APIError && e.status === 401) report(e);
+  } finally { if (epoch === authEpoch && generation === mergeEpoch) mergeSaving.value = false; }
 }
-function closeResult(){previewEpoch++;clearTimeout(previewTimer);resultTarget.value=undefined;taskPreview.value=undefined;previewBusy.value=false;previewError.value=''}
+function closeResult(keepBlockedNotice = false){
+  // Closing the result view is a user-visible cancel: the pending gesture must
+  // not navigate its reserved blank afterwards.
+  invalidatePreview('close');
+  previewEpoch++;
+  clearTimeout(previewTimer);
+  resultTarget.value=undefined;
+  taskPreview.value=undefined;
+  previewBusy.value=false;
+  previewError.value='';
+  if (!keepBlockedNotice) previewBlockedURL.value='';
+}
 watch([projectID,taskID,()=>conversation.value?.rounds?.at(-1)?.id],(next,previous)=>{
+ // Any selection change, task switch or new latest round invalidates the live
+ // preview intent — even with no result panel open, and even if the values later
+ // look identical again (A → B → A must never revive a late receipt).
+ // Confirming a legacy result may materialize the same bound round, not a new intent.
+ const legacyAcknowledged = mergeSaving.value && !previous[2] && next[2] === mergeRequest?.roundId && next[0] === previous[0] && next[1] === previous[1];
+ if (!legacyAcknowledged) closeMerge();
+ invalidatePreview(next[1]!==previous[1]||next[0]!==previous[0]?'task':'round');
  if(resultTarget.value&&(resultTarget.value.taskId!==taskID.value||resultTarget.value.projectId!==projectID.value||(next[2]!==previous[2]&&next[2]!==resultTarget.value.roundId)))closeResult();
-});
+ if(previewBlockedURL.value&&(taskID.value!==previous[1]||projectID.value!==previous[0]||next[2]!==previous[2]))previewBlockedURL.value='';
+},{flush:'sync'});
+watch(() => mergeTarget.value ? mergeStamp(mergeTarget.value) : "", (now, before) => {
+  if (before && now !== before && !mergeSaving.value && !mergeOperation.value && (!mergeTarget.value || !uncertainMergeOperation(mergeIntent, { projectId: mergeTarget.value.projectId, taskId: mergeTarget.value.id }))) closeMerge();
+}, { flush: 'sync' });
 function resultChat(){chatVisible.value=true;nextTick(()=>chatPanel.value?.focusEditor())}
 function reviseResult(){closeResult();resultChat()}
 function previewInstructions(){
@@ -1073,23 +1111,301 @@ function previewInstructions(){
  setDraft(local,previous+(previous.trim()?'\n\n':'')+'请补充本任务的预览说明：网页任务请在当前独立工作区提供 kaiwu-preview.json，使用 {port} 和 127.0.0.1，说明启动命令及访问路径；非网页任务请提供使用方法和实际验证输出。不要自动启动服务。');
  closeResult();resultChat();
 }
-async function openResult(roundID:string){
- const selected=task.value;if(!selected)return;
- closeResult();resultTarget.value={projectId:selected.projectId,taskId:selected.id,roundId:roundID};
- chatVisible.value=false;
- await loadTaskPreview('status',true);
+// One unified preview intent owns the reserved blank tab, the monotonic
+// generation and the per-gesture operation id. Selection / task / latest round /
+// auth changes invalidate it even when no result panel is open.
+const previewIntent = createPreviewIntent({
+  createOperationId: createOperationID,
+  openBlank: () => {
+    let win: Window | null = null;
+    try {
+      win = window.open('about:blank', '_blank');
+      if (win) win.opener = null;
+    } catch { win = null; }
+    return win;
+  },
+});
+const previewBlockedURL = ref<string>("");
+function currentPreviewScope(): PreviewScope | undefined {
+  const selected = task.value;
+  const roundId = conversation.value?.rounds?.at(-1)?.id;
+  if (!selected || !roundId) return;
+  return { projectId: selected.projectId, taskId: selected.id, roundId };
+}
+function isPreviewScopeLive(scope: PreviewScope): boolean {
+  const now = currentPreviewScope();
+  return !!now && now.projectId === scope.projectId && now.taskId === scope.taskId && now.roundId === scope.roundId;
+}
+function invalidatePreview(reason: string) {
+  invalidatePreviewIntent(previewIntent, reason);
+  // Auth change / unmount: these operation receipts belong to a login session
+  // that is over. A plain selection change keeps them so an unknown start can
+  // still be reconciled read-only later in the same login.
+  if (reason === 'auth' || reason === 'unmount') clearPreviewStarts(previewIntent);
+}
+
+async function runPreviewFlow(
+  target: { projectId: string; taskId: string; roundId: string },
+  explicitStart = false
+) {
+  if (!target) return;
+  const scope: PreviewScope = { ...target };
+  // A historical round only ever shows the stored record: the current worktree
+  // can no longer reproduce it, so no Status/Open/Start is issued at all.
+  const isHistorical = target.roundId !== conversation.value?.rounds?.at(-1)?.id;
+  if (isHistorical) {
+    invalidatePreview('historical');
+    closeResult();
+    resultTarget.value = target;
+    chatVisible.value = false;
+    return;
+  }
+
+  // One gesture binds one intent: it dedupes in-flight repeats, late repeats just
+  // after completion, and owns exactly one pre-opened blank tab.
+  const intent = beginPreviewIntent(previewIntent, {
+    scope,
+    gesture: explicitStart ? 'start' : 'open',
+  });
+  if (!intent) return;
+  const previewWindow = intent.blank ?? null;
+  let navigated = false;
+  previewBlockedURL.value = "";
+
+  function stillCurrent(res?: TaskPreview): boolean {
+    if (!intent) return false;
+    if (!isPreviewScopeLive(scope)) return false;
+    return isPreviewIntentCurrent(previewIntent, intent, currentPreviewScope() ?? scope, res);
+  }
+
+  function discardBlank() {
+    if (previewWindow && !previewWindow.closed && !navigated) previewWindow.close();
+  }
+
+  function navigateOrBlock(url: string | undefined): boolean {
+    const safeUrl = safePreviewURL(url);
+    if (!safeUrl) return false;
+    if (previewWindow && !previewWindow.closed) {
+      previewWindow.location.href = safeUrl;
+      markPreviewNavigated(intent!);
+      navigated = true;
+      return true;
+    }
+    // Popup was blocked: keep the notice, never drop the verified URL.
+    closeResult(true);
+    resultTarget.value = target;
+    chatVisible.value = false;
+    previewBlockedURL.value = safeUrl;
+    navigated = true;
+    return true;
+  }
+
+  // Stable operation id per (scope + manifest + start). Reusing it means an
+  // unknown receipt can be reconciled read-only and retried idempotently.
+  function startOperationId(manifestId: string): string | undefined {
+    const key = previewIntentKey(scope) + ':' + manifestId;
+    const decision = previewStartOperation(previewIntent, key);
+    if (decision.action === 'write') return decision.operationId;
+    if (decision.action === 'wait') return;
+    // Blocked: only a read-only status check may decide what happens next.
+    return;
+  }
+
+  try {
+    let currentPreview = taskPreview.value;
+    if (!explicitStart || !currentPreview || currentPreview.taskId !== target.taskId || currentPreview.roundId !== target.roundId) {
+      const status = await api<TaskPreview>('previews/status', target);
+      if (!stillCurrent(status)) {
+        discardBlank();
+        return;
+      }
+      currentPreview = status;
+      taskPreview.value = status;
+    }
+
+    // Explicit file-only results have no webpage. Open only mints download
+    // capabilities; close our un-navigated blank and show the real file list.
+    if (currentPreview.kind === 'files') {
+      const opened = await api<TaskPreview>('previews/open', target);
+      if (!stillCurrent(opened)) { discardBlank(); return; }
+      discardBlank();
+      closeResult();
+      resultTarget.value = target;
+      chatVisible.value = false;
+      taskPreview.value = opened;
+      return;
+    }
+
+    // 1. Static preview: directly Open capability URL
+    if (currentPreview.kind === 'static') {
+      const opened = await api<TaskPreview>('previews/open', target);
+      if (!stillCurrent(opened)) {
+        discardBlank();
+        return;
+      }
+      taskPreview.value = opened;
+      if (navigateOrBlock(opened.url)) { taskPreview.value = opened; return; }
+      discardBlank();
+      throw new Error(opened.message || '未获取到有效的静态预览入口');
+    }
+
+    // 2. Running preview: viewing is not executing. `previews/open` is read-only
+    // and mints a fresh login-bound capability URL, so an already running preview
+    // is opened even when this page has no URL yet, and without re-approving the
+    // execution command. It must never fall back to Start just to obtain a URL.
+    const manifestId = currentPreview.manifestId;
+    if (currentPreview.state === 'running') {
+      const opened = await api<TaskPreview>('previews/open', target);
+      if (!stillCurrent(opened)) {
+        discardBlank();
+        return;
+      }
+      taskPreview.value = opened;
+      if (navigateOrBlock(opened.url)) return;
+      discardBlank();
+      throw new Error(opened.message || '未获取到有效的服务预览入口');
+    }
+
+    // 3. Runnable command: it runs only from a user gesture — the explicit Start
+    // button, or the chat result action while this exact login/task/round/manifest
+    // is already approved. Background work (Status, restore, poll) never starts a
+    // command; with no approval it only shows the panel and waits.
+    const sameScopedApproval = !!manifestId && isManifestApproved(target.taskId, target.roundId, manifestId);
+    if (currentPreview.command?.length && manifestId && (explicitStart || sameScopedApproval)) {
+      const startKey = previewIntentKey(scope) + ':' + manifestId;
+      // An earlier start whose receipt never arrived must be reconciled read-only
+      // first; never re-send that write blindly.
+      if (peekPreviewStart(previewIntent, startKey) === 'unknown') {
+        const status = await api<TaskPreview>('previews/status', target);
+        if (!stillCurrent(status)) {
+          discardBlank();
+          return;
+        }
+        const verdict = reconcilePreviewStart(previewIntent, startKey, status.state === 'running');
+        taskPreview.value = status;
+        if (verdict === 'blocked') {
+          discardBlank();
+          previewError.value = '上次启动结果未知，请刷新状态确认后再试；系统不会自动重发启动命令。';
+          return;
+        }
+        // Read-only status showed the preview running: only open it. This branch
+        // must never fall through into another Start write.
+        const opened = await api<TaskPreview>('previews/open', target);
+        if (!stillCurrent(opened)) {
+          discardBlank();
+          return;
+        }
+        if (!navigateOrBlock(opened.url)) {
+          discardBlank();
+          previewError.value = opened.message || '上次启动结果未知，但服务器未提供有效的预览入口，请刷新状态确认。';
+          return;
+        }
+        taskPreview.value = { ...status, ...opened };
+        return;
+      }
+      const operationId = startOperationId(manifestId);
+      if (!operationId) {
+        discardBlank();
+        previewError.value = '预览启动正在进行中，请稍候刷新状态。';
+        return;
+      }
+      let started: TaskPreview;
+      try {
+        started = await api<TaskPreview>('previews/start', { ...target, manifestId, operationId });
+        settlePreviewStart(previewIntent, startKey, operationId, started?.state === 'failed' ? 'failed' : 'succeeded');
+      } catch (e) {
+        // Any error after the request left the page may have happened after the
+        // side effect (500/502/504, lost reply, offline). Keep the id and require a
+        // read-only status check instead of silently writing again. Only a
+        // provable no-work rejection could be retried, and the service exposes no
+        // such evidence, so every failure here stays unknown.
+        settlePreviewStart(previewIntent, startKey, operationId, 'unknown');
+        throw e;
+      }
+      if (!stillCurrent(started)) {
+        discardBlank();
+        return;
+      }
+      taskPreview.value = started;
+      if (started.state === 'running') {
+        recordManifestApproval(target.taskId, target.roundId, manifestId);
+        const opened = await api<TaskPreview>('previews/open', target);
+        if (!stillCurrent(opened)) {
+          discardBlank();
+          return;
+        }
+        if (navigateOrBlock(opened.url)) {
+          taskPreview.value = { ...started, ...opened };
+          return;
+        }
+      }
+    }
+
+    // 4. Cannot directly open in a new tab (needs authorization or is not a
+    // runnable webpage): close only our own blank and show the ResultPreview pane.
+    discardBlank();
+    if (!navigated && !explicitStart) {
+      closeResult();
+      resultTarget.value = target;
+      chatVisible.value = false;
+      taskPreview.value = currentPreview;
+    }
+  } catch (e) {
+    discardBlank();
+    if (!stillCurrent()) return;
+    if (!explicitStart) {
+      closeResult();
+      resultTarget.value = target;
+      chatVisible.value = false;
+    }
+    previewError.value = e instanceof Error ? e.message : '打开预览失败';
+  } finally {
+    releasePreviewIntent(previewIntent, intent);
+  }
+}
+async function openResult(roundID: string) {
+  const selected = task.value;
+  if (!selected) return;
+  await runPreviewFlow({ projectId: selected.projectId, taskId: selected.id, roundId: roundID }, false);
+}
+async function openArtifacts(roundID: string) {
+  const selected = task.value;
+  if (!selected) return;
+  if (roundID !== conversation.value?.rounds?.at(-1)?.id) { await openResult(roundID); return; }
+  closeResult();
+  resultTarget.value = { projectId: selected.projectId, taskId: selected.id, roundId: roundID };
+  chatVisible.value = false;
+  await loadTaskPreview('status', true); // an explicit read-only gesture, never Start
+}
+function isCurrentPreviewTarget(target:{projectId:string;taskId:string;roundId:string}|undefined){
+ return !!target&&!!task.value&&!!conversation.value&&target.projectId===task.value.projectId&&target.taskId===task.value.id&&target.roundId===conversation.value.rounds?.at(-1)?.id;
 }
 async function loadTaskPreview(action:'status'|'start'|'stop'='status',forceOpen=false){
- const target=resultTarget.value;if(!target||previewBusy.value||!online.value)return;
+ const target=resultTarget.value;
+ // Only the live latest round of the selected task may talk to the preview API;
+ // a historical target is a stored record and never issues Status/Open/Start.
+ if(!target||!isCurrentPreviewTarget(target)||previewBusy.value||!online.value)return;
  clearTimeout(previewTimer);const epoch=previewEpoch;previewBusy.value=true;previewError.value='';
  try{
-  const previousURL=taskPreview.value?.state==='running'?taskPreview.value.url:undefined;
+  const previous = taskPreview.value;
+  const previousURL=previous?.state==='running'?previous.url:undefined;
   const manifestId=action==='start'?taskPreview.value?.manifestId:undefined;
   if(action==='start'&&!manifestId)throw new Error('预览配置缺少确认指纹，请先刷新状态并核对命令。');
   const result=await api<TaskPreview>('previews/'+action,{...target,...(action==='status'?{}:{operationId:createOperationID()}),...(action==='start'?{manifestId}:{})});
   if(epoch!==previewEpoch)return;
   if(result.taskId!==target.taskId||result.roundId!==target.roundId)throw new Error('成果目标已变化，请重新打开任务结果。');
-  if(result.state==='running'){
+  if(action==='start'&&result.state==='running'&&manifestId){
+   recordManifestApproval(target.taskId,target.roundId,manifestId);
+  }
+  // A confirmed Stop ends that gesture: an explicit reopen is allowed again.
+  if(action==='stop'&&result.state==='stopped')clearPreviewCompletion(previewIntent);
+  result.artifacts = preserveArtifactLinks(result, previous);
+  if(forceOpen && result.artifacts?.length && (result.kind==='files'||result.kind==='static')) {
+   const opened = await api<TaskPreview>('previews/open', target);
+   if(epoch!==previewEpoch)return;
+   if(opened.taskId!==target.taskId||opened.roundId!==target.roundId)throw new Error('文件入口与当前成果不匹配。');
+   Object.assign(result,opened);
+  } else if(result.state==='running' && result.kind!=='files'){
    if(!forceOpen&&safePreviewURL(previousURL))result.url=previousURL;
    else{
     const opened=await api<TaskPreview>('previews/open',target);
@@ -1136,6 +1452,8 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   stopped = true;
+  invalidatePreview('unmount');
+  clearManifestApprovals();
   setSocketRequest(undefined);
   clearTimeout(retry);
   clearTimeout(gitTimer);
@@ -1258,7 +1576,7 @@ onBeforeUnmount(() => {
         </button>
       </nav>
       <div class="app" :class="{ 'chat-visible': chatVisible, 'result-visible': !!resultTarget }">
-        <ResultPreview v-if="resultTarget&&task&&conversation" :task="task" :conversation="conversation" :execution="task.executionId?state?.executions?.[task.executionId]:undefined" :round-id="resultTarget.roundId" :preview="taskPreview" :busy="previewBusy" :error="previewError" :online="online" @back="closeResult();chatVisible=false" @chat="resultChat" @refresh="loadTaskPreview('status',true)" @start="loadTaskPreview('start',true)" @stop="loadTaskPreview('stop')" @revise="reviseResult" @instructions="previewInstructions"/>
+        <ResultPreview v-if="resultTarget&&task&&conversation" :task="task" :conversation="conversation" :execution="task.executionId?state?.executions?.[task.executionId]:undefined" :round-id="resultTarget.roundId" :preview="taskPreview" :preview-blocked-url="previewBlockedURL" :busy="previewBusy" :error="previewError" :online="online" @back="closeResult();chatVisible=false" @chat="resultChat" @refresh="loadTaskPreview('status',true)" @start="resultTarget && runPreviewFlow(resultTarget, true)" @stop="loadTaskPreview('stop')" @revise="reviseResult" @instructions="previewInstructions"/>
         <KanbanBoard v-else
           :executions="state?.executions??{}"
           :git="state?.taskGit ?? {}"
@@ -1301,6 +1619,7 @@ onBeforeUnmount(() => {
             !!conversation.profile.model
           "
           :visible="width >= 1024 || chatVisible"
+          :preview="taskPreview"
           @draft="setDraft(local, $event)"
           @send="send"
           @project="navigate()"
@@ -1309,6 +1628,7 @@ onBeforeUnmount(() => {
           @start="task && start(task)"
           @merge="task && openMerge(task)"
           :tasks="tasks"
+          @files="openArtifacts"
           @confirm-result="confirmResult"
           @preview-result="openResult"
           @model="openModels(conversation)"
@@ -1331,6 +1651,9 @@ onBeforeUnmount(() => {
       v-if="mergePreview && mergeTarget"
       :key="mergePreview.id"
       :preview="mergePreview"
+      :review="mergeReview"
+      :mode="isPushOnlyReview(mergeReview) ? 'push_only' : 'local'"
+      :stale="mergeStale"
       :task-title="mergeTarget.title"
       :saving="mergeSaving"
       :operation="mergeOperation"

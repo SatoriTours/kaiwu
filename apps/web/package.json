@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "test": "node tests/workbench.test.ts && node tests/version.test.ts",
+    "test": "node tests/workbench.test.ts && node tests/preview-intent.test.ts && node tests/merge-intent.test.ts && node tests/artifact-links.test.ts && node tests/version.test.ts",
     "build": "vue-tsc --noEmit && vite build && node scripts/copy-build.mjs",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:chat-turn": "node tests/chat-turn.run.mjs"
   },
   "dependencies": {
     "dompurify": "3.4.16",

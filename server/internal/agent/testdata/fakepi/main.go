@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +55,19 @@ func nativeDialog(out *json.Encoder, scan *bufio.Scanner, session, file, model, 
 }
 
 func main() {
+	for i, arg := range os.Args {
+		if arg == "--serve-preview" && i+1 < len(os.Args) {
+			port := os.Args[i+1]
+			mux := http.NewServeMux()
+			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				fmt.Fprintf(w, "<!doctype html><html><head><meta charset=\"utf-8\"><title>服务进程网页</title></head><body><h1 id=\"proc-title\">开悟服务进程测试</h1></body></html>")
+			})
+			server := &http.Server{Addr: "127.0.0.1:" + port, Handler: mux}
+			_ = server.ListenAndServe()
+			return
+		}
+	}
 	session := "fixture"
 	sessionDir := ""
 	development := false
@@ -165,6 +179,40 @@ func main() {
 				_ = out.Encode(map[string]any{"type": "tool_execution_start", "toolCallId": "fixture-write", "toolName": "write", "args": map[string]string{"path": "kaiwu-fixture-result.txt"}})
 				err := os.WriteFile("kaiwu-fixture-result.txt", []byte(fmt.Sprint(c["message"])), 0600)
 				_ = out.Encode(map[string]any{"type": "tool_execution_end", "toolCallId": "fixture-write", "toolName": "write", "result": map[string]string{"text": "fixed fixture file written"}, "isError": err != nil})
+
+				if strings.Contains(fmt.Sprint(c["message"]), "静态网页产物") {
+					_ = os.WriteFile("index.html", []byte(`<!doctype html><html><head><meta charset="utf-8"><title>静态预览网页</title><link rel="stylesheet" href="assets/style.css"></head><body><h1 id="static-title">开悟静态网页测试</h1><img id="static-img" src="assets/pixel.png" alt="pixel" width="10" height="10"><script src="assets/app.js"></script></body></html>`), 0600)
+					_ = os.MkdirAll("assets", 0755)
+					_ = os.WriteFile("assets/style.css", []byte(`#static-title { color: rgb(24, 112, 60); font-family: sans-serif; }`), 0600)
+					_ = os.WriteFile("assets/app.js", []byte(`document.addEventListener('DOMContentLoaded', () => { document.body.dataset.jsReady = 'true'; });`), 0600)
+					// 1x1 transparent png
+					pngData := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82}
+					_ = os.WriteFile("assets/pixel.png", pngData, 0600)
+				}
+				if strings.Contains(fmt.Sprint(c["message"]), "命令网页产物") {
+					self, _ := os.Executable()
+					if self == "" {
+						self = "fakepi"
+					}
+					manifestBytes, _ := json.Marshal(map[string]any{
+						"version": 1,
+						"command": []string{self, "--serve-preview", "{port}"},
+						"path":    "/",
+					})
+					_ = os.WriteFile("kaiwu-preview.json", manifestBytes, 0600)
+				}
+				if strings.Contains(fmt.Sprint(c["message"]), "命令网页变更") {
+					self, _ := os.Executable()
+					if self == "" {
+						self = "fakepi"
+					}
+					manifestBytes, _ := json.Marshal(map[string]any{
+						"version": 1,
+						"command": []string{self, "--serve-preview", "{port}", "--v2"},
+						"path":    "/",
+					})
+					_ = os.WriteFile("kaiwu-preview.json", manifestBytes, 0600)
+				}
 			}
 			if c["message"] == "__MARKDOWN_STREAM_FIXTURE__" {
 				chunks = []string{"## 流式格式\n\n```go\npackage main\n", "func main() { println(\"ready\") }\n", "```\n\n**完成**"}

@@ -48,7 +48,7 @@ func (h *handler) previewGateway(w http.ResponseWriter, r *http.Request) {
 	// normal API Origin/CSRF checks remain unchanged.
 	check := r.Clone(r.Context())
 	check.Header = r.Header.Clone()
-	if check.Header.Get("Origin") == "null" {
+	if check.Header.Get("Origin") == "null" || (check.Header.Get("Origin") == "" && check.Header.Get("Sec-Fetch-Site") == "cross-site") {
 		check.Header.Del("Origin")
 		check.Header.Del("Sec-Fetch-Site")
 	}

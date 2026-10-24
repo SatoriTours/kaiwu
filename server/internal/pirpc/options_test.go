@@ -19,7 +19,8 @@ func TestOptionsOverridesAndRejectsNegative(t *testing.T) {
 	typ := reflect.TypeOf(Options{})
 	for i := 0; i < typ.NumField(); i++ {
 		f := typ.Field(i)
-		if f.Name == "Logger" {
+		// Only numeric knobs have defaults; callbacks (Logger, OnStarted) do not.
+		if f.Name == "Logger" || f.Name == "OnStarted" {
 			continue
 		}
 		t.Run(f.Name, func(t *testing.T) {

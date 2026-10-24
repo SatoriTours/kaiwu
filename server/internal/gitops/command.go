@@ -13,15 +13,58 @@ import (
 
 type Runner func(context.Context, string, ...string) (string, error)
 
-func Args(dir string, args ...string) []string {
-	return append([]string{"-C", dir, "--no-pager", "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "-c", "core.attributesFile=" + os.DevNull, "-c", "commit.gpgSign=false", "-c", "merge.gpgSign=false", "-c", "merge.verifySignatures=false", "-c", "log.showSignature=false", "-c", "merge.autoStash=false", "-c", "rerere.enabled=false", "-c", "core.quotePath=false"}, args...)
+// bridgeArgs appends the resolver-supplied credential configuration after the
+// generic argument list, so a controlled helper is installed only where the
+// service explicitly provided one.
+func bridgeArgs(dir string, config []string, args ...string) []string {
+	base := Args(dir, args...)
+	if len(config) == 0 {
+		return base
+	}
+	// Generic arguments include a final "credential.helper=" reset, so the
+	// controlled helper has to be installed after them and before the command.
+	head := base[:len(base)-len(args)]
+	out := append([]string{}, head...)
+	for _, kv := range config {
+		out = append(out, "-c", kv)
+	}
+	return append(out, args...)
 }
+
+func Args(dir string, args ...string) []string {
+	return append([]string{"-C", dir, "--no-pager", "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "-c", "core.attributesFile=" + os.DevNull, "-c", "commit.gpgSign=false", "-c", "merge.gpgSign=false", "-c", "merge.verifySignatures=false", "-c", "log.showSignature=false", "-c", "merge.autoStash=false", "-c", "rerere.enabled=false", "-c", "core.quotePath=false",
+		// An empty value resets git's credential helper list, so a repository
+		// or included config can never run its own helper. The service supplies
+		// credentials through its own controlled bridge instead.
+		"-c", "credential.helper="}, args...)
+}
+
+// withheldEnv are variables that must never reach a git child implicitly: raw
+// service credentials, bridge plumbing a child could be tricked into using and
+// an SSH agent that was not explicitly authorized by the resolver.
+var withheldEnv = map[string]bool{
+	"KAIWU_GITHUB_GIT_TOKEN":       true,
+	"KAIWU_GITHUB_API_TOKEN":       true,
+	"KAIWU_GITHUB_SSH_KEY":         true,
+	"KAIWU_GITHUB_SSH_AGENT":       true,
+	"KAIWU_GITHUB_HELPER":          true,
+	"KAIWU_GITHUB_CREDENTIAL_FD":   true,
+	"KAIWU_GITHUB_CREDENTIAL_HOST": true,
+	"SSH_AUTH_SOCK":                true,
+	"GIT_ASKPASS":                  true,
+	"SSH_ASKPASS":                  true,
+}
+
 func Env() []string {
 	var env []string
 	for _, v := range os.Environ() {
-		if !strings.HasPrefix(v, "GIT_") {
-			env = append(env, v)
+		if strings.HasPrefix(v, "GIT_") {
+			continue
 		}
+		if name, _, _ := strings.Cut(v, "="); withheldEnv[name] {
+			continue
+		}
+		env = append(env, v)
 	}
 	return append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_TERMINAL_PROMPT=0", "GIT_EDITOR=true", "GIT_MERGE_AUTOEDIT=no", "GIT_LITERAL_PATHSPECS=1", "LC_ALL=C")
 }

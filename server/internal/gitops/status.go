@@ -199,9 +199,20 @@ func committedScope(ctx context.Context, dir, base, head string, protected ...st
 	if head == "" || head == base {
 		return nil
 	}
+	return committedScopeSet(ctx, dir, base, []string{head}, protected...)
+}
+
+// committedScopeSet applies the same private-path scope to every commit
+// reachable from heads but not from base, so a push review can inspect the exact
+// multi-input upload set instead of only one linear range.
+func committedScopeSet(ctx context.Context, dir, base string, heads []string, protected ...string) error {
+	if len(heads) == 0 {
+		return nil
+	}
 	// A merge imports reachable history, including files removed by later commits.
 	// Inspect every introduced commit rather than only the final tree difference.
-	args := []string{"log", "--format=", "--name-only", "--root", "-m", "--no-renames", "--no-ext-diff", "--no-textconv", "-z", head}
+	args := []string{"log", "--format=", "--name-only", "--root", "-m", "--no-renames", "--no-ext-diff", "--no-textconv", "-z"}
+	args = append(args, heads...)
 	if base != "" {
 		args = append(args, "--not", base)
 	}

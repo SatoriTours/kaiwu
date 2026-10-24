@@ -124,6 +124,49 @@ export interface MergePreview {
   files: GitFile[];
   needsCommit: boolean;
   canMerge: boolean;
+  mode?: string;
+  roundId?: string;
+}
+/** One commit a push review would upload. */
+export interface MergeUpload {
+  sha: string;
+  subject: string;
+}
+/** Read-only push review: the local proof plus the observed remote state. */
+export interface MergeReview extends MergePreview {
+  remoteName?: string;
+  remoteUrl?: string;
+  mainRef?: string;
+  observedRemoteSHA?: string;
+  localMainSHA?: string;
+  uploads?: MergeUpload[];
+  pending?: GitFile[];
+  pendingNote?: string;
+  safetyProof?: string;
+  credentialRef?: string;
+  alreadyMerged?: boolean;
+  pushOnly?: boolean;
+  canPush?: boolean;
+  pushReason?: string;
+  reviewFingerprint?: string;
+}
+/** Remote authorisation frozen into a push operation. */
+export interface PushReviewFreeze {
+  fingerprint: string;
+  reviewFingerprint: string;
+  remoteName: string;
+  remoteUrl: string;
+  mainRef: string;
+  credentialRef?: string;
+  observedSHA: string;
+  localMainSHA: string;
+  taskSHA: string;
+  uploads?: MergeUpload[];
+  pending?: GitFile[];
+  pendingNote?: string;
+  safetyProof?: string;
+  roundId: string;
+  pushOnly?: boolean;
 }
 export interface MergeOperation {
   id: string;
@@ -132,9 +175,19 @@ export interface MergeOperation {
   phase: string;
   error?: string;
   startedAt: string;
+  finishedAt?: string;
+  taskBeforeSHA?: string;
   taskAfterSHA: string;
+  mainBeforeSHA?: string;
   mainAfterSHA: string;
+  mode?: string;
+  roundId?: string;
   preview: MergePreview;
+  push?: PushReviewFreeze;
+  intendedSHA?: string;
+  remoteAfterSHA?: string;
+  pushAttemptedAt?: string;
+  ciStatus?: string;
 }
 
 export interface ToolRecord {id:string;name:string;input?:string;result?:string;failed:boolean}
@@ -152,12 +205,18 @@ export interface Round {
   tools: ToolRecord[];
 }
 
+export interface PreviewArtifact { id: string; name: string; size: number; type: string; url?: string }
+
 export interface TaskPreview {
  taskId: string;
  roundId: string;
  state: 'unavailable' | 'stopped' | 'starting' | 'running' | 'failed';
  manifestId?: string;
  message: string;
+ kind?: 'static' | 'files';
+ artifacts?: PreviewArtifact[];
+ root?: string;
+ entry?: string;
  command?: string[];
  path?: string;
  url?: string;

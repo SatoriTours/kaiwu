@@ -23,6 +23,10 @@ type Store struct {
 	closed      bool
 	syncEvents  []SyncEvent
 	syncBytes   int
+	// persistBarrier is a durability test seam: when set it runs before the
+	// state write and may fail it, so tests can prove what survives a store
+	// failure without changing production behaviour (nil by default).
+	persistBarrier func(State) error
 	// userTurnHook is notified after a command that starts a user run commits.
 	// It is called after the store lock is released and must not call back.
 	userTurnHook func(taskID, conversationID string)
@@ -187,11 +191,25 @@ func clone(st State) State {
 	}
 	return out
 }
+
+// SetPersistBarrier installs the durability fault seam used by tests that prove
+// which facts survive a failed state write. Passing nil removes it.
+func (s *Store) SetPersistBarrier(fn func(State) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.persistBarrier = fn
+}
+
 func (s *Store) Snapshot() State { s.mu.Lock(); defer s.mu.Unlock(); return clone(s.state) }
 func (s *Store) persist(next State, operationID, fingerprint string, receipt Receipt) error {
 	return s.persistWith(next, operationID, fingerprint, receipt, nil)
 }
 func (s *Store) persistWith(next State, operationID, fingerprint string, receipt Receipt, write func(*sql.Tx) error) error {
+	if s.persistBarrier != nil {
+		if e := s.persistBarrier(next); e != nil {
+			return e
+		}
+	}
 	next.Revision = s.state.Revision + 1
 	body, err := json.Marshal(next)
 	if err != nil {

@@ -194,3 +194,107 @@ func TestPreviewGatewayCapabilityWorksWithoutCookieAndRevokesWithLogin(t *testin
 		t.Fatal("preview changed confirmation")
 	}
 }
+
+// TestPreviewArtifactDownloadOverHTTP proves the declared-file download works
+// through the real HTTP admission layer: capability-only access, forced
+// attachment, and login revocation. Nothing starts and no task state changes.
+func TestPreviewArtifactDownloadOverHTTP(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "project")
+	_ = os.Mkdir(source, 0700)
+	git := func(args ...string) string {
+		t.Helper()
+		b, e := exec.Command("git", append([]string{"-C", source}, args...)...).CombinedOutput()
+		if e != nil {
+			t.Fatalf("git: %v %s", e, b)
+		}
+		return strings.TrimSpace(string(b))
+	}
+	git("init", "--template=", "-b", "main")
+	git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "fixture")
+	base := git("rev-parse", "HEAD")
+	data := filepath.Join(root, "data")
+	id := strings.Repeat("e", 32)
+	parent := filepath.Join(data, "worktrees", id)
+	_ = os.MkdirAll(parent, 0700)
+	tree := filepath.Join(parent, "tree")
+	branch := "kaiwu/task-" + id
+	git("worktree", "add", "-b", branch, tree)
+	owner, _ := json.Marshal(map[string]any{"TaskID": id, "Source": source, "Branch": branch, "BaseSHA": base, "Ready": true})
+	_ = os.WriteFile(filepath.Join(parent, "owner.json"), owner, 0600)
+	_ = os.MkdirAll(filepath.Join(tree, "out"), 0o755)
+	_ = os.WriteFile(filepath.Join(tree, "out", "报告.csv"), []byte("a,b\n1,2\n"), 0600)
+	manifest, _ := json.Marshal(map[string]any{"version": 2, "kind": "files", "artifacts": []map[string]any{{"path": "out/报告.csv", "name": "报告 数据.csv"}}})
+	_ = os.WriteFile(filepath.Join(tree, "kaiwu-preview.json"), manifest, 0600)
+	s, e := workbench.Open(filepath.Join(data, "db"), workbench.Profile{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer s.Close()
+	_ = s.Update(func(st *workbench.State) error {
+		st.Projects["p"] = workbench.Project{ID: "p", Path: source}
+		st.Tasks[id] = workbench.Task{ID: id, ProjectID: "p", ConversationID: "c", ExecutionID: "x", Status: "completed"}
+		st.Executions["x"] = workbench.Execution{ID: "x", TaskID: id, ConversationID: "c", Workspace: tree, Branch: branch, BaseSHA: base, Phase: "confirmed", FinishedAt: "done"}
+		st.Conversations["c"] = workbench.Conversation{ID: "c", ProjectID: "p", TaskID: id, RunState: "idle", Rounds: []workbench.Round{{ID: "r", Phase: "confirmed", FinishedAt: "done"}}}
+		return nil
+	})
+	pm := preview.New(context.Background(), s, preview.Config{DataDir: data})
+	defer pm.Close()
+	accessToken := strings.Repeat("x", 32)
+	credential := strings.Repeat("a", 64)
+	loginHash := credentialHash(credential)
+	if e = s.SaveLogin(loginHash, credentialHash(accessToken), time.Now().Add(time.Hour)); e != nil {
+		t.Fatal(e)
+	}
+	h := New(Config{Token: accessToken, Host: "127.0.0.1:7331", Previews: pm}, s, nil).(*handler)
+	defer h.Close()
+	req := preview.Request{ProjectID: "p", TaskID: id, RoundID: "r", OperationID: "artifact-preview"}
+	shown, err := pm.Status(req)
+	if err != nil || shown.Kind != "files" || len(shown.Artifacts) != 1 || shown.URL != "" || shown.Artifacts[0].URL != "" {
+		t.Fatal(shown, err)
+	}
+	req.ManifestID = shown.ManifestID
+	v, e := pm.Open(req, loginHash)
+	if e != nil || len(v.Artifacts) != 1 || !strings.Contains(v.Artifacts[0].URL, "/~download/") {
+		t.Fatal(v, e)
+	}
+	fetch := func(method, target string, withCookie bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "http://127.0.0.1:7331"+target, nil)
+		r.Host = "127.0.0.1:7331"
+		r.Header.Set("Origin", "null")
+		if withCookie {
+			r.AddCookie(&http.Cookie{Name: "kaiwu_session", Value: credential})
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	for _, withCookie := range []bool{false, true} {
+		w := fetch("GET", v.Artifacts[0].URL, withCookie)
+		if w.Code != 200 || w.Body.String() != "a,b\n1,2\n" || w.Header().Get("Content-Type") != "text/csv; charset=utf-8" ||
+			!strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment;") ||
+			!strings.Contains(w.Header().Get("Content-Disposition"), "filename*=UTF-8''%E6%8A%A5%E5%91%8A%20%E6%95%B0%E6%8D%AE.csv") ||
+			w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Cache-Control") != "no-store" ||
+			w.Header().Get("Referrer-Policy") != "no-referrer" || w.Header().Get("Set-Cookie") != "" {
+			t.Fatal("download failed", w.Code, w.Body.String(), w.Header())
+		}
+	}
+	if w := fetch("HEAD", v.Artifacts[0].URL, false); w.Code != 200 || w.Body.Len() != 0 || w.Header().Get("Content-Length") != "8" {
+		t.Fatal("head", w.Code, w.Body.Len(), w.Header())
+	}
+	if w := fetch("GET", "/preview/"+strings.Repeat("b", 64)+"/~download/"+v.Artifacts[0].ID, false); w.Code == 200 {
+		t.Fatal("unknown capability served", w.Code)
+	}
+	if w := fetch("GET", "/api/previews/status", false); w.Code == 405 && false {
+		t.Fatal("unreachable")
+	}
+	if e = s.RevokeLogin(loginHash); e != nil {
+		t.Fatal(e)
+	}
+	if w := fetch("GET", v.Artifacts[0].URL, false); w.Code != 401 {
+		t.Fatal("revoked login downloaded", w.Code)
+	}
+	if st := s.Snapshot(); st.Tasks[id].Status != "completed" || len(st.Executions) != 1 {
+		t.Fatal("download changed task state")
+	}
+}

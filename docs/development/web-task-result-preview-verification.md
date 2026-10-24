@@ -1,6 +1,8 @@
 # 任务成果预览与确认完成验证
 
-日期：2026-10-17。状态：实现、最终浏览器验证、独立验收与 7331 更新均已通过。
+日期：2026-10-17。状态：该历史批次实现、最终浏览器验证、独立验收与 7331 更新均已通过。
+
+> 后续 2026-10-24 扩展另见[文末](#2026-10-24-产物直达与双合并增量)；以下旧通过／部署结论不覆盖新批次。
 
 ## 授权与执行范围
 
@@ -78,3 +80,39 @@
 用户明确要求“提交代码，push 到 github”。当前源码已在本地主分支 main，origin 为 https://github.com/SatoriTours/kaiwu.git，推送前远端没有分支。将此前已完成的结构化进展／双向 WebSocket、自动接回、结果预览、聊天交互及项目菜单一并核验：Go 全量 test、vet、Go build、前端状态 16/16、Vue 类型检查／Vite build、Chromium 全量 32/32（38.7s）、diff 检查均通过。源码散列核对确认测试期间没有并发修改；浏览器使用隔离假 pi，不调用真实模型。
 
 检查待提交树和最初本地提交，未发现实际访问令牌或已检查的密钥模式；本地 .kaiwu 数据、Cookie／登录凭据、会话日志、私有截图、构建产物和 node_modules 均保留忽略。原会话及用户创建的本地工作区保留；原任务托管 worktree 已不在实际路径及活动工作区列表，不按旧记录猜测归属或归档其他空间。没有创建 PR、Tag 或 Release。
+
+## 2026-10-24 产物直达与双合并增量
+
+**状态：本地实现与分项功能／质量验收；用户已要求提交，收尾交付进行中。** 下面保留提交指令前的历史状态，不据此推断实际远端或部署结果。 在当前项目目录与同一 Workspace 延续，不使用以上旧批次的 worktree／发布授权。最新阶段见根目录 `TODO.md` 与 `docs/superpowers/plans/2026-10-24-task-result-actions.md`。
+
+- 静态 HTML／相对资源直接进入新标签页；拥有的未导航空白页在失效时关闭，不关闭用户已有页面。命令预览仍须授权，running 只 Open；未知 Start 仅只读核查，不因 Stop／无回执而再启动。历史轮次不访问当前树。
+- v2 manifest 可用 `kind: "files"` 与非空 `artifacts` 声明文件，或在 `kind: "static"` 网页旁添加文件。每项为相对**任务 worktree** 的 `path`、可选下载 `name` 和白名单 `type`，不是相对 static root。最多 16 项／32MiB 每文件；不遍历或列出任意目录。
+- Status 仅元数据；显式 Open 才提供本源 `/preview/<cap>/~download/<id>`。files-only 显示下载列表，没有伪网页／iframe／Start。HTML 一律 attachment，不在工作台执行；保留会话／草稿／工作台地址。
+- 下载后端独立首验复现旧 cap 在重读 manifest 窗口读取新声明 ID；必须修，未按“此刻已声明”判通过。R1 使用同一已校验 manifest 快照贯穿解析，独立实际 gateway 复验得到窗口内 404、终态旧 cap 409、新 cap 200。同 ID 更名亦须重绑，原 NOFOLLOW／MIME／大小／登录／轮次安全项保留。
+- 审核后显式选择本地合并或合并并推送；仅服务端 `PushOnly` 真证明才能显示“推送到远程”。绑定最新已结束轮次及对应 review ID，认可随接纳原子记录，不强迫先按确认完成，也不改写验证证据。远程不可用仍可本地操作；未知回执保持原 operation ID，只读核查、不重放提交／合并／push。Git、本地／远端、CI／部署事实分列，CI 未测仍 `not_checked`。
+- 前端 `npm test` 68 项（35＋9＋15＋3＋6）、`vue-tsc --noEmit` 与 Vite 构建通过。新增六个 Chromium 自测在真实 Go／隔离 fakepi／临时 Git 上通过：本地合并及原子认可、真实 PDF／HTML 下载、两个 **mock remote transport** UI 场景、真实本地接纳后丢回执只读核查、静态网页与文件共存／只读轮询。远程 mock 不转发写入，不能当作真实推送验收。
+- 下载实际检查 Chromium `download`、中文空格 `suggestedFilename`、保存字节、HTML 不执行、Start=0与非空草稿；这不是操作系统保存对话框验收。桌面／360／390及键盘 Enter 已自测，主控实看六张截图，360 合并取消按钮断行为已记 Minor，未见遮挡；独立验收端无图像能力时仍必须明确**独立视觉验收受阻**，不能用这些开发者截图或 DOM 尺寸代替。
+- F5 历史独立组合 exit1 保留，重登录根因尚未实证。当前含 F5 的四例自测通过，7 次登录记录显示当时 UI ready；未改生产认证、未升 timeout／删断言。F5b 已用可见可用的自然点击，Stop 后 Status 增加并显示未知启动解释，零新增 Start，不再靠 inert／force 点击证明成功。
+
+首轮前端冻结源集合散列 `bebaa880bbebd33ab138e1884ff18d6461138a858903f2ffbee29e4c8cbd1521`（14 源文件，M1 后的测试集合见下）；下载后端 R1：`artifacts d99ef152`、`gateway 92d6b630`、`manager d5b797d4`、测试 `4a978481`。独立前端 spec／quality 验收进行中；最终结论以本批追加记录为准。
+
+本批没有真实 pi 模型联调、真实 GitHub／Actions／生产部署／跨平台验收；保留 15 个历史 fakepi，不以清理他人成果换取全绿。原逐项红／失败／绿日志、hash 与独立报告保存在本任务单份 agent-artifacts 留存目录，未把未部署说成已经生效。
+
+### 2026-10-25 M1：登录同步与有界夹具生命周期
+
+独立首验找到真实夹具问题：加载期立即 `isVisible()` 会跳过令牌表单；整文件登录又触发产品 10 次／分钟限流。真实 `/api/snapshot` 401 回包延迟 0／250／400ms 的新用例先 **3 fail（exit1）**，等待 token 或工作台真实 ready 后 **3 pass（exit0）**。worker 仅内存复用自有 fixture Cookie，不回放 localStorage／草稿；显式 logout 仍真撤销、401 后新登录。生产认证未改。
+
+随后整文件单服务又触产品 8 驻留上限（13 pass／6 fail）。正式全量入口为：
+
+```sh
+cd apps/web
+npm run test:chat-turn
+```
+
+入口自动发现全部用例，每片最多四例；`fullyParallel` 只用于个案分片，实际始终 `workers:1`，各片全新服务、串行使用原 17445。无手写 grep／跳例／上调产品限制，保留有限超时及 SIGTERM 收尾。正式执行 **19／19 pass，exit0**（4＋4＋4＋4＋3；每片成功登录 3／1／1／1／4）。补真 local dialog 初始焦点、说明 Space、Esc 零写、重开 Enter 一次写；敏感历史 UI 理由／隐藏 push 是明确 mock 合同检查，不当真实远端联调。
+
+旧 F3 locator 调用时间不再当 DOM 激活时间，正式 fixture 采用先前已验的 trusted native DOM 方法；未改产品 700ms／intent。主控 ready 后 122／255ms，末击距首击 423ms＜700，无新增 Open／tab，900ms 后再开成功；独立补跑末击距首击 452ms，可信／enabled 断言同样通过。不新开已裁定产品根因调查。
+
+最新集合 **`eb8e49020cbc1049be78575e31cb1dde7123d704143e70abeb5e218a14a8bc1e`**（16 文件），仅四测试相关文件变化，生产 TS／Go／dist 未变。569 实际独立窄验 **6＋1＋1 全过**（19.4／3.2／5.4 秒），核对全19日志与自动分片完整性，M1关闭，消费侧 **spec／quality分别通过**；报告 `chat-acceptance.md` §16 保留原失败。完整 Tab 循环未测；HTTP／WS长期相位采样／503变体等旧边界仍不作为通过依据。
+
+**独立视觉仍受阻**，已一次补问是否授权既有 UI 配置先核图像能力再只读验六图；未答不切模型、不重复催问。真实 UI 远端联调仍未验，不扩大本轮授权。整体仍阻塞／未完成；未部署、提交或推送。

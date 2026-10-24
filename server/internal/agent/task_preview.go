@@ -34,6 +34,7 @@ func (l *previewLease) File() *os.File          { return l.lease.inheritedFile()
 func (l *previewLease) Attempt() error          { return l.lease.attempt() }
 func (l *previewLease) Started(pid int) error   { return l.lease.started(pid) }
 func (l *previewLease) Release(safe bool) error { return l.lease.release(safe) }
+func (l *previewLease) NoProcess()              { _ = l.lease.noProcess() }
 
 // Reserve drains the original idle pi before transferring its execution lock.
 // Session identity, session file, messages and finished results remain intact.

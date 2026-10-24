@@ -17,6 +17,8 @@ func acquireExecutionLease(string) (*executionLease, error) {
 func (*executionLease) attempt() error     { return errors.New("execution is unsupported") }
 func (*executionLease) started(int) error  { return errors.New("execution is unsupported") }
 func (*executionLease) unused() bool       { return true }
+func (*executionLease) noProcess() error   { return errors.New("execution is unsupported") }
+func (*executionLease) unproven() bool     { return true }
 func (*executionLease) release(bool) error { return nil }
 
 func acquireProjectMergeLease(string) (*executionLease, error) {

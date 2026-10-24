@@ -120,7 +120,46 @@ func (m *Manager) reserveTask(ctx context.Context, taskID string) (func() error,
 	var once sync.Once
 	return func() error { once.Do(clear); return nil }, nil
 }
+
+// PreviewMergeReview produces a local review proof bound to the newest finished
+// round. The proof carries the mode and round so BeginMerge can acknowledge that
+// exact round in the same atomic write that queues the merge. Push is named but
+// not executable in this slice.
+func (m *Manager) PreviewMergeReview(ctx context.Context, review workbench.MergeReviewRequest) (workbench.MergePreview, error) {
+	if review.Mode != workbench.MergeModeLocal {
+		return workbench.MergePreview{}, workbench.Conflict("推送合并尚未开通，本版本只支持本地合并")
+	}
+	proof, e := m.previewMerge(ctx, review.ProjectID, review.TaskID)
+	if e != nil {
+		return proof, e
+	}
+	// Admission re-checks the same evidence; failing here keeps the preview from
+	// ever advertising an unconfirmable round.
+	if _, e := workbench.ReviewedTask(m.store.Snapshot(), workbench.MergeRequest{ProjectID: review.ProjectID, TaskID: review.TaskID, Mode: review.Mode, RoundID: review.RoundID}); e != nil {
+		return workbench.MergePreview{}, e
+	}
+	proof.Mode, proof.RoundID = review.Mode, review.RoundID
+	// The stored preview is what StartMerge re-reads, so the binding has to be
+	// written back before the caller can queue the merge.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return proof, errors.New("manager closed")
+	}
+	if stored, ok := m.previews[proof.ID]; ok {
+		stored.Mode, stored.RoundID = proof.Mode, proof.RoundID
+		m.previews[proof.ID] = stored
+	}
+	return proof, nil
+}
+
+// PreviewMerge is the legacy, unreviewed entry: same signature and behaviour as
+// before, including the fact that it never acknowledges a round.
 func (m *Manager) PreviewMerge(ctx context.Context, projectID, taskID string) (workbench.MergePreview, error) {
+	return m.previewMerge(ctx, projectID, taskID)
+}
+
+func (m *Manager) previewMerge(ctx context.Context, projectID, taskID string) (workbench.MergePreview, error) {
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -162,10 +201,16 @@ func (m *Manager) PreviewMerge(ctx context.Context, projectID, taskID string) (w
 	if m.closed {
 		return proof, errors.New("manager closed")
 	}
+	// Previews and their remote reviews share one lifetime: a dropped preview
+	// must drop its cached review too, otherwise the review map grows without
+	// bound while silently outliving what it reviews.
+	expired := 0
 	for id, v := range m.previews {
 		expire, _ := time.Parse(time.RFC3339, v.ExpiresAt)
 		if time.Now().After(expire) {
 			delete(m.previews, id)
+			delete(m.reviews, id)
+			expired++
 		}
 	}
 	if len(m.previews) >= 256 {
@@ -174,34 +219,21 @@ func (m *Manager) PreviewMerge(ctx context.Context, projectID, taskID string) (w
 	m.previews[proof.ID] = proof
 	return proof, nil
 }
+
+// dropPreview removes a preview and any review bound to it, keeping the two
+// caches consistent after a terminal operation or an eviction.
+func (m *Manager) dropPreview(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.previews, id)
+	delete(m.reviews, id)
+}
 func randomID() string {
 	b := make([]byte, 16)
 	if _, e := rand.Read(b); e != nil {
 		panic(e)
 	}
 	return hex.EncodeToString(b)
-}
-func (m *Manager) StartMerge(req workbench.MergeRequest) (workbench.MergeOperation, bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.closed {
-		return workbench.MergeOperation{}, false, errors.New("manager closed")
-	}
-	if op, replay, e := m.store.FindMerge(req); replay || e != nil {
-		return op, replay, e
-	}
-	proof, ok := m.previews[req.PreviewID]
-	expire, _ := time.Parse(time.RFC3339, proof.ExpiresAt)
-	if !ok || time.Now().After(expire) {
-		return workbench.MergeOperation{}, false, workbench.Conflict("预检已过期，请重新审核")
-	}
-	op, replay, e := m.store.BeginMerge(req, proof)
-	if e != nil || replay {
-		return op, replay, e
-	}
-	m.wg.Add(1)
-	go func() { defer m.wg.Done(); m.runMerge(op) }()
-	return op, false, nil
 }
 func (m *Manager) projectGate(common string) chan struct{} {
 	m.mu.Lock()

@@ -24,6 +24,12 @@ type Options struct {
 	StartupTimeout, CallTimeout, WriteTimeout time.Duration
 	ShutdownTimeout, DrainTimeout             time.Duration
 	Logger                                    *slog.Logger
+	// OnStarted is an optional lifecycle callback invoked once, immediately
+	// after a real child process was spawned and before any handshake, so the
+	// caller can durably attribute the process it actually started. An error
+	// aborts the launch and stops the already spawned child. The default (nil)
+	// keeps every existing call site unchanged.
+	OnStarted func(pid int) error
 }
 
 // Params must not be modified concurrently with Call.

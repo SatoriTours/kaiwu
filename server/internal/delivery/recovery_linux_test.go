@@ -149,7 +149,7 @@ func buildRecoveryWorld(t *testing.T, root string) *recoveryWorld {
 // recoveryTransport routes the frozen remote URL onto the local bare repo and
 // records every push so both processes can count real writes.
 func recoveryTransport(w *recoveryWorld) gitops.RemoteTransportFunc {
-	return func(ctx context.Context, dir string, target gitops.RemoteTarget, args []string, _ string, _ gitops.ProcessLease) (string, error) {
+	return func(ctx context.Context, dir string, target gitops.RemoteTarget, args []string, _ string, lease gitops.ProcessLease) (string, error) {
 		a := append([]string{}, args...)
 		for i := range a {
 			if strings.Contains(a[i], "github.com") {
@@ -163,7 +163,7 @@ func recoveryTransport(w *recoveryWorld) gitops.RemoteTransportFunc {
 				_ = f.Close()
 			}
 		}
-		return gitops.Run(ctx, dir, nil, a...)
+		return gitops.Run(ctx, dir, gitops.LeaseTrack(lease), a...)
 	}
 }
 

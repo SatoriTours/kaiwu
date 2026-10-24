@@ -54,6 +54,17 @@ func buildDelivery(ctx context.Context, dataDir string, store *workbench.Store, 
 	})
 }
 
+// manualRemoteRunner builds the read-only remote runner used by manual push
+// review. It shares the existing credential resolver but never builds delivery
+// workers, policies or API clients.
+func manualRemoteRunner() (*gitops.RemoteRunner, error) {
+	resolver, err := githubauth.New(githubauth.Config{Lookup: os.LookupEnv})
+	if err != nil {
+		return nil, fmt.Errorf("manual review credentials: %w", err)
+	}
+	return gitops.NewRemoteRunner(gitops.RemoteConfig{Resolver: resolver}), nil
+}
+
 // deliveryCommander keeps a disabled delivery out of the Web API as a real
 // nil interface instead of a typed nil.
 func deliveryCommander(m *delivery.Manager) webapi.DeliveryCommander {
@@ -102,7 +113,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 			return fmt.Errorf("open workbench: %w", err)
 		}
 		defer func() { result = errors.Join(result, store.Close()) }()
-		manager := agent.New(ctx, store, agent.Config{Program: wb.Program, DataDir: wb.DataDir, PiAgentDir: wb.PiAgentDir})
+		// The manual review remote is assembled on its own: it is read-only and
+		// never enables or stands in for automated delivery. A missing resolver
+		// (no service credentials) leaves push review explicitly blocked while
+		// local merge keeps working.
+		manualRemote, remoteErr := manualRemoteRunner()
+		if remoteErr != nil {
+			return remoteErr
+		}
+		manager := agent.New(ctx, store, agent.Config{Program: wb.Program, DataDir: wb.DataDir, PiAgentDir: wb.PiAgentDir, Remote: manualRemote})
 		defer func() { result = errors.Join(result, manager.Close()) }()
 		previews := preview.New(ctx, store, preview.Config{DataDir: wb.DataDir, Reserve: manager.AcquirePreviewLease})
 		manager.SetPreviewStopper(previews.StopTask)

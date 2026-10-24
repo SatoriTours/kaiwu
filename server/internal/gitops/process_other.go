@@ -5,6 +5,10 @@ package gitops
 import "os/exec"
 
 func setupProcess(cmd *exec.Cmd) {}
+
+// groupGone cannot be proven on this platform, so ownership is kept.
+func groupGone(int) bool { return false }
+
 func killProcess(cmd *exec.Cmd) {
 	if cmd.Process != nil {
 		_ = cmd.Process.Kill()

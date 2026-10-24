@@ -3,9 +3,9 @@ import {computed} from 'vue';
 import type {Task,Conversation,Execution,TaskPreview} from './types.ts';
 import MarkdownContent from './MarkdownContent.vue';
 import {taskState} from './task-state.ts';
-import {safePreviewURL} from './preview.ts';
+import {safePreviewURL, safeArtifactURL, isWebPreviewable} from './preview.ts';
 import {formatResultHeading} from './result-history.ts';
-const props=defineProps<{task:Task;conversation:Conversation;execution?:Execution;roundId:string;preview?:TaskPreview;busy:boolean;online:boolean;error:string}>();
+const props=defineProps<{task:Task;conversation:Conversation;execution?:Execution;roundId:string;preview?:TaskPreview;busy:boolean;online:boolean;error:string;previewBlockedUrl?:string}>();
 const emit=defineEmits<{back:[];chat:[];refresh:[];start:[];stop:[];revise:[];instructions:[]}>();
 const rounds=computed(()=>props.conversation.rounds??[]);
 const round=computed(()=>rounds.value.find(r=>r.id===props.roundId));
@@ -15,7 +15,7 @@ const presentation=computed(()=>taskState(props.task,props.conversation,props.ex
 const reply=computed(()=>props.conversation.messages.find(m=>m.id===presentation.value.replyId));
 const tools=computed(()=>round.value?.tools??props.execution?.tools??[]);
 const frameURL=computed(()=>!historical.value&&props.preview?.state==='running'?safePreviewURL(props.preview.url):undefined);
-const canStart=computed(()=>!historical.value&&!!props.preview?.command?.length&&['stopped','failed'].includes(props.preview.state));
+const canStart=computed(()=>!historical.value&&!!props.preview?.command?.length&&['stopped','failed','running'].includes(props.preview.state));
 const stateLabel=computed(()=>({running:'服务运行中',starting:'正在启动',stopped:'服务已停止',failed:'预览启动失败',unavailable:'暂无网页预览'}[props.preview?.state??'unavailable']));
 const headingText=computed(()=>{
  if(!round.value) return '本轮成果';
@@ -29,17 +29,35 @@ const headingText=computed(()=>{
  <div class="result-pane-scroll">
   <p v-if="historical" class="preview-warning">正在查看历史成果记录。当前工作区已用于后续开发，不能以当前预览复现历史效果。</p>
   <div v-if="error" class="preview-warning" role="alert">{{error}}<span> 如操作结果未知，请刷新状态，系统不会自动重发启动或停止命令。</span></div>
-  <section class="preview-surface" aria-label="网页效果">
+  <div v-if="previewBlockedUrl" class="preview-blocked-notice" role="alert">
+   <p>浏览器拦截了自动打开的新标签页：</p>
+   <a :href="previewBlockedUrl" target="_blank" rel="noopener noreferrer" class="preview-direct-link" role="link">
+    在新标签页打开网页
+   </a>
+  </div>
+  <section v-if="!historical && preview?.artifacts?.length" class="artifact-list" aria-label="文件产物">
+   <h3>文件产物</h3>
+   <ul><li v-for="file in preview.artifacts" :key="file.id">
+    <a v-if="safeArtifactURL(file.url)" :href="safeArtifactURL(file.url)" :download="file.name" rel="noopener noreferrer">下载 {{file.name}}</a>
+    <span v-else>{{file.name}}（请刷新状态获取下载链接）</span>
+    <small>{{file.size}} 字节 · {{file.type}}</small>
+   </li></ul>
+   <p class="muted">仅下载本轮显式声明的文件；链接过期后请刷新。</p>
+  </section>
+  <section v-if="!historical && isWebPreviewable(preview)" class="preview-surface" aria-label="网页效果">
    <div class="preview-status"><strong>{{stateLabel}}</strong><small v-if="preview?.path">{{preview.path}}</small><button v-if="preview?.state==='running'" :disabled="busy||!online" @click="emit('stop')">停止预览</button></div>
    <iframe v-if="frameURL" :key="frameURL" class="task-preview-frame" title="任务效果" :src="frameURL" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
-   <div v-else class="preview-empty"><h3>{{busy?'正在核对预览状态…':stateLabel}}</h3><p>{{preview?.message||(historical?'历史轮次仅展示原成果与运行记录。':'正在读取任务预览配置，已有成果和运行记录见下方。')}}</p>
-    <template v-if="canStart"><p>将使用任务工作区运行以下命令：</p><code class="preview-command">{{JSON.stringify(preview?.command)}}</code><button class="primary" :disabled="busy||!online||!preview?.manifestId" @click="emit('start')">{{preview?.state==='failed'?'重试启动预览':'启动预览'}}</button></template>
+   <div v-else class="preview-empty"><h3>{{busy?'正在核对预览状态…':stateLabel}}</h3><p>{{preview?.message||'正在读取任务预览配置，已有成果和运行记录见下方。'}}</p>
+    <template v-if="canStart"><p>将使用任务工作区运行以下命令：</p><code class="preview-command">{{JSON.stringify(preview?.command)}}</code><button class="primary preview-start-btn" :disabled="busy||!online||!preview?.manifestId" @click="emit('start')">{{preview?.state==='failed'?'重试启动预览':'启动预览并在新标签页打开'}}</button></template>
     <button v-else-if="preview?.state==='unavailable'&&!historical" :disabled="!online" @click="emit('instructions')">补充预览说明</button>
     <p v-if="preview?.state==='running'&&!frameURL" class="preview-warning">预览入口尚未通过校验，请刷新状态。</p>
    </div>
    <details v-if="preview?.logs" class="preview-logs"><summary>预览诊断</summary><pre>{{preview.logs}}</pre></details>
   </section>
-  <section class="result-output" aria-label="成果与运行结果"><div class="row between"><h3>成果与运行结果</h3><button @click="emit('revise')">继续修改</button></div>
+  <div v-else-if="preview?.message && !historical" class="preview-empty-reason">
+   <p>{{ preview.message }}</p>
+  </div>
+  <section class="result-output" aria-label="成果与运行结果"><div class="row between"><h3>成果与运行结果</h3></div>
    <MarkdownContent v-if="reply" :text="reply.displayText??reply.text"/>
    <p v-else-if="presentation.summary">{{presentation.summary}}</p><p v-else class="muted">本轮没有文字成果说明，请结合下方执行记录核对。</p>
    <ul v-if="round?.report?.results?.length"><li v-for="(result,i) in round.report.results" :key="i">{{result}}</li></ul>

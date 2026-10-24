@@ -52,6 +52,14 @@ func Start(ctx context.Context, s LaunchSpec, opts Options) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	if o.OnStarted != nil {
+		// The child exists now, so its identity is reported before the handshake:
+		// a later failure can be attributed instead of looking like "nothing ran".
+		if err := o.OnStarted(p.pid); err != nil {
+			p.stop(0, o.ShutdownTimeout)
+			return nil, err
+		}
+	}
 	c := newClient(ctx, p, o)
 	handshake, cancel := context.WithTimeout(ctx, o.StartupTimeout)
 	response, err := c.call(handshake, Command{Type: "get_state"}, true)

@@ -1,14 +1,13 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed, onMounted, onUnmounted } from "vue";
-import type { Conversation, Task, Execution, GitStatus, Message, DeliverySummary } from "./types.ts";
+import type { Conversation, Task, Execution, GitStatus, Message, DeliverySummary, TaskPreview } from "./types.ts";
 import { isStartRequest } from "./workbench.ts";
 import {taskState} from "./task-state.ts";
 import MergeIcon from "./MergeIcon.vue";
 import { isMergeRequest } from "./git.ts";
 import TaskActionIcon from "./TaskActionIcon.vue";
-import ProgressCard from "./ProgressCard.vue";
 import AssistantReply from "./AssistantReply.vue";
-import {groupChatMessages} from './chat-messages.ts';
+import {groupChatMessages, filterChatEntries} from './chat-messages.ts';
 import {failureView} from './failure.ts';
 import MarkdownContent from "./MarkdownContent.vue";
 import DeliveryStatus from "./DeliveryStatus.vue";
@@ -37,6 +36,7 @@ const props = defineProps<{
   online: boolean;
   agentAvailable: boolean;
   visible: boolean;
+  preview?: TaskPreview;
 }>();
 const emit = defineEmits<{
   draft: [string];
@@ -48,6 +48,7 @@ const emit = defineEmits<{
   merge: [];
   model: [];
   confirmResult:[string];
+  files:[string];
   previewResult:[string];
   acceptDelivery: [summary: DeliverySummary];
   pauseDelivery: [summary: DeliverySummary];
@@ -74,7 +75,45 @@ const taskStatus=computed(()=>props.task?taskState(props.task,props.conversation
 // can never carry another conversation's reason.
 const failure=computed(()=>failureView(props.conversation,props.execution));
 const deliveryActive=computed(()=>props.delivery?isDeliveryActive(props.delivery.phase):false);
-const chatEntries=computed(()=>groupChatMessages(props.conversation.messages));
+const chatFilter = ref<'all' | 'questions'>('all');
+
+const rawChatEntries = computed(() =>
+  groupChatMessages(props.conversation.messages, {
+    runState: props.conversation.runState,
+    taskStatus: taskStatus.value,
+    rounds: props.conversation.rounds,
+  })
+);
+
+const chatEntries = computed(() => filterChatEntries(rawChatEntries.value, chatFilter.value));
+
+async function setChatFilter(filter: 'all' | 'questions') {
+  chatFilter.value = filter;
+}
+
+function onQuestionKeydown(e: KeyboardEvent, messageId: string) {
+  if (chatFilter.value !== 'questions') return;
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+    e.preventDefault();
+    locateQuestion(messageId);
+  }
+}
+
+async function locateQuestion(messageId: string) {
+  chatFilter.value = 'all';
+  userInteractedScroll.value = true;
+  await nextTick();
+  const el = messages.value?.querySelector<HTMLElement>(`[data-message-id~="${messageId}"]`)
+    ?? messages.value?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+  if (el && messages.value) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const nextAssistant = el.nextElementSibling as HTMLElement | null;
+    if (nextAssistant?.classList.contains('assistant')) {
+      const details = nextAssistant.querySelector<HTMLDetailsElement>('details.assistant-turn-details, details.assistant-detail');
+      if (details) details.open = true;
+    }
+  }
+}
 // Expiry is wall-clock driven: a pending native request past its deadline must
 // leave the answer queue even when no snapshot arrives in between.
 const now = ref(Date.now());
@@ -106,11 +145,21 @@ function interactionStatus(ix: { status: string; expiresAt?: string }) {
   return effectiveInteractionStatus(ix as any, now.value);
 }
 const messages = ref<HTMLElement>();
-async function showLatestReply(messageID?:string){
- await nextTick();const replies=Array.from(messages.value?.querySelectorAll<HTMLElement>('.message.assistant')??[]);const target=messageID?Array.from(messages.value?.querySelectorAll<HTMLElement>('[data-message-id]')??[]).find(el=>el.dataset.messageId===messageID):undefined;const el=messageID?target?.closest<HTMLElement>('.message.assistant'):replies.at(-1);
- if(!el||!messages.value)return;
- const detail=el.querySelector<HTMLDetailsElement>('details.assistant-detail');if(detail)detail.open=true;
- messages.value.scrollTop+=el.getBoundingClientRect().top-messages.value.getBoundingClientRect().top;
+const userInteractedScroll = ref(false);
+async function showLatestReply(messageID?: string) {
+  await nextTick();
+  userInteractedScroll.value = true;
+  const replies = Array.from(messages.value?.querySelectorAll<HTMLElement>('.message.assistant') ?? []);
+  const target = messageID
+    ? Array.from(messages.value?.querySelectorAll<HTMLElement>('[data-message-id]') ?? []).find(
+        (el) => el.dataset.messageId === messageID || el.dataset.messageId?.split(/\s+/).includes(messageID),
+      )
+    : undefined;
+  const el = messageID ? target?.closest<HTMLElement>('.message.assistant') ?? target : replies.at(-1);
+  if (!el || !messages.value) return;
+  const detail = el.querySelector<HTMLDetailsElement>('details.assistant-turn-details, details.assistant-detail');
+  if (detail) detail.open = true;
+  messages.value.scrollTop += el.getBoundingClientRect().top - messages.value.getBoundingClientRect().top;
 }
 
 const editor = ref<HTMLTextAreaElement>();
@@ -156,6 +205,10 @@ watch(
   async () => {
     const id = props.conversation.id,
       el = messages.value;
+    if (userInteractedScroll.value) {
+      userInteractedScroll.value = false;
+      return;
+    }
     const bottom =
       props.visible &&
       id === renderedID &&
@@ -282,7 +335,29 @@ const deliveryLabels: Record<string, string> = {
         @cancel="s => emit('cancelDelivery', s)"
         @extendBudget="s => emit('extendBudgetDelivery', s)"
       />
-      <ProgressCard :conversation="conversation" :task="task" :tasks="tasks" :execution="execution" :git="git" :delivery="delivery" :online="online" :pending="pending" :agent-available="agentAvailable" @resume="emit('resume')" @reply="showLatestReply" @confirm="id=>emit('confirmResult',id)" @merge="emit('merge')" @revise="focusEditor" @preview="id=>emit('previewResult',id)"/>
+    </div>
+    <div class="chat-filter-bar row between" role="toolbar" aria-label="聊天过滤">
+      <div class="chat-filter-tabs">
+        <button
+          type="button"
+          class="chat-filter-btn"
+          :class="{ active: chatFilter === 'all' }"
+          :aria-pressed="chatFilter === 'all'"
+          @click="setChatFilter('all')"
+        >
+          全部
+        </button>
+        <button
+          type="button"
+          class="chat-filter-btn"
+          :class="{ active: chatFilter === 'questions' }"
+          :aria-pressed="chatFilter === 'questions'"
+          @click="setChatFilter('questions')"
+        >
+          只看我的问题
+        </button>
+      </div>
+      <span class="chat-filter-count">{{ chatFilter === 'questions' ? '共 ' + chatEntries.length + ' 个提问' : '' }}</span>
     </div>
     <div
       class="messages"
@@ -292,25 +367,51 @@ const deliveryLabels: Record<string, string> = {
     >
 
       <article
-        v-for="entry in chatEntries"
+        v-for="(entry, index) in chatEntries"
         :key="entry.id"
         class="message"
-        :data-message-id="entry.message.id"
-        :class="entry.message.role"
+        :data-message-id="entry.updates?.length ? entry.updates.map(u => u.id).join(' ') : entry.message.id"
+        :class="[entry.role, { 'question-clickable': chatFilter === 'questions' }]"
         :data-delivery="entry.message.delivery"
+        :tabindex="chatFilter === 'questions' ? 0 : undefined"
+        :role="chatFilter === 'questions' ? 'button' : undefined"
+        :aria-label="chatFilter === 'questions' ? '点击定位此问题：' + entry.message.text.slice(0, 30) : undefined"
+        @click="chatFilter === 'questions' ? locateQuestion(entry.message.id) : undefined"
+        @keydown="chatFilter === 'questions' ? onQuestionKeydown($event, entry.message.id) : undefined"
       >
         <div class="author">
-          <span class="avatar">{{ entry.message.role === "user" ? "我" : "π" }}</span
-          ><strong>{{
-            entry.message.role === "user"
-              ? "你"
+          <span class="avatar">{{ entry.role === 'user' ? '我' : 'π' }}</span>
+          <strong>{{
+            entry.role === 'user'
+              ? '你'
               : entry.updates ? '执行进展' : task
-                ? "pi · 任务 Agent"
-                : "pi · 项目 Agent"
-          }}</strong
-          ><span>{{ entry.updates?entry.updates.length+' 条更新':deliveryLabel(entry.message) }}</span>
+                ? 'pi · 任务 Agent'
+                : 'pi · 项目 Agent'
+          }}</strong>
+          <span v-if="chatFilter === 'questions'" class="jump-hint">点击定位至对话 ↗</span>
+          <span v-else>{{ entry.updates ? entry.updates.length + ' 条更新' : deliveryLabel(entry.message) }}</span>
         </div>
-        <AssistantReply v-if="entry.message.role==='assistant'" :message="entry.message" :updates="entry.updates"/><MarkdownContent v-else class="text" :text="entry.message.text" />
+        <AssistantReply
+          v-if="entry.role === 'assistant'"
+          :entry="entry"
+          :message="entry.message"
+          :updates="entry.updates"
+          :is-latest="index === chatEntries.length - 1"
+          :task="task"
+          :conversation="conversation"
+          :git="git"
+          :execution="execution"
+          :delivery="delivery"
+          :online="online"
+          :pending="pending"
+          :preview="preview"
+          @files="id => emit('files', id)"
+          @confirm="id => emit('confirmResult', id)"
+          @preview="id => emit('previewResult', id)"
+          @merge="emit('merge')"
+          @reply="showLatestReply"
+        />
+        <MarkdownContent v-else class="text" :text="entry.message.text" />
       </article>
 
       <!-- A settled failure belongs where it happened: in the conversation,
