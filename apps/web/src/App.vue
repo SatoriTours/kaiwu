@@ -68,6 +68,7 @@ const authenticated = ref(false),
   online = ref(false),
   agentAvailable = ref(false),
   token = ref(""),
+  showToken = ref(false),
   loginBusy = ref(false),
   error = ref(""),
   projectID = ref(""),
@@ -169,6 +170,7 @@ function clearIdentity() {
   authenticated.value = false;
   online.value = false;
   loginBusy.value = false;
+  showToken.value = false;
   saving.value = false;
   dialog.value = "";
   modelTarget.value = undefined;
@@ -247,7 +249,11 @@ const refresh = createRefreshQueue(async () => {
     applyData(data);
   } catch (e) {
     if (epoch === authEpoch) {
-      report(e);
+      if (!loaded.value && !authenticated.value && e instanceof APIError && e.status === 401) {
+        clearIdentity();
+      } else {
+        report(e);
+      }
       online.value = false;
     }
   } finally {
@@ -295,6 +301,7 @@ async function login() {
     await api("login", { token: token.value });
     if (epoch !== authEpoch) return;
     token.value = "";
+    showToken.value = false;
     readLocation();
     await refresh();
     connect();
@@ -307,6 +314,7 @@ async function login() {
 async function logout() {
   clearIdentity();
   clearInteractionDrafts();
+  error.value = "";
   const epoch = authEpoch;
   history.replaceState(null, "", "/");
   try {
@@ -1141,28 +1149,66 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <div v-if="!loaded" class="entry"><p>正在连接开悟……</p></div>
-  <main v-else-if="!authenticated" class="entry">
-    <form class="login-card" @submit.prevent="login">
-      <span class="logo">悟</span>
-      <h1>进入开悟</h1>
-      <p>连接你自己的开发工作台</p>
-      <label
-        ><span>本机访问令牌</span
-        ><input
-          v-model="token"
-          type="password"
-          autocomplete="current-password"
-          required
-          autofocus
-      /></label>
-      <p class="error" role="alert">{{ error }}</p>
-      <button class="primary" :disabled="loginBusy">
-        {{ loginBusy ? "连接中…" : "进入工作台" }}
-      </button>
-      <p class="muted">
-        登录状态保留 30 天，刷新无需重新输入；点击“退出”可清除登录。
-      </p>
-    </form>
+  <main v-else-if="!authenticated" class="login-page">
+    <div class="entry">
+      <div class="brand" aria-label="开悟">
+        <span class="mark" aria-hidden="true">悟</span>
+        <span class="brand-name">开悟</span>
+      </div>
+      <section class="card" aria-labelledby="heading">
+        <h1 id="heading">进入你的工作台</h1>
+        <p class="intro">从想法到作品，在创造中更新认知。</p>
+        <form class="login-form" @submit.prevent="login">
+          <label for="token">本机访问令牌</label>
+          <div class="input-wrap">
+            <input
+              id="token"
+              v-model="token"
+              :type="showToken ? 'text' : 'password'"
+              placeholder="输入本机访问令牌"
+              autocomplete="current-password"
+              aria-describedby="token-help"
+              required
+              autofocus
+            />
+            <button
+              class="reveal"
+              type="button"
+              :aria-label="showToken ? '隐藏令牌' : '显示令牌'"
+              :aria-pressed="showToken ? 'true' : 'false'"
+              @click="showToken = !showToken"
+            >
+              <svg v-if="!showToken" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/>
+                <circle cx="12" cy="12" r="2.5"/>
+              </svg>
+              <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24m-2.12-2.12a3 3 0 0 1-2.12-2.12M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61M2 2l20 20"/>
+              </svg>
+            </button>
+          </div>
+          <p v-if="error" class="login-error" role="alert">{{ error }}</p>
+          <button class="submit" type="submit" :disabled="loginBusy">
+            {{ loginBusy ? "连接中…" : "进入工作台" }}
+            <svg v-if="!loginBusy" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 12h14m-5-5 5 5-5 5"/>
+            </svg>
+          </button>
+        </form>
+        <p class="remember">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="6" y="10" width="12" height="10" rx="2"/>
+            <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+          </svg>
+          登录保留 30 天，退出后清除
+        </p>
+        <div class="divider"></div>
+        <p class="help" id="token-help">
+          <strong>访问令牌在哪里？</strong><br />使用启动服务时设置的本机访问令牌。
+        </p>
+      </section>
+      <p class="footer">本地优先，只连接你自己的开发环境</p>
+    </div>
   </main>
   <template v-else
     ><header class="top">

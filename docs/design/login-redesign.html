@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>开悟 · 登录页设计稿</title>
+  <style>
+    :root{color-scheme:light;--ink:#27352f;--muted:#7d857f;--green:#39594a;--line:#e3e7e2}
+    *{box-sizing:border-box}
+    body{margin:0;background:#f5f6f3;color:var(--ink);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;-webkit-font-smoothing:antialiased}
+    button,input{font:inherit}
+    button{cursor:pointer}
+    .page{min-height:100svh;display:flex;align-items:center;justify-content:center;padding:48px 24px}
+    .entry{width:384px;max-width:100%;transform:translateY(-18px)}
+    .brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:26px}
+    .mark{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:#2d4439;color:#fff;font-size:18px;font-weight:500;line-height:1}
+    .brand-name{font-size:19px;font-weight:600;letter-spacing:2px}
+    .card{padding:32px;border:1px solid #e2e6df;border-radius:14px;background:#fff;box-shadow:0 3px 6px #253c2903,0 12px 40px #253c2904}
+    h1{margin:0;font-size:23px;font-weight:600;letter-spacing:-.6px;line-height:1.4}
+    .intro{margin:9px 0 28px;font-size:12px;color:#838b85;line-height:1.7}
+    label{display:block;margin-bottom:9px;font-size:12px;font-weight:500;color:#535f57}
+    .input-wrap{position:relative}
+    input{display:block;width:100%;height:44px;padding:0 42px 0 12px;border:1px solid #dce2dc;border-radius:7px;background:#fcfdfb;color:var(--ink);font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s}
+    input::placeholder{color:#a0a79f}
+    input:focus{border-color:#7d9b88;box-shadow:0 0 0 3px #54776312}
+    .reveal{position:absolute;right:5px;top:5px;width:34px;height:34px;display:grid;place-items:center;border:0;border-radius:5px;background:transparent;color:#8c958d}
+    .reveal:hover{background:#edf1ec;color:#39594a}
+    svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+    .submit{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:42px;margin-top:16px;border:1px solid var(--green);border-radius:7px;background:var(--green);color:#fff;font-size:13px;font-weight:500;transition:background .15s}
+    .submit:hover{background:#2e493c}
+    .submit svg{width:14px;height:14px;opacity:.8}
+    button:focus-visible{outline:2px solid #7d9b88;outline-offset:3px}
+    .remember{display:flex;justify-content:center;align-items:center;gap:6px;margin:18px 0 0;color:#8b938c;font-size:11px;line-height:1.6}
+    .remember svg{width:12px;height:12px;color:#929b93}
+    .divider{height:1px;margin:24px 0 17px;background:#eff1ed}
+    .help{margin:0;color:#929991;font-size:11px;line-height:1.85}
+    .help strong{color:#747f75;font-weight:500}
+    .footer{margin:22px 0 0;text-align:center;color:#9aa198;font-size:11px;letter-spacing:.3px;line-height:1.8}
+    .notice{margin:12px 0 0;color:#66766a;font-size:11px;line-height:1.7}
+    [hidden]{display:none!important}
+    @media(max-width:480px){.page{padding:32px 24px}.entry{width:100%;max-width:360px;transform:translateY(-20px)}.brand{margin-bottom:24px}.card{padding:28px 24px}h1{font-size:22px}.intro{font-size:11px}.footer{font-size:10px}}
+    @media(max-height:540px){.page{align-items:flex-start;padding-top:28px}.entry{transform:none}}
+    @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+  </style>
+</head>
+<body>
+  <!-- 独立静态视觉稿；不会提交、保存或验证令牌，不连接实际服务。 -->
+  <main class="page">
+    <div class="entry">
+      <div class="brand" aria-label="开悟"><span class="mark" aria-hidden="true">悟</span><span class="brand-name">开悟</span></div>
+      <section class="card" aria-labelledby="heading">
+        <h1 id="heading">进入你的工作台</h1>
+        <p class="intro">从想法到作品，在创造中更新认知。</p>
+        <form id="preview-form">
+          <label for="token">本机访问令牌</label>
+          <div class="input-wrap">
+            <input id="token" type="password" placeholder="输入本机访问令牌" autocomplete="off" aria-describedby="token-help">
+            <button class="reveal" type="button" aria-label="显示令牌" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></svg></button>
+          </div>
+          <button class="submit" type="submit">进入工作台<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></button>
+          <p class="notice" role="status" hidden>这是静态设计稿，不会验证或保存令牌。</p>
+        </form>
+        <p class="remember"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>登录保留 30 天，退出后清除</p>
+        <div class="divider"></div>
+        <p class="help" id="token-help"><strong>访问令牌在哪里？</strong><br>使用启动服务时设置的本机访问令牌。</p>
+      </section>
+      <p class="footer">本地优先，只连接你自己的开发环境</p>
+    </div>
+  </main>
+  <script>
+    const token = document.querySelector('#token');
+    const reveal = document.querySelector('.reveal');
+    reveal.addEventListener('click', () => {
+      const visible = token.type === 'password';
+      token.type = visible ? 'text' : 'password';
+      reveal.setAttribute('aria-label', visible ? '隐藏令牌' : '显示令牌');
+      reveal.setAttribute('aria-pressed', String(visible));
+    });
+    document.querySelector('#preview-form').addEventListener('submit', event => {
+      event.preventDefault();
+      token.value = '';
+      document.querySelector('.notice').hidden = false;
+    });
+  </script>
+</body>
+</html>

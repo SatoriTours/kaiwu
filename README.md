@@ -62,6 +62,8 @@ GOTOOLCHAIN=local go -C server test ./...
 
 ## 项目状态
 
+登录页已按紧凑灰绿设计完成本地改版：支持令牌显示／隐藏，保留 30 天登录；10 项登录浏览器测试及独立复验通过；实际部署以入口显示的修订号为准。[本批记录](TODO.md#当前改版紧凑灰绿登录页)。
+
 项目仍在开发中，当前优先打磨 **Web + pi** 的任务流程。桌面端（Windows / macOS / Linux，Nim + Leaf）与 Android（Kotlin / KMP / Compose）仍是目标，目前尚未提供原生客户端；Codex、自动多 Agent 编排和真实自动交付尚未开放。
 
 欢迎通过 [Issues](https://github.com/SatoriTours/kaiwu/issues) 交流问题与建议。**许可证尚未确定**，公开仓库不代表已授予使用、修改或分发许可。

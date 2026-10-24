@@ -1,3 +1,13 @@
+# 当前改版：紧凑灰绿登录页
+
+- [x] 用户查看 `docs/design/login-redesign.html` 及桌面／手机截图后明确批准开发；只改登录入口，保留认证与30天登录，不提交／推送／部署，不调用真实模型。
+- [x] UI实现与自测：`c51d8ad2-e7d3-4547-b3a9-3ce3276f43a4`，实际配置 `pi/cliproxy/gemini-3.8-flash-high`、thinking high；App.vue／style.css与专用测试配置、截图完成，npm单元35／build／登录浏览器9／failure浏览器5报告通过。App.vue hash `0a442a59`、style.css `fbce14af`；已停止写入。原会话已核对实际diff与hash，其余混合改动保留；全仓diff-check现有types.ts尾空行为无关基线。
+- [x] 独立功能验收与第1轮复验通过：`00e5014d-044b-4266-99c2-fe3c3c1d8f73`（`pi/open-design/deepseek-v4.1-flash`、配置thinking high，运行态off）。实跑 `cd apps/web && npx playwright test -c playwright.login.config.ts` 退出0、10 passed；最小复验探针退出0、1 passed，证明首次真实401无红字、提交后401显示“会话已过期”、按钮恢复、再Enter进入工作台，current-password断言通过。上一轮独立实跑30天cookie／刷新／跨context／退出撤销、网络／500提示、focus-visible 2px、真实快速Enter单POST、无存储泄漏及工作台烟测证据保留；桌面／360／390无溢出和短视口可滚，主控已目视actual桌面／手机与设计一致。测试仅临时回环服务＋假pi，服务已停止。
+- [x] 原会话已核对实际diff／最终hash／限定diff-check及独立报告。P1静默回跳与autocomplete恢复均已修复并复验；本地实现完成，未提交／推送／部署，7331未更新。既有socket撤销用例单独grep缺前置session夹具 `browser-session.json`（ENOENT）属未验限制，其他退出撤销证据已通过，不伪称全套通过。完整复验报告 `/tmp/kaiwu-login-acceptance.md`；关键证据已汇总本节，设计与实际截图见 `docs/design/login-redesign*.png`。
+- [x] 用户后续明确“提交代码”，授权本批commit／main推送／既有部署及安全归档；核实 GitHub `SatoriTours/kaiwu` 默认main，origin及本地基线同为`700b98a`，Actions工作流数0，不适用。仅提交登录页2实现／2测试配置／5设计资产及3份现有文档；同目录暂停子Agent后端、旧截图、二进制和测试遗留不纳入。通过既有reference-transaction钩子对候选干净归档做部署门禁，不直接构建混合目录上线。最终SHA／部署结果与证据保存于 `~/.local/state/agent-artifacts/kaiwu/2026-10-24-login-redesign/`；共享目录有其他未提交／未跟踪／忽略成果，空间保留，不擅自清理以归档。
+
+本任务仅关联现有空间 `wks_5663ffa6688b6c19`，协调者 `f6df7bdb-8ebc-47f4-bb5a-41b40ce87d27`，cwd `/home/jimxl/projects/kaiwu`，分支 `main`，git-dir/index `.git`／`.git/index`。阶段：实现及独立验收完成，普通修复1轮已关闭；App.vue `cadbc3c6`，style.css `fbce14af`不变，spec `72bcc601`；开发build及专用10项通过，主控核diff/hash/限定diff-check通过。验收通道此前503 `workspace_billing_scope_unavailable`／HTTP2 GOAWAY，非额度耗尽；原会话同模型有界恢复一次，保留已完成9项证据，收敛剩余聚焦检查；验收图像能力受限，主控已实际目视桌面／手机截图补齐。角色token／费用未知。设计稿为本任务成果，暂停子Agent后端／旧截图／测试残留不是本任务范围。不新增或归档空间。
+
 # 当前缺陷：任务失败原因与聊天局部布局
 
 - [x] 核对截图、现有数据流与样式：pi errorMessage 未被保留；任务错误仅在条件化折叠区显示；短用户消息气泡整行拉伸。
