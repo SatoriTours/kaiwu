@@ -1,0 +1,67 @@
+/* Undefined theme tokens preserve each existing light color as its fallback.
+   CSS media queries keep system mode live without JS listeners or an app reload. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --theme-text: #e0e8e1;
+  --theme-muted: #a5b3a8;
+  --theme-accent: #b0d0b6;
+  --theme-blue: #a6c9ed;
+  --theme-teal: #a2d3cf;
+  --theme-purple: #d3b6e5;
+  --theme-warning: #e5c18b;
+  --theme-danger: #f2aaa2;
+  --theme-canvas: #151c17;
+  --theme-surface: #202923;
+  --theme-inset: #1b241e;
+  --theme-hover: #2c3b31;
+  --theme-green-bg: #293d30;
+  --theme-blue-bg: #253646;
+  --theme-teal-bg: #263b3a;
+  --theme-purple-bg: #342d43;
+  --theme-warning-bg: #3a3325;
+  --theme-danger-bg: #3d2b2a;
+  --theme-border: #3c4a40;
+  --theme-green-border: #58735f;
+  --theme-blue-border: #536f8b;
+  --theme-teal-border: #527c76;
+  --theme-purple-border: #79628b;
+  --theme-warning-border: #8b7347;
+  --theme-danger-border: #86514b;
+  --theme-focus: #9ab5a1;
+  --theme-shadow: #00000050;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --theme-text: #e0e8e1;
+    --theme-muted: #a5b3a8;
+    --theme-accent: #b0d0b6;
+    --theme-blue: #a6c9ed;
+    --theme-teal: #a2d3cf;
+    --theme-purple: #d3b6e5;
+    --theme-warning: #e5c18b;
+    --theme-danger: #f2aaa2;
+    --theme-canvas: #151c17;
+    --theme-surface: #202923;
+    --theme-inset: #1b241e;
+    --theme-hover: #2c3b31;
+    --theme-green-bg: #293d30;
+    --theme-blue-bg: #253646;
+    --theme-teal-bg: #263b3a;
+    --theme-purple-bg: #342d43;
+    --theme-warning-bg: #3a3325;
+    --theme-danger-bg: #3d2b2a;
+    --theme-border: #3c4a40;
+    --theme-green-border: #58735f;
+    --theme-blue-border: #536f8b;
+    --theme-teal-border: #527c76;
+    --theme-purple-border: #79628b;
+    --theme-warning-border: #8b7347;
+    --theme-danger-border: #86514b;
+    --theme-focus: #9ab5a1;
+    --theme-shadow: #00000050;
+  }
+}
+.login-page .login-theme-picker { position: fixed; top: 16px; right: 18px; z-index: 1; }
+.theme-picker .custom-select-trigger:hover { background: var(--theme-hover, #f0f3f0); }
+/* Previewed user pages keep their own colors; no inversion/filter crosses the iframe. */

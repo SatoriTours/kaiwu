@@ -313,10 +313,10 @@ onBeforeUnmount(() => {
   gap: 4px;
   min-height: 28px;
   padding: 2px 8px;
-  border: 1px solid #d6ddd7;
+  border: 1px solid var(--theme-border, #d6ddd7);
   border-radius: 6px;
-  background: #f7f9f8;
-  color: #3b423f;
+  background: var(--theme-canvas, #f7f9f8);
+  color: var(--theme-text, #3b423f);
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   cursor: pointer;
@@ -328,30 +328,30 @@ onBeforeUnmount(() => {
 }
 
 .version-trigger:hover {
-  background: #edf1ee;
-  border-color: #bcc6c0;
+  background: var(--theme-inset, #edf1ee);
+  border-color: var(--theme-border, #bcc6c0);
 }
 
 .version-trigger:focus-visible {
-  outline: 2px solid #456490;
+  outline: 2px solid var(--theme-focus, #456490);
   outline-offset: 1px;
 }
 
 .version-trigger.is-dev {
   font-family: inherit;
-  color: #2b5c46;
-  background: #eef7f2;
-  border-color: #c2e2d1;
+  color: var(--theme-accent, #2b5c46);
+  background: var(--theme-green-bg, #eef7f2);
+  border-color: var(--theme-green-border, #c2e2d1);
 }
 
 .version-trigger.is-unknown {
   font-family: inherit;
-  color: #7b8580;
+  color: var(--theme-muted, #7b8580);
   border-style: dashed;
 }
 
 .version-trigger.is-outdated {
-  border-color: #d97706;
+  border-color: var(--theme-warning-border, #d97706);
 }
 
 .version-text {
@@ -360,7 +360,7 @@ onBeforeUnmount(() => {
 }
 
 .outdated-dot {
-  color: #d97706;
+  color: var(--theme-warning, #d97706);
   font-size: 10px;
   line-height: 1;
 }
@@ -378,8 +378,8 @@ onBeforeUnmount(() => {
 }
 
 .version-dialog {
-  background: #ffffff;
-  border: 1px solid #d6ddd7;
+  background: var(--theme-surface, #ffffff);
+  border: 1px solid var(--theme-border, #d6ddd7);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   width: 100%;
@@ -395,15 +395,15 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid #edf1ee;
-  background: #fafbfa;
+  border-bottom: 1px solid var(--theme-border, #edf1ee);
+  background: var(--theme-canvas, #fafbfa);
 }
 
 .dialog-header h3 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  color: #1a201c;
+  color: var(--theme-text, #1a201c);
 }
 
 .close-button {
@@ -411,19 +411,19 @@ onBeforeUnmount(() => {
   border: none;
   font-size: 14px;
   line-height: 1;
-  color: #7b8580;
+  color: var(--theme-muted, #7b8580);
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 4px;
 }
 
 .close-button:hover {
-  background: #edf1ee;
-  color: #1a201c;
+  background: var(--theme-inset, #edf1ee);
+  color: var(--theme-text, #1a201c);
 }
 
 .close-button:focus-visible {
-  outline: 2px solid #456490;
+  outline: 2px solid var(--theme-focus, #456490);
 }
 
 .dialog-body {
@@ -442,9 +442,9 @@ onBeforeUnmount(() => {
 }
 
 .alert-warning {
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  color: #92400e;
+  background: var(--theme-warning-bg, #fffbeb);
+  border: 1px solid var(--theme-warning-border, #fde68a);
+  color: var(--theme-warning, #92400e);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -454,7 +454,7 @@ onBeforeUnmount(() => {
 .alert-warning p {
   margin: 2px 0 0;
   font-size: 11px;
-  color: #b45309;
+  color: var(--theme-warning, #b45309);
 }
 
 .reload-button {
@@ -473,9 +473,9 @@ onBeforeUnmount(() => {
 }
 
 .alert-error {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #991b1b;
+  background: var(--theme-danger-bg, #fef2f2);
+  border: 1px solid var(--theme-danger-border, #fecaca);
+  color: var(--theme-danger, #991b1b);
 }
 
 .alert-error p {
@@ -492,15 +492,15 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 12px;
   font-weight: 600;
-  color: #555f59;
+  color: var(--theme-text, #555f59);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .failure-banner {
-  background: #fff1e7;
-  color: #854b21;
-  border-left: 3px solid #e06c27;
+  background: var(--theme-warning-bg, #fff1e7);
+  color: var(--theme-warning, #854b21);
+  border-left: 3px solid var(--theme-warning-border, #e06c27);
   padding: 6px 10px;
   font-size: 12px;
   border-radius: 0 4px 4px 0;
@@ -516,20 +516,20 @@ onBeforeUnmount(() => {
 }
 
 .info-grid dt {
-  color: #7b8580;
+  color: var(--theme-muted, #7b8580);
   white-space: nowrap;
 }
 
 .info-grid dd {
   margin: 0;
-  color: #1a201c;
+  color: var(--theme-text, #1a201c);
   word-break: break-all;
 }
 
 .sha-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
-  background: #f2f4f2;
+  background: var(--theme-inset, #f2f4f2);
   padding: 1px 4px;
   border-radius: 3px;
 }
@@ -546,25 +546,25 @@ onBeforeUnmount(() => {
 }
 
 .status-succeeded {
-  background: #eef7f2;
-  color: #1e7048;
+  background: var(--theme-green-bg, #eef7f2);
+  color: var(--theme-accent, #1e7048);
 }
 
 .status-failed {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: var(--theme-danger-bg, #fef2f2);
+  color: var(--theme-danger, #b91c1c);
 }
 
 .status-testing,
 .status-building,
 .status-deploying {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: var(--theme-blue-bg, #eff6ff);
+  color: var(--theme-blue, #1d4ed8);
 }
 
 .status-unknown {
-  background: #f3f4f6;
-  color: #4b5563;
+  background: var(--theme-inset, #f3f4f6);
+  color: var(--theme-text, #4b5563);
 }
 
 .dialog-footer {
@@ -572,8 +572,8 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 16px;
-  border-top: 1px solid #edf1ee;
-  background: #fafbfa;
+  border-top: 1px solid var(--theme-border, #edf1ee);
+  background: var(--theme-canvas, #fafbfa);
 }
 
 .refresh-button,
@@ -585,13 +585,13 @@ onBeforeUnmount(() => {
 }
 
 .refresh-button {
-  background: #f2f4f2;
-  border: 1px solid #d6ddd7;
-  color: #2e3531;
+  background: var(--theme-inset, #f2f4f2);
+  border: 1px solid var(--theme-border, #d6ddd7);
+  color: var(--theme-text, #2e3531);
 }
 
 .refresh-button:hover:not(:disabled) {
-  background: #e5e9e6;
+  background: var(--theme-inset, #e5e9e6);
 }
 
 .refresh-button:disabled {
@@ -602,11 +602,11 @@ onBeforeUnmount(() => {
 .dismiss-button {
   background: transparent;
   border: 1px solid transparent;
-  color: #555f59;
+  color: var(--theme-text, #555f59);
 }
 
 .dismiss-button:hover {
-  background: #edf1ee;
+  background: var(--theme-inset, #edf1ee);
 }
 
 @media (max-width: 599px) {

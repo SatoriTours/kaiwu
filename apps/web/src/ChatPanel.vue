@@ -43,6 +43,7 @@ const emit = defineEmits<{
   send: [];
   project: [];
   create: [];
+  close: [];
   resume: [];
   start: [];
   merge: [];
@@ -311,6 +312,7 @@ const deliveryLabels: Record<string, string> = {
           <TaskActionIcon :status="taskStatus" :pending="pending" />
         </button>
       </div>
+      <button class="chat-close" aria-label="收起聊天" title="收起聊天" autofocus @click="emit('close')">×</button>
     </header>
 
     <div v-if="!task" class="scope">

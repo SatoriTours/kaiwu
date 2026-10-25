@@ -18,7 +18,8 @@ export async function copyText(text: string): Promise<void> {
   field.value = text;
   field.setAttribute("readonly", "");
   field.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
-  document.body.append(field);
+  // Modal dialogs make the rest of the document inert, including a body-level copy field.
+  (active?.closest('dialog[open]') ?? document.querySelector('dialog:modal') ?? document.body).append(field);
   try {
     field.select();
     if (!document.execCommand("copy")) throw new Error("clipboard unavailable");

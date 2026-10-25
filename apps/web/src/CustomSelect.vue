@@ -305,10 +305,10 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
   width: 100%;
   min-height: 32px;
   padding: 6px 10px;
-  border: 1px solid var(--border, #e4e9e5);
+  border: 1px solid var(--border, var(--theme-border, #e4e9e5));
   border-radius: 7px;
-  background: #ffffff;
-  color: var(--ink, #303635);
+  background: var(--theme-surface, #ffffff);
+  color: var(--ink, var(--theme-text, #303635));
   font-size: 12px;
   text-align: left;
   cursor: pointer;
@@ -316,23 +316,23 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
 }
 
 .custom-select-trigger:hover:not(:disabled) {
-  background: #f0f3f0;
-  border-color: #d1ded5;
+  background: var(--theme-inset, #f0f3f0);
+  border-color: var(--theme-border, #d1ded5);
 }
 
 .custom-select-trigger[aria-expanded="true"] {
-  background: #f0f3f0;
-  border-color: #849e90;
+  background: var(--theme-inset, #f0f3f0);
+  border-color: var(--theme-border, #849e90);
 }
 
 .custom-select-trigger:focus-visible {
-  outline: 2px solid #849e90;
+  outline: 2px solid var(--theme-focus, #849e90);
   outline-offset: 1px;
 }
 
 .custom-select-trigger:disabled {
-  background: #f7f9f7;
-  border-color: #e8ede9;
+  background: var(--theme-canvas, #f7f9f7);
+  border-color: var(--theme-border, #e8ede9);
   cursor: not-allowed;
 }
 
@@ -345,7 +345,7 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
 }
 
 .custom-select-placeholder {
-  color: var(--muted, #8a938e);
+  color: var(--muted, var(--theme-muted, #8a938e));
 }
 
 .custom-select-chevron {
@@ -353,7 +353,7 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
   height: 14px;
   flex: none;
   fill: none;
-  stroke: #8a938e;
+  stroke: var(--theme-muted, #8a938e);
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -374,8 +374,8 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
   max-height: 240px;
   overflow: auto;
   padding: 5px;
-  background: #ffffff;
-  border: 1px solid #e4e9e5;
+  background: var(--theme-surface, #ffffff);
+  border: 1px solid var(--theme-border, #e4e9e5);
   border-radius: 9px;
   box-shadow: 0 8px 24px rgba(37, 57, 44, 0.1), 0 2px 6px rgba(37, 57, 44, 0.05);
   scrollbar-width: thin;
@@ -398,7 +398,7 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--ink, #303635);
+  color: var(--ink, var(--theme-text, #303635));
   text-align: left;
   font-size: 12px;
   line-height: 1.4;
@@ -407,20 +407,20 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
 
 .custom-select-option:hover:not(:disabled),
 .custom-select-option.active:not(:disabled) {
-  background: #f2f5f2;
+  background: var(--theme-inset, #f2f5f2);
 }
 
 .custom-select-option.selected {
-  color: #3e604b;
-  background: #edf3ee;
+  color: var(--theme-text, #3e604b);
+  background: var(--theme-inset, #edf3ee);
   font-weight: 500;
 }
 
 .custom-select-option:focus,
 .custom-select-option:focus-visible {
-  outline: 2px solid #849e90;
+  outline: 2px solid var(--theme-focus, #849e90);
   outline-offset: -2px;
-  background: #f2f5f2;
+  background: var(--theme-inset, #f2f5f2);
 }
 
 .custom-select-option:disabled {
@@ -439,7 +439,7 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
   height: 14px;
   flex: none;
   fill: none;
-  stroke: #507363;
+  stroke: var(--theme-text, #507363);
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -447,7 +447,7 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
 
 .custom-select-empty {
   padding: 8px 10px;
-  color: var(--muted, #8a938e);
+  color: var(--muted, var(--theme-muted, #8a938e));
   font-size: 12px;
   text-align: center;
 }

@@ -1,3 +1,4 @@
+import { clickInView, fillInChat, openChat } from './view-navigation';
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -8,19 +9,19 @@ const authHeaders={'X-Fixture-Token':TOKEN};
 async function evidence(request:APIRequestContext){const r=await request.get('/__fixture/evidence',{headers:authHeaders});expect(r.ok()).toBeTruthy();return r.json()}
 async function snapshot(request:APIRequestContext){const r=await request.get('/api/snapshot');expect(r.ok()).toBeTruthy();return (await r.json()).state}
 async function post(request:APIRequestContext,path:string,body:any){const r=await request.post('/api/'+path,{data:body,headers:{'X-Kaiwu-Client':'web','Origin':'http://127.0.0.1:17332'}});expect(r.ok(),await r.text()).toBeTruthy();return r.json()}
-async function login(page:Page){await page.goto('/');await page.getByLabel('本机访问令牌').fill(TOKEN);await page.getByRole('button',{name:'进入工作台',exact:true}).click();await expect(page.getByRole('button',{name:'当前项目',exact:true})).toBeVisible()}
+async function login(page:Page){await page.goto('/');await page.getByLabel('本机访问令牌').fill(TOKEN);await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'进入工作台',exact:true}));await expect(page.getByRole('button',{name:'当前项目',exact:true})).toBeVisible()}
 async function configure(page:Page,manual=false){
  const info=await evidence(page.request),res=await page.request.get('/api/delivery/policy?projectId='+info.projectId);const {policy}=await res.json();
  Object.assign(policy,{enabled:true,requireAcceptance:manual,repository:{id:42,owner:'owner',name:'repo',url:'https://github.com/owner/repo.git',mainBranch:'main'},checks:[{id:'test',argv:['true'],dir:'.',timeoutSeconds:300}],taskWorkflows:[{id:1,jobs:['test']}],mainWorkflows:[{id:2,jobs:['test']}],maxRepairs:3,gitCredentialRef:'server_github_https',apiCredentialRef:'server_github_api',authorizationDigest:'fixture-explicit-scope',actor:'local-login',authorizedAt:new Date().toISOString(),revokedAt:'0001-01-01T00:00:00Z'});
  await post(page.request,'delivery/policy',{operationId:randomUUID(),expectedVersion:policy.version,policy});return info.projectId;
 }
 async function addTask(page:Page,request:string){
- await page.locator('[data-action=new-task]').click();await page.locator('input[name=title]').fill(request);await page.locator('textarea[name=request]').fill(request);await page.getByRole('button',{name:'保存',exact:true}).click();
+ await clickInView(page, page.locator('[data-action=new-task]'));await page.locator('input[name=title]').fill(request);await page.locator('textarea[name=request]').fill(request);await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'保存',exact:true}));
  await expect(page.locator('#chat-title')).toContainText(request);
  const st=await snapshot(page.request);return Object.values(st.tasks).find((t:any)=>t.title===request) as any;
 }
 async function startTask(page:Page,task:any){
- await page.locator('.task-card[data-taskid="'+task.id+'"]').getByRole('button',{name:'开始开发',exact:true}).click();
+ await clickInView(page, page.locator('.task-card[data-taskid="'+task.id+'"]').getByRole('button',{ includeHidden: true,name:'开始开发',exact:true}));
 }
 async function phase(page:Page,task:any,wanted:string){
  await expect.poll(async()=> (await snapshot(page.request)).deliveries?.[task.id]?.phase,{timeout:30000}).toBe(wanted);
@@ -36,7 +37,7 @@ test.describe('真实 Go 服务的自动交付界面',()=>{
  test.beforeEach(async({page})=>{await login(page);await cleanup(page)});
 
  test('交付设置概览与向导、禁用启用、保存真实草稿重开核验及只读预检',async({page})=>{
-  await page.getByRole('button',{name:'当前项目',exact:true}).click();await page.getByRole('menuitem',{name:/交付设置/}).click();
+  await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'当前项目',exact:true}));await clickInView(page, page.getByRole('menuitem',{ includeHidden: true,name:/交付设置/}));
   const dialog=page.getByRole('dialog',{name:/自动交付/});await expect(dialog).toBeVisible();
 
   // 1. 验证首屏：暂未开放自动交付提示与禁用“启用自动交付”按钮
@@ -51,50 +52,50 @@ test.describe('真实 Go 服务的自动交付界面',()=>{
   // 3. 验证交付方式单选切换
   const manualCard = dialog.locator('#modeCardManual');
   const autoCard = dialog.locator('#modeCardAuto');
-  await autoCard.click();
+  await clickInView(page, autoCard);
   await expect(autoCard).toHaveClass(/selected/);
-  await manualCard.click();
+  await clickInView(page, manualCard);
   await expect(manualCard).toHaveClass(/selected/);
 
   // 4. 打开向导调整目标仓库
-  await dialog.getByTestId('configure-repository').click();
+  await clickInView(page, dialog.getByTestId('configure-repository'));
   await expect(dialog.getByTestId('wizard-view')).toBeVisible();
   await dialog.getByLabel('GitHub 仓库规范地址').fill('https://github.com/owner/repo.git');
   await dialog.getByLabel('目标主分支').fill('main');
 
   // 下一步：通过标准
-  await dialog.getByTestId('wizard-next').click();
+  await clickInView(page, dialog.getByTestId('wizard-next'));
   await expect(dialog.getByText('本地检查命令')).toBeVisible();
   // 添加或修改本地检查
   const progInput = dialog.locator('#checkProgram_0');
   if (await progInput.count() === 0) {
-    await dialog.getByRole('button',{name:'+ 添加本地检查'}).click();
+    await clickInView(page, dialog.getByRole('button',{name:'+ 添加本地检查'}));
   }
   await dialog.locator('#checkProgram_0').fill('true');
   // 如果有多余参数，清空或不添加参数
   const removeArgBtns = dialog.locator('.arg-row button');
   while (await removeArgBtns.count() > 0) {
-    await removeArgBtns.first().click();
+    await clickInView(page, removeArgBtns.first());
   }
 
   // 下一步：失败处理与授权摘要
-  await dialog.getByTestId('wizard-next').click();
+  await clickInView(page, dialog.getByTestId('wizard-next'));
   await expect(dialog.getByText('最大自动修复次数')).toBeVisible();
   const maxRepairsTrigger = dialog.locator('#maxRepairs');
-  await maxRepairsTrigger.click();
-  await dialog.locator('[role="option"]:has-text("3 次")').click();
+  await clickInView(page, maxRepairsTrigger);
+  await clickInView(page, dialog.locator('[role="option"]:has-text("3 次")'));
   // 验证授权风险提示包含任务/主分支推送
   await expect(dialog.locator('.auth-summary-card')).toContainText('任务分支或主分支推送均可能触发已有自动化构建或发包');
   await expect(dialog.locator('#authRepairTimes')).toHaveText('3');
 
   // 完成调整返回概览
-  await dialog.getByTestId('wizard-finish').click();
+  await clickInView(page, dialog.getByTestId('wizard-finish'));
   await expect(dialog.getByTestId('wizard-view')).not.toBeVisible();
   await expect(dialog.getByTestId('overview')).toBeVisible();
   await expect(dialog.locator('#summaryRepoDetail')).toContainText('owner/repo · 主分支 main');
 
   // 5. 保存草稿
-  await dialog.getByRole('button',{name:'保存草稿',exact:true}).click();
+  await clickInView(page, dialog.getByRole('button',{ includeHidden: true,name:'保存草稿',exact:true}));
   await expect(dialog).not.toBeVisible();
 
   // 6. 重新打开核验草稿真实保留在 SQLite 中，验证 Go 后端读回数据规范性
@@ -108,34 +109,34 @@ test.describe('真实 Go 服务的自动交付界面',()=>{
   expect(savedPolicy.checks.length).toBe(1);
   expect(savedPolicy.checks[0].argv).toEqual(['true']);
 
-  await page.getByRole('button',{name:'当前项目',exact:true}).click();
-  await page.getByRole('menuitem',{name:/交付设置/}).click();
+  await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'当前项目',exact:true}));
+  await clickInView(page, page.getByRole('menuitem',{ includeHidden: true,name:/交付设置/}));
   const reopened=page.getByRole('dialog',{name:/自动交付/});
   await expect(reopened).toBeVisible();
   await expect(reopened.locator('#summaryRepoDetail')).toContainText('owner/repo · 主分支 main');
 
   // 6.1 验证清空仓库地址：清空 url/owner/name/id 但保留目标主分支
-  await reopened.getByTestId('configure-repository').click();
+  await clickInView(page, reopened.getByTestId('configure-repository'));
   await reopened.getByLabel('GitHub 仓库规范地址').fill('');
-  await reopened.getByTestId('wizard-next').click(); // 进入 Step 2
-  await reopened.getByRole('button', { name: '返回概览' }).click(); // 返回概览，触发同步
+  await clickInView(page, reopened.getByTestId('wizard-next')); // 进入 Step 2
+  await clickInView(page, reopened.getByRole('button', { includeHidden: true, name: '返回概览' })); // 返回概览，触发同步
   await expect(reopened.locator('#summaryRepoDetail')).toContainText('尚未配置 GitHub 仓库');
 
   // 恢复有效仓库以进行后续测试
-  await reopened.getByTestId('configure-repository').click();
+  await clickInView(page, reopened.getByTestId('configure-repository'));
   await reopened.getByLabel('GitHub 仓库规范地址').fill('https://github.com/owner/repo.git');
-  await reopened.getByRole('button', { name: '返回概览' }).click();
+  await clickInView(page, reopened.getByRole('button', { includeHidden: true, name: '返回概览' }));
   await expect(reopened.locator('#summaryRepoDetail')).toContainText('owner/repo · 主分支 main');
 
   // 7. 只读预检核验（明确检查的是已保存策略）
-  await reopened.locator('details.advanced-box summary').click();
+  await clickInView(page, reopened.locator('details.advanced-box summary'));
   const preflightBtn = reopened.getByRole('button',{name:'执行只读预检'});
   await expect(preflightBtn).toBeVisible();
-  await preflightBtn.click();
+  await clickInView(page, preflightBtn);
   await expect(reopened).toContainText(/预检/);
 
   // 8. 关闭弹窗
-  await reopened.getByRole('button',{name:'取消'}).click();
+  await clickInView(page, reopened.getByRole('button',{ includeHidden: true,name:'取消'}));
   await expect(reopened).not.toBeVisible();
  });
 
@@ -147,7 +148,7 @@ test.describe('真实 Go 服务的自动交付界面',()=>{
   await expect(page.locator('#chat').getByRole('button',{name:'合并到主分支',exact:true})).toHaveCount(0);
   await expect(page.locator('#chat').getByRole('button',{name:'确认完成',exact:true})).toHaveCount(0);
   await page.reload();await expect(panel).toContainText('待验收');expect((await evidence(page.request)).pushes.length).toBe(before.pushes.length);
-  await panel.getByRole('button',{name:/验收.*交付|效果验收通过/}).click();const done=await phase(page,task,'succeeded');
+  await clickInView(page, panel.getByRole('button',{ includeHidden: true,name:/验收.*交付|效果验收通过/}));const done=await phase(page,task,'succeeded');
   const after=await evidence(page.request);expect(after.refs).toContain(done.candidateSHA+' refs/heads/main');expect(after.pushes.length-before.pushes.length).toBe(1);
   await expect(panel).toContainText('技术交付');await expect(panel.locator('a[href^="https://github.com/owner/repo/actions/runs/"]')).not.toHaveCount(0);
  });
@@ -172,19 +173,20 @@ test.describe('真实 Go 服务的自动交付界面',()=>{
 
  test('暂停后原会话修改候选，旧验收令牌失效',async({page})=>{
   await configure(page,true);const task=await addTask(page,'暂停重验 '+randomUUID().slice(0,6));await startTask(page,task);const old=await phase(page,task,'awaiting_acceptance');
-  const panel=page.locator('.delivery-status-panel');await panel.getByRole('button',{name:'暂停',exact:true}).click();await phase(page,task,'paused');
+  const panel=page.locator('.delivery-status-panel');await clickInView(page, panel.getByRole('button',{ includeHidden: true,name:'暂停',exact:true}));await phase(page,task,'paused');
   const before=await snapshot(page.request),session=before.conversations[task.conversationId].sessionId;
-  await page.locator('#draft').fill('补充效果 '+randomUUID().slice(0,6));await page.locator('#send').click();
+  await fillInChat(page, page.locator('#draft'), '补充效果 '+randomUUID().slice(0,6));await clickInView(page, page.locator('#send'));
   await expect.poll(async()=> (await snapshot(page.request)).conversations[task.conversationId].runState).toBe('idle');
-  await panel.getByRole('button',{name:/恢复|继续交付/}).click();const fresh=await phase(page,task,'awaiting_acceptance');expect(fresh.candidateSHA).not.toBe(old.candidateSHA);
+  await clickInView(page, panel.getByRole('button',{ includeHidden: true,name:/恢复|继续交付/}));const fresh=await phase(page,task,'awaiting_acceptance');expect(fresh.candidateSHA).not.toBe(old.candidateSHA);
   const r=await page.request.post('/api/delivery/accept',{data:{operationId:randomUUID(),deliveryId:fresh.id,token:old.acceptanceToken,expectedVersion:fresh.version},headers:{'X-Kaiwu-Client':'web',Origin:'http://127.0.0.1:17332'}});expect(r.status()).toBe(409);expect((await snapshot(page.request)).conversations[task.conversationId].sessionId).toBe(session);
  });
 
  test('验收回执丢失后重连只读核查，不重发副作用',async({page})=>{
   const calls:any[]=[];let drop=false;
   await page.routeWebSocket('**/api/socket',client=>{const server=client.connectToServer(),methods=new Map<string,string>();client.onMessage(raw=>{const v=JSON.parse(String(raw));calls.push(v);methods.set(v.id,v.method);server.send(raw)});server.onMessage(raw=>{const v=JSON.parse(String(raw));if(v.type==='reply'&&methods.get(v.id)==='delivery/accept'&&drop){drop=false;void client.close({code:1012,reason:'lost receipt'});return}client.send(raw)})});
-  await page.reload();await expect(page.locator('#chat-title')).toBeVisible();await configure(page,true);const task=await addTask(page,'丢回执 '+randomUUID().slice(0,6));await startTask(page,task);await phase(page,task,'awaiting_acceptance');const before=await evidence(page.request);
-  drop=true;await page.locator('.delivery-status-panel').getByRole('button',{name:/验收.*交付|效果验收通过/}).click();await phase(page,task,'succeeded');
+  await page.reload();await openChat(page);
+  await expect(page.locator('#chat-title')).toBeVisible();await configure(page,true);const task=await addTask(page,'丢回执 '+randomUUID().slice(0,6));await startTask(page,task);await phase(page,task,'awaiting_acceptance');const before=await evidence(page.request);
+  drop=true;await clickInView(page, page.locator('.delivery-status-panel').getByRole('button',{ includeHidden: true,name:/验收.*交付|效果验收通过/}));await phase(page,task,'succeeded');
   const accepted=calls.find(c=>c.method==='delivery/accept');await expect.poll(()=>calls.some(c=>c.method==='operations/'+accepted.body.operationId)).toBe(true);
   await page.reload();await expect(page.locator('.delivery-status-panel')).toContainText('技术交付');
   expect(calls.filter(c=>c.method==='delivery/accept')).toHaveLength(1);expect((await evidence(page.request)).pushes.length-before.pushes.length).toBe(1);
@@ -195,25 +197,25 @@ test.describe('真实 Go 服务的自动交付界面',()=>{
   for(let i=0;i<25;i++){const d=(await snapshot(page.request)).deliveries[task.id];await post(page.request,'delivery/control',{operationId:randomUUID(),deliveryId:d.id,action:'extend_budget',expectedVersion:d.version})}
   const d=(await snapshot(page.request)).deliveries[task.id];expect(d.steps).toHaveLength(20);
   const all=await post(page.request,'delivery/steps',{deliveryId:d.id,after:0,limit:100});expect(all.items.length).toBeGreaterThan(20);
-  const history=page.locator('.delivery-steps-history');await history.locator('summary').click();await expect(history.getByRole('button').first()).toBeVisible();await history.getByRole('button').first().click();await expect(history.locator('li')).toHaveCount(all.items.length);
+  const history=page.locator('.delivery-steps-history');await clickInView(page, history.locator('summary'));await expect(history.getByRole('button').first()).toBeVisible();await clickInView(page, history.getByRole('button', { includeHidden: true }).first());await expect(history.locator('li')).toHaveCount(all.items.length);
  });
 
  test('1440/768/360px 紧凑状态与详情收起、键盘菜单、下一轮模型',async({page})=>{
   await configure(page,true);const task=await addTask(page,'响应式验收 '+randomUUID().slice(0,6));await startTask(page,task);await phase(page,task,'awaiting_acceptance');
   for(const width of [1440,768,360]){
    await page.setViewportSize({width,height:900});
-   if(width<1024 && !await page.locator('#chat').isVisible())await page.locator('.task-card[data-taskid="'+task.id+'"]').click();
+   if(width<1024 && !await page.locator('#chat').isVisible())await clickInView(page, page.locator('.task-card[data-taskid="'+task.id+'"]'));
    await expect(page.locator('.delivery-status-panel')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
    expect(await page.locator('.delivery-status-panel details[open]').count()).toBe(0);
    if(width===1440||width===360){const dir=resolve('../../docs/design/web-service');mkdirSync(dir,{recursive:true});await page.screenshot({path:resolve(dir,width===1440?'automated-delivery-desktop.png':'automated-delivery-mobile.png'),fullPage:true})}
   }
-  await page.setViewportSize({width:1440,height:900});await page.getByRole('button',{name:'选择会话模型',exact:true}).click();
-  const dialog=page.getByRole('dialog');
-  await dialog.getByLabel('提供商',{exact:true}).click();
-  await dialog.locator('[role="option"]:has-text("fixture")').click();
-  await dialog.getByLabel('模型',{exact:true}).click();
-  await dialog.locator('[role="option"]:has-text("another-test")').click();
-  await dialog.getByRole('button',{name:/下一轮使用/}).click();
+  await page.setViewportSize({width:1440,height:900});await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'选择会话模型',exact:true}));
+  const dialog=page.locator('dialog:not(.chat-drawer)[open]');
+  await clickInView(page, dialog.getByLabel('提供商',{exact:true}));
+  await clickInView(page, dialog.locator('[role="option"]:has-text("fixture")'));
+  await clickInView(page, dialog.getByLabel('模型',{exact:true}));
+  await clickInView(page, dialog.locator('[role="option"]:has-text("another-test")'));
+  await clickInView(page, dialog.getByRole('button',{ includeHidden: true,name:/下一轮使用/}));
   await expect(page.getByRole('button',{name:'选择会话模型',exact:true})).toContainText('待生效');const st=await snapshot(page.request);expect(st.conversations[task.conversationId].pendingProfile.model).toBe('another-test');expect(st.profile.model).toBe('isolated-test');
  });
 });

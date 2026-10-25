@@ -234,8 +234,8 @@ function formatTime(iso?: string) {
 .delivery-status-panel {
   margin: 12px 0;
   padding: 12px 14px;
-  background: var(--bg-hover, #f8f9fa);
-  border: 1px solid var(--border, #e5e5e5);
+  background: var(--bg-hover, var(--theme-canvas, #f8f9fa));
+  border: 1px solid var(--border, var(--theme-border, #e5e5e5));
   border-radius: 6px;
   font-size: 13px;
 }
@@ -257,35 +257,35 @@ function formatTime(iso?: string) {
   border-radius: 12px;
   font-size: 12px;
   font-weight: bold;
-  background: #e6f7ff;
-  color: #096dd9;
-  border: 1px solid #91d5ff;
+  background: var(--theme-blue-bg, #e6f7ff);
+  color: var(--theme-blue, #096dd9);
+  border: 1px solid var(--theme-blue-border, #91d5ff);
 }
 .delivery-tag.awaiting_acceptance {
-  background: #fff7e6;
-  color: #d46b08;
-  border-color: #ffd591;
+  background: var(--theme-warning-bg, #fff7e6);
+  color: var(--theme-warning, #d46b08);
+  border-color: var(--theme-warning-border, #ffd591);
 }
 .delivery-tag.blocked {
-  background: #fff1f0;
-  color: #cf1322;
-  border-color: #ffa39e;
+  background: var(--theme-danger-bg, #fff1f0);
+  color: var(--theme-danger, #cf1322);
+  border-color: var(--theme-danger-border, #ffa39e);
 }
 .delivery-tag.succeeded {
-  background: #f6ffed;
-  color: #389e0d;
-  border-color: #b7eb8f;
+  background: var(--theme-green-bg, #f6ffed);
+  color: var(--theme-accent, #389e0d);
+  border-color: var(--theme-green-border, #b7eb8f);
 }
 .delivery-repairs {
   font-size: 12px;
-  color: var(--text-muted, #666);
+  color: var(--text-muted, var(--theme-text, #666));
 }
 .delivery-turn-badge {
   font-size: 11px;
   padding: 1px 6px;
-  background: #e6fffb;
-  color: #08979c;
-  border: 1px solid #87e8de;
+  background: var(--theme-teal-bg, #e6fffb);
+  color: var(--theme-teal, #08979c);
+  border: 1px solid var(--theme-teal-border, #87e8de);
   border-radius: 4px;
 }
 .delivery-actions-bar {
@@ -302,38 +302,38 @@ function formatTime(iso?: string) {
   padding: 2px 8px;
 }
 .small-btn.danger {
-  color: #cf1322;
-  border-color: #ffa39e;
+  color: var(--theme-danger, #cf1322);
+  border-color: var(--theme-danger-border, #ffa39e);
 }
 .delivery-desc {
   margin: 8px 0 4px 0;
-  color: var(--text, #333);
+  color: var(--text, var(--theme-text, #333));
   line-height: 1.4;
 }
 .delivery-blocker-box {
-  background: #fff1f0;
-  border: 1px solid #ffa39e;
+  background: var(--theme-danger-bg, #fff1f0);
+  border: 1px solid var(--theme-danger-border, #ffa39e);
   padding: 8px 10px;
   border-radius: 4px;
   margin: 8px 0;
-  color: #cf1322;
+  color: var(--theme-danger, #cf1322);
 }
 .delivery-sha-strip {
   display: flex;
   gap: 12px;
   font-size: 12px;
-  color: var(--text-muted, #666);
+  color: var(--text-muted, var(--theme-text, #666));
   margin-top: 6px;
 }
 .delivery-ci-runs {
   margin-top: 8px;
-  border-top: 1px dashed var(--border, #ddd);
+  border-top: 1px dashed var(--border, var(--theme-border, #ddd));
   padding-top: 6px;
 }
 .ci-runs-title {
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-muted, #666);
+  color: var(--text-muted, var(--theme-text, #666));
   margin-bottom: 4px;
 }
 .ci-run-item {
@@ -347,18 +347,18 @@ function formatTime(iso?: string) {
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 11px;
-  background: #f0f0f0;
+  background: var(--theme-inset, #f0f0f0);
 }
 .ci-badge.failure {
-  background: #fff1f0;
-  color: #cf1322;
+  background: var(--theme-danger-bg, #fff1f0);
+  color: var(--theme-danger, #cf1322);
 }
 .ci-badge.success {
-  background: #f6ffed;
-  color: #389e0d;
+  background: var(--theme-green-bg, #f6ffed);
+  color: var(--theme-accent, #389e0d);
 }
 .ci-link {
-  color: #476f64;
+  color: var(--theme-text, #476f64);
   text-decoration: none;
 }
 .ci-link:hover {
@@ -370,7 +370,7 @@ function formatTime(iso?: string) {
 }
 .delivery-steps-history summary {
   cursor: pointer;
-  color: var(--text-muted, #666);
+  color: var(--text-muted, var(--theme-text, #666));
 }
 .steps-list {
   margin: 6px 0 0 0;
@@ -381,10 +381,10 @@ function formatTime(iso?: string) {
   display: flex;
   gap: 8px;
   padding: 2px 0;
-  border-bottom: 1px dotted #f0f0f0;
+  border-bottom: 1px dotted var(--theme-border, #f0f0f0);
 }
 .step-time {
-  color: #999;
+  color: var(--theme-muted, #999);
 }
 .step-kind {
   font-weight: 500;
@@ -393,9 +393,9 @@ function formatTime(iso?: string) {
   flex: 1;
 }
 .step-exit.exit-ok {
-  color: #389e0d;
+  color: var(--theme-accent, #389e0d);
 }
 .step-exit.exit-fail {
-  color: #cf1322;
+  color: var(--theme-danger, #cf1322);
 }
 </style>

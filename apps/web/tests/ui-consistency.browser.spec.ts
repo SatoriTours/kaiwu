@@ -45,7 +45,8 @@ async function enterWorkbench(page: any) {
     targetProject = { id: (await resp.json()).createdId, name: "开悟验收项目" };
   }
   await page.goto("/projects/" + targetProject.id);
-  await expect(page.locator("#chat-title")).toBeVisible();
+  await expect(page.locator("#chat-title")).toHaveText("项目对话 · 开悟验收项目");
+  await expect(page.locator(".board-side")).toBeVisible();
 }
 
 test.describe("UI Consistency & CustomSelect Verification", () => {

@@ -11,6 +11,7 @@ import {
 import KanbanBoard from "./KanbanBoard.vue";
 import ProjectMenu from "./ProjectMenu.vue";
 import ChatPanel from "./ChatPanel.vue";
+import ChatDrawer from "./ChatDrawer.vue";
 import ResultPreview from "./ResultPreview.vue";
 import {safePreviewURL, preserveArtifactLinks, isWebPreviewable, isManifestApproved, recordManifestApproval, clearManifestApprovals} from "./preview.ts";
 import {
@@ -36,6 +37,7 @@ import { mergeFinished } from "./merge.ts";
 import ModelDialog from "./ModelDialog.vue";
 import DeliverySettings from "./DeliverySettings.vue";
 import VersionBadge from "./VersionBadge.vue";
+import ThemePicker from "./ThemePicker.vue";
 import { isMergeRequest } from "./git.ts";
 import {taskState} from "./task-state.ts";
 import { SocketClient } from "./socket.ts";
@@ -180,7 +182,7 @@ function navigate(task?: Task) {
     "",
     "/projects/" + project.value.id + (task ? "/tasks/" + task.id : ""),
   );
-  if (width.value < 1024) chatVisible.value = true;
+  chatVisible.value = true;
 }
 function chooseProject(id: string) {
   projectID.value = id;
@@ -197,6 +199,7 @@ function clearIdentity() {
   authEpoch++;
  streamID="";
   authenticated.value = false;
+  chatVisible.value = false;
   closeResult();
   clearManifestApprovals();
   online.value = false;
@@ -1438,10 +1441,12 @@ function resize() {
 }
 function pop() {
   readLocation();
+  chatVisible.value = !!taskID.value;
   void refresh();
 }
 onMounted(async () => {
   readLocation();
+  chatVisible.value = !!taskID.value;
   document.addEventListener("visibilitychange",previewVisibility);
   window.addEventListener("beforeunload", beforeUnload);
   window.addEventListener("resize", resize);
@@ -1468,6 +1473,7 @@ onBeforeUnmount(() => {
 <template>
   <div v-if="!loaded" class="entry"><p>正在连接开悟……</p></div>
   <main v-else-if="!authenticated" class="login-page">
+    <ThemePicker class="login-theme-picker" />
     <div class="entry">
       <div class="brand" aria-label="开悟">
         <span class="mark" aria-hidden="true">悟</span>
@@ -1543,6 +1549,7 @@ onBeforeUnmount(() => {
       />
       <div class="global-actions" role="group" aria-label="全局操作">
         <VersionBadge />
+        <ThemePicker />
         <button aria-label="默认模型" title="为新项目和任务选择默认模型" @click="openModels()">默认模型</button>
         <span class="connection" :class="{ off: !online }" role="status">{{
           online ? "● 已连接" : "○ 正在重连"
@@ -1590,13 +1597,14 @@ onBeforeUnmount(() => {
           :pending="local.pending"
           :conversations="state?.conversations ?? {}"
           @select="navigate"
+          @project="navigate()"
           @start="start($event)"
           @merge="openMerge($event)"
           @topic="mobileTopic = $event"
           @add-topic="open('topic')"
           @add-task="open('task', $event)"
           @delete-topic="open('delete', $event.id)"
-        /><ChatPanel
+        /><ChatDrawer :open="chatVisible" @close="chatVisible = false"><ChatPanel
           v-if="conversation"
           :key="'chat-panel'"
           ref="chatPanel"
@@ -1618,7 +1626,8 @@ onBeforeUnmount(() => {
             !!conversation.profile.provider &&
             !!conversation.profile.model
           "
-          :visible="width >= 1024 || chatVisible"
+          :visible="chatVisible"
+          @close="chatVisible = false"
           :preview="taskPreview"
           @draft="setDraft(local, $event)"
           @send="send"
@@ -1644,7 +1653,8 @@ onBeforeUnmount(() => {
         <aside v-else class="chat">
           <p class="error">聊天目标无效。请显式选择项目或任务。</p>
           <button @click="navigate()">返回项目对话</button>
-        </aside>
+          <button @click="chatVisible = false">收起聊天</button>
+        </aside></ChatDrawer>
       </div></template
     >
     <MergeDialog

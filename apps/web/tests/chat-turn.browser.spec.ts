@@ -1,3 +1,4 @@
+import { clickInView, fillInChat, openChat } from './view-navigation';
 import { test, expect } from "@playwright/test";
 import type { Page, Cookie } from "@playwright/test";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, realpathSync } from "node:fs";
@@ -42,7 +43,7 @@ async function login(page: Page, { fresh = false } = {}) {
     console.log('[auth-ui]', JSON.stringify({ attempt, event: 'initial-visibility', wall: Date.now(), tokenVisible: visible }));
     if (visible) {
       await token.fill(TOKEN);
-      await page.getByRole("button", { name: "进入工作台", exact: true }).click();
+      await clickInView(page, page.getByRole("button", { includeHidden: true, name: "进入工作台", exact: true }));
     }
     await expect(currentProject).toBeVisible();
     loginCookies = await page.context().cookies('http://127.0.0.1:17445');
@@ -55,30 +56,30 @@ async function login(page: Page, { fresh = false } = {}) {
 async function addProject(page: Page, name: string): Promise<void> {
   const welcome = page.getByRole("button", { name: "＋ 添加项目", exact: true });
   if (await welcome.isVisible().catch(() => false)) {
-    await welcome.click();
+    await clickInView(page, welcome);
   } else {
-    await page.getByRole("button", { name: "当前项目", exact: true }).click();
-    await page.getByRole("menuitem", { name: "添加项目", exact: true }).click();
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "当前项目", exact: true }));
+    await clickInView(page, page.getByRole("menuitem", { includeHidden: true, name: "添加项目", exact: true }));
   }
   const dir = mkdtempSync(join(tmpdir(), "kaiwu-chat-turn-e2e-"));
   createdDirs.push(dir);
   execFileSync("git", ["init", dir], { stdio: "ignore" });
   await page.locator("input[name=name]").fill(name);
   await page.locator("input[name=path]").fill(dir);
-  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
   await expect(page.locator("#chat-title")).toHaveText("项目对话 · " + name);
 }
 
 async function newTask(page: Page, project: string, topic: string, title: string, request = "任务对话流") {
   await addProject(page, project);
-  await page.locator("[data-action=new-topic]").click();
+  await clickInView(page, page.locator("[data-action=new-topic]"));
   await page.locator("input[name=name]").fill(topic);
-  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
   await expect(page.locator(".column h2").first()).toHaveText(topic);
-  await page.getByRole("button", { name: `在 ${topic} 新建任务`, exact: true }).click();
+  await clickInView(page, page.getByRole("button", { includeHidden: true, name: `在 ${topic} 新建任务`, exact: true }));
   await page.locator("input[name=title]").fill(title);
   await page.locator("textarea[name=request]").fill(request);
-  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
   await expect(page.locator("#chat-title")).toContainText(title);
 }
 
@@ -126,16 +127,16 @@ test("Task3b: reviewed local merge acknowledges the finished round without a pri
   await login(page);
   await newTask(page, "ReviewedMergeProject", "MergeTopic", "ReviewedMergeTask");
   const card = page.locator(".task-card").first();
-  await card.getByRole("button", { name: "开始开发", exact: true }).click();
+  await clickInView(page, card.getByRole("button", { includeHidden: true, name: "开始开发", exact: true }));
   await expect(card).toContainText("待验收", { timeout: 15000 });
-  await page.locator("#draft").fill("保留合并期间的草稿");
+  await fillInChat(page, page.locator('#draft'), "保留合并期间的草稿");
   const taskId = (await card.getAttribute("data-taskid"))!;
   const before = (await (await page.request.get("/api/snapshot")).json()).state;
   const task = before.tasks[taskId];
   const round = before.conversations[task.conversationId].rounds.at(-1);
   expect(round.phase).toBe("finished");
-  await card.getByRole("button", { name: "合并到主分支", exact: true }).click();
-  const dialog = page.getByRole("dialog");
+  await clickInView(page, card.getByRole("button", { includeHidden: true, name: "合并到主分支", exact: true }));
+  const dialog = page.locator('dialog:not(.chat-drawer)[open]');
   await expect(dialog).toBeVisible();
   await expect.poll(() => probe.calls.filter(c => c.method === "git/preview").map(c => c.body.mode)).toContain("local");
   const local = dialog.locator('[data-merge-mode="local"]');
@@ -149,7 +150,7 @@ test("Task3b: reviewed local merge acknowledges the finished round without a pri
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   expect(probe.calls.filter(c => c.method === 'git/merge')).toHaveLength(0);
-  await card.getByRole('button', { name: '合并到主分支', exact: true }).click();
+  await clickInView(page, card.getByRole('button', { includeHidden: true, name: '合并到主分支', exact: true }));
   await expect(dialog).toBeVisible();
   await local.focus();
   await local.press('Enter');
@@ -162,7 +163,7 @@ test("Task3b: reviewed local merge acknowledges the finished round without a pri
   const after = (await (await page.request.get("/api/snapshot")).json()).state;
   expect(after.conversations[task.conversationId].rounds.at(-1).phase).toBe("confirmed");
   expect(after.conversations[task.conversationId].rounds.at(-1).report?.checks).toEqual(round.report?.checks);
-  await dialog.getByRole("button", { name: "取消", exact: true }).click();
+  await clickInView(page, dialog.getByRole("button", { includeHidden: true, name: "取消", exact: true }));
   await expect(page.locator("#draft")).toHaveValue("保留合并期间的草稿");
 });
 
@@ -172,7 +173,7 @@ test("Task3b files: explicit files-only downloads preserve Unicode names, bytes 
   await login(page);
   await newTask(page, "FileArtifactsProject", "FilesTopic", "FileArtifactsTask");
   const card = page.locator(".task-card").first();
-  await card.getByRole("button", { name: "开始开发", exact: true }).click();
+  await clickInView(page, card.getByRole("button", { includeHidden: true, name: "开始开发", exact: true }));
   await expect(card).toContainText("待验收", { timeout: 15000 });
   const snapshot = (await (await page.request.get("/api/snapshot")).json()).state;
   const task = snapshot.tasks[(await card.getAttribute("data-taskid"))!];
@@ -186,8 +187,8 @@ test("Task3b files: explicit files-only downloads preserve Unicode names, bytes 
   writeFileSync(join(tree, "kaiwu-preview.json"), JSON.stringify({ version: 2, kind: "files", artifacts: [
     { path: "report.pdf", name: "总结 报告.pdf" }, { path: "attachment.html", name: "只下载 不执行.html" },
   ] }));
-  await page.locator("#draft").fill("下载前保留的非空草稿");
-  await page.locator(".turn-result-actions button").filter({ hasText: /查看结果|打开网页/ }).first().click();
+  await fillInChat(page, page.locator('#draft'), "下载前保留的非空草稿");
+  await clickInView(page, page.locator(".turn-result-actions button").filter({ hasText: /查看结果|打开网页/ }).first());
   const region = page.getByRole("region", { name: "任务成果与效果" });
   await expect(region).toBeVisible();
   await expect(region.locator("iframe")).toHaveCount(0);
@@ -198,7 +199,7 @@ test("Task3b files: explicit files-only downloads preserve Unicode names, bytes 
   const [pdfDownload] = await Promise.all([page.waitForEvent("download"), pdfLink.press('Enter')]);
   expect(pdfDownload.suggestedFilename()).toBe("总结 报告.pdf");
   expect(readFileSync((await pdfDownload.path())!)).toEqual(pdf);
-  const [htmlDownload] = await Promise.all([page.waitForEvent("download"), region.getByRole("link", { name: "下载 只下载 不执行.html", exact: true }).click()]);
+  const [htmlDownload] = await Promise.all([page.waitForEvent("download"), clickInView(page, region.getByRole("link", { name: "下载 只下载 不执行.html", exact: true }))]);
   expect(htmlDownload.suggestedFilename()).toBe("只下载 不执行.html");
   expect(readFileSync((await htmlDownload.path())!).toString()).toBe(html);
   expect(await page.evaluate(() => (window as any).__ARTIFACT_EXECUTED__)).toBeUndefined();
@@ -214,7 +215,7 @@ test("Task3b files: explicit files-only downloads preserve Unicode names, bytes 
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   // Desktop already keeps chat beside the pane; its chat-back button is mobile-only.
-  await region.getByRole("button", { name: "← 返回看板", exact: true }).click();
+  await clickInView(page, region.getByRole("button", { includeHidden: true, name: "← 返回看板", exact: true }));
   await expect(page.locator("#draft")).toHaveValue("下载前保留的非空草稿");
 });
 
@@ -225,10 +226,10 @@ for (const pushOnly of [false, true]) {
     await login(page);
     await newTask(page, `RemoteUI${pushOnly}`, "RemoteTopic", "RemoteChoiceTask");
     const card = page.locator('.task-card').first();
-    await card.getByRole('button', { name: '开始开发', exact: true }).click();
+    await clickInView(page, card.getByRole('button', { includeHidden: true, name: '开始开发', exact: true }));
     await expect(card).toContainText('待验收', { timeout: 15000 });
-    await card.getByRole('button', { name: '合并到主分支', exact: true }).click();
-    const dialog = page.getByRole('dialog');
+    await clickInView(page, card.getByRole('button', { includeHidden: true, name: '合并到主分支', exact: true }));
+    const dialog = page.locator('dialog:not(.chat-drawer)[open]');
     await expect(dialog).toContainText('https://github.com/example/task3b.git');
     await expect(dialog).toContainText('受控远程提交范围');
     await expect(dialog).toContainText('可能触发远程构建／部署');
@@ -247,7 +248,7 @@ for (const pushOnly of [false, true]) {
       }
       await page.setViewportSize({ width: 1440, height: 900 });
     }
-    await push.click();
+    await clickInView(page, push);
     await expect(dialog).toContainText('CI 未检查');
     const writes = probe.calls.filter(c => c.method === 'git/merge');
     expect(writes).toHaveLength(1);
@@ -262,7 +263,7 @@ for (const pushOnly of [false, true]) {
     if (pushOnly) {
       await expect(dialog).toContainText('结果需要核查');
       const reads = probe.calls.filter(c => c.method.startsWith('git/operations/')).length;
-      await dialog.getByRole('button', { name: '只读核查', exact: true }).click();
+      await clickInView(page, dialog.getByRole('button', { includeHidden: true, name: '只读核查', exact: true }));
       await expect.poll(() => probe.calls.filter(c => c.method.startsWith('git/operations/')).length).toBe(reads + 1);
       expect(probe.calls.filter(c => c.method === 'git/merge')).toHaveLength(1);
       await expect(dialog.locator('[data-merge-mode]')).toHaveCount(0);
@@ -278,10 +279,10 @@ test('Task3b sensitive remote review UI (mock transport): blocked history is vis
   await login(page);
   await newTask(page, 'SensitiveHistoryUI', 'RemoteTopic', 'SensitiveHistoryTask');
   const card = page.locator('.task-card').first();
-  await card.getByRole('button', { name: '开始开发', exact: true }).click();
+  await clickInView(page, card.getByRole('button', { includeHidden: true, name: '开始开发', exact: true }));
   await expect(card).toContainText('待验收', { timeout: 15000 });
-  await card.getByRole('button', { name: '合并到主分支', exact: true }).click();
-  const dialog = page.getByRole('dialog');
+  await clickInView(page, card.getByRole('button', { includeHidden: true, name: '合并到主分支', exact: true }));
+  const dialog = page.locator('dialog:not(.chat-drawer)[open]');
   await expect(dialog.getByRole('note')).toContainText('待上传提交包含需先处理的私密文件或不安全路径');
   await expect(dialog.locator('[data-merge-mode="push"]')).toHaveCount(0);
   await expect(dialog.locator('[data-merge-mode="local"]')).toBeEnabled();
@@ -293,24 +294,24 @@ test('Task3b unknown local receipt: a real admitted write is looked up, never re
   const probe = await routePreviewSocket(page);
   await login(page);
   await newTask(page, 'LostMergeReceiptProject', 'MergeTopic', 'LostMergeReceiptTask');
-  await page.locator('#draft').fill('未知回执期间保留草稿');
+  await fillInChat(page, page.locator('#draft'), '未知回执期间保留草稿');
   const card = page.locator('.task-card').first();
-  await card.getByRole('button', { name: '开始开发', exact: true }).click();
+  await clickInView(page, card.getByRole('button', { includeHidden: true, name: '开始开发', exact: true }));
   await expect(card).toContainText('待验收', { timeout: 15000 });
-  await card.getByRole('button', { name: '合并到主分支', exact: true }).click();
-  const dialog = page.getByRole('dialog');
+  await clickInView(page, card.getByRole('button', { includeHidden: true, name: '合并到主分支', exact: true }));
+  const dialog = page.locator('dialog:not(.chat-drawer)[open]');
   probe.drop('git/merge');
-  await dialog.locator('[data-merge-mode="local"]').click();
+  await clickInView(page, dialog.locator('[data-merge-mode="local"]'));
   await expect(dialog).toContainText('操作回执未知');
   await expect(dialog.locator('[data-merge-mode="local"]')).toBeDisabled();
   // Wait for the actual socket reconnection, not a forced click on an offline UI.
   await expect(page.locator('#send')).toBeEnabled({ timeout: 10000 });
-  await dialog.getByRole('button', { name: '重新检查', exact: true }).click();
+  await clickInView(page, dialog.getByRole('button', { includeHidden: true, name: '重新检查', exact: true }));
   await expect(dialog).toContainText('操作完成', { timeout: 15000 });
   const writes = probe.calls.filter(c => c.method === 'git/merge');
   expect(writes).toHaveLength(1);
   expect(probe.calls.some(c => c.method === 'git/operations/' + writes[0].body.operationId)).toBe(true);
-  await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  await clickInView(page, dialog.getByRole('button', { includeHidden: true, name: '取消', exact: true }));
   await expect(page.locator('#draft')).toHaveValue('未知回执期间保留草稿');
 });
 
@@ -320,7 +321,7 @@ test('Task3b static files: direct webpage coexists with explicit downloads and r
   await login(page);
   await newTask(page, 'StaticAndFilesProject', 'OutputTopic', 'StaticAndFilesTask');
   const card = page.locator('.task-card').first();
-  await card.getByRole('button', { name: '开始开发', exact: true }).click();
+  await clickInView(page, card.getByRole('button', { includeHidden: true, name: '开始开发', exact: true }));
   await expect(card).toContainText('待验收', { timeout: 15000 });
   const snapshot = (await (await page.request.get('/api/snapshot')).json()).state;
   const task = snapshot.tasks[(await card.getAttribute('data-taskid'))!];
@@ -330,15 +331,15 @@ test('Task3b static files: direct webpage coexists with explicit downloads and r
   writeFileSync(join(tree, 'index.html'), '<h1>本轮网页与附件</h1>');
   writeFileSync(join(tree, 'result.csv'), 'name,value\n中文,42\n');
   writeFileSync(join(tree, 'kaiwu-preview.json'), JSON.stringify({ version: 2, kind: 'static', root: '.', entry: 'index.html', artifacts: [{ path: 'result.csv', name: '数据 结果.csv' }] }));
-  await page.locator('#draft').fill('静态网页与附件同时保留草稿');
-  const [web] = await Promise.all([context.waitForEvent('page'), page.locator('.turn-result-actions button').filter({ hasText: /查看结果|打开网页/ }).first().click()]);
+  await fillInChat(page, page.locator('#draft'), '静态网页与附件同时保留草稿');
+  const [web] = await Promise.all([context.waitForEvent('page'), clickInView(page, page.locator('.turn-result-actions button').filter({ hasText: /查看结果|打开网页/ }).first())]);
   await expect(web.getByRole('heading', { name: '本轮网页与附件', exact: true })).toBeVisible();
   await web.close();
   await page.bringToFront();
-  await page.getByRole('button', { name: '文件产物（1）', exact: true }).click();
+  await clickInView(page, page.getByRole('button', { includeHidden: true, name: '文件产物（1）', exact: true }));
   const link = page.getByRole('link', { name: '下载 数据 结果.csv', exact: true });
   await expect(link).toBeVisible();
-  const [download] = await Promise.all([page.waitForEvent('download'), link.click()]);
+  const [download] = await Promise.all([page.waitForEvent('download'), clickInView(page, link)]);
   expect(download.suggestedFilename()).toBe('数据 结果.csv');
   expect(readFileSync((await download.path())!).toString()).toBe('name,value\n中文,42\n');
   const opens = probe.openCount(), statuses = probe.statusCount();
@@ -449,8 +450,8 @@ test.describe("Chat turn and result actions", () => {
     await login(page);
     await addProject(page,"ProjectQuestions");
     for(let i=0;i<2;i++){
-      await page.locator("#draft").fill("__CHAT_FOCUS_QA__ 项目问题 "+i);
-      await page.locator("#send").click();
+      await fillInChat(page, page.locator('#draft'), "__CHAT_FOCUS_QA__ 项目问题 "+i);
+      await clickInView(page, page.locator("#send"));
       await expect(page.locator(".message.assistant")).toHaveCount(i+1);
       await expect(page.locator(".message.assistant").last().locator(".assistant-summary-markdown")).toContainText("最后一段解释同样保留。");
     }
@@ -464,13 +465,13 @@ test.describe("Chat turn and result actions", () => {
     await page.setViewportSize({width:1440,height:900});
     await login(page);
     await newTask(page,"FocusChat","接口开发","实现 Hello");
-    await page.locator(".task-card").first().getByRole("button",{name:"开始开发",exact:true}).click();
+    await clickInView(page, page.locator(".task-card").first().getByRole("button",{ includeHidden: true,name:"开始开发",exact:true}));
     await expect(page.locator(".confirm-btn")).toBeVisible();
     const originalID = await page.locator(".message.assistant").first().getAttribute("data-message-id");
     const artifacts = process.env.KAIWU_CHAT_FOCUS_ARTIFACTS;
     if(artifacts) await page.screenshot({path:join(artifacts,"desktop.png")});
-    await page.locator("#draft").fill("__CHAT_FOCUS_QA__ 请解释实现，不修改");
-    await page.locator("#send").click();
+    await fillInChat(page, page.locator('#draft'), "__CHAT_FOCUS_QA__ 请解释实现，不修改");
+    await clickInView(page, page.locator("#send"));
     const answer=page.locator(".message.assistant").last();
     await expect(answer).toContainText("正在回复");
     await expect(answer.locator(".assistant-summary-markdown pre")).toBeVisible();
@@ -488,11 +489,11 @@ test.describe("Chat turn and result actions", () => {
     await page.reload();
     await expect(page.locator(".confirm-btn")).toHaveCount(1);
     await expect(page.locator(".message.assistant").last()).toContainText("最后一段解释同样保留。");
-    await page.locator(".confirm-btn").click();
+    await clickInView(page, page.locator(".confirm-btn"));
     await expect(page.locator(".task-card").first()).toContainText("已完成");
     // New development supersedes the accepted result without deleting its history.
-    await page.locator("#draft").fill("结构化登录恢复 继续修改");
-    await page.locator("#send").click();
+    await fillInChat(page, page.locator('#draft'), "结构化登录恢复 继续修改");
+    await clickInView(page, page.locator("#send"));
     await expect(page.locator(".confirm-btn")).toHaveCount(1);
     await expect(page.locator(".message.assistant").last()).toContainText("登录恢复已实现");
     const history=page.locator(".assistant-turn-container.historical").first();
@@ -501,18 +502,18 @@ test.describe("Chat turn and result actions", () => {
     await history.locator("> summary").focus();
     await page.keyboard.press("Enter");
     await expect(history.locator(".historical-result-actions button")).toBeVisible();
-    await history.locator(".historical-result-actions button").click();
+    await clickInView(page, history.locator(".historical-result-actions button"));
     await expect(history.locator(".historical-result")).toContainText("历史网页效果未存档");
     for(const width of [390,360]){
       await page.setViewportSize({width,height:844});
-      await page.locator(".mobile-switch button:has-text('聊天')").click();
+      await clickInView(page, page.locator(".mobile-switch button:has-text('聊天')"));
       await expect(page.locator("#draft")).toBeVisible();
       expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
       const last=page.locator(".message.assistant").last();
-      await last.locator(".assistant-turn-summary").click();
+      await clickInView(page, last.locator(".assistant-turn-summary"));
       await expect(last.locator(".assistant-turn-body")).toBeVisible();
       if(artifacts) await page.screenshot({path:join(artifacts,"mobile-"+width+".png")});
-      await last.locator(".assistant-turn-summary").click();
+      await clickInView(page, last.locator(".assistant-turn-summary"));
     }
   });
 
@@ -526,12 +527,12 @@ test.describe("Chat turn and result actions", () => {
 
     // 2. Click "开始开发" so task execution and worktree are started
     const card = page.locator(".task-card").first();
-    await card.getByRole("button", { name: "开始开发", exact: true }).click();
+    await clickInView(page, card.getByRole("button", { includeHidden: true, name: "开始开发", exact: true }));
     await expect(card).toContainText("待验收", { timeout: 15000 });
 
     // Send prompt with structured login recovery
-    await page.locator("#draft").fill("结构化登录恢复 开发测试");
-    await page.locator("#send").click();
+    await fillInChat(page, page.locator('#draft'), "结构化登录恢复 开发测试");
+    await clickInView(page, page.locator("#send"));
 
     // The user message appears
     await expect(page.locator(".message.user").last()).toContainText("结构化登录恢复 开发测试");
@@ -603,15 +604,15 @@ test.describe("Chat turn and result actions", () => {
     expect(await details.getAttribute("open")).toBeNull();
 
     // 5. Send second user message
-    await page.locator("#draft").fill("第二问：请继续补充测试");
-    await page.locator("#send").click();
+    await fillInChat(page, page.locator('#draft'), "第二问：请继续补充测试");
+    await clickInView(page, page.locator("#send"));
 
     // Wait for second round/assistant message
     await expect(page.locator(".message.user")).toHaveCount(3);
     await expect(page.locator(".message.assistant")).toHaveCount(3, { timeout: 15000 });
 
     // 6. Test Display Filter: '只看我的问题'
-    await page.getByRole("button", { name: "只看我的问题" }).click();
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "只看我的问题" }));
     // Only user messages should be displayed
     await expect(page.locator(".message.user")).toHaveCount(3);
     await expect(page.locator(".message.assistant")).toHaveCount(0);
@@ -625,7 +626,7 @@ test.describe("Chat turn and result actions", () => {
     await expect(page.getByRole("button", { name: "全部" })).toHaveClass(/active/);
 
     // Switch back to questions filter
-    await page.getByRole("button", { name: "只看我的问题" }).click();
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "只看我的问题" }));
     await expect(page.locator(".message.assistant")).toHaveCount(0);
 
     // Test Enter key on question to restore all and jump
@@ -640,11 +641,13 @@ test.describe("Chat turn and result actions", () => {
     await expect(resultActionRow).toBeVisible();
     const previewBtn = resultActionRow.locator("button:has-text('查看效果'), button:has-text('查看结果'), button:has-text('打开网页')");
     await expect(previewBtn).toBeVisible();
-    await previewBtn.click();
+    await clickInView(page, previewBtn);
     // Verify draft is preserved and not cleared
     expect(await page.locator("#draft").inputValue()).toBe("");
 
-    // 8. Test Space on Result Actions button ("确认完成")
+    // 8. Return through the real drawer control before keyboard confirmation.
+    await openChat(page);
+    // Test Space on Result Actions button ("确认完成").
     const confirmBtn = page.locator(".turn-result-actions button.confirm-btn");
     await expect(confirmBtn).toBeVisible();
     await confirmBtn.focus();
@@ -653,29 +656,29 @@ test.describe("Chat turn and result actions", () => {
     // Return to board from preview surface to check task card
     const backBtn = page.getByRole("button", { name: "← 返回看板", exact: true });
     if (await backBtn.isVisible().catch(() => false)) {
-      await backBtn.click();
+      await clickInView(page, backBtn);
     }
     // Task should be marked completed
     await expect(page.locator(".task-card").first()).toContainText("已完成");
 
     // 9. Verify draft isolation across tasks
-    await page.locator("#draft").fill("草稿保留在当前任务1");
+    await fillInChat(page, page.locator('#draft'), "草稿保留在当前任务1");
     // Create second task in same topic
-    await page.getByRole("button", { name: "在 DevTopic 新建任务", exact: true }).click();
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "在 DevTopic 新建任务", exact: true }));
     await page.locator("input[name=title]").fill("BubbleTask2");
     await page.locator("textarea[name=request]").fill("第二任务");
-    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
     await expect(page.locator("#chat-title")).toContainText("BubbleTask2");
 
     // Task2 draft must be empty
     expect(await page.locator("#draft").inputValue()).toBe("");
 
     // Switch back to Task1
-    await page.locator(".task-card").filter({ hasText: "BubbleTask1" }).click();
+    await clickInView(page, page.locator(".task-card").filter({ hasText: "BubbleTask1" }));
     await expect(page.locator("#chat-title")).toContainText("BubbleTask1");
     // Draft in Task1 is preserved
     expect(await page.locator("#draft").inputValue()).toBe("草稿保留在当前任务1");
-    await page.locator("#draft").fill(""); // clean up
+    await fillInChat(page, page.locator('#draft'), ""); // clean up
   });
 
   test("Real static preview regression: opens in new tab, loads real HTML/CSS/JS/image, with popup blocker fallback and approval lifecycle", async ({ page, context }) => {
@@ -685,12 +688,12 @@ test.describe("Chat turn and result actions", () => {
 
     // 1. Click "开始开发" so task execution and independent worktree are initialized with development tools
     const card = page.locator(".task-card").first();
-    await card.getByRole("button", { name: "开始开发", exact: true }).click();
+    await clickInView(page, card.getByRole("button", { includeHidden: true, name: "开始开发", exact: true }));
     await expect(card).toContainText("待验收", { timeout: 15000 });
 
     // 2. Trigger development with prompt producing static web artifacts
-    await page.locator("#draft").fill("生成静态网页产物 测试入口");
-    await page.locator("#send").click();
+    await fillInChat(page, page.locator('#draft'), "生成静态网页产物 测试入口");
+    await clickInView(page, page.locator("#send"));
 
     // Wait for development tool and assistant reply
     await expect(page.locator(".message.assistant")).toHaveCount(2, { timeout: 20000 });
@@ -706,7 +709,7 @@ test.describe("Chat turn and result actions", () => {
     // Verify popup listener handles new tab or fallback link
     const [newPage] = await Promise.all([
       context.waitForEvent("page", { timeout: 10000 }),
-      actionBtn.click(),
+      clickInView(page, actionBtn),
     ]);
 
     await newPage.waitForLoadState("networkidle");
@@ -730,11 +733,11 @@ test.describe("Chat turn and result actions", () => {
     await newTask(page, "BlockedPopupProj", "WebTopic", "BlockedWebTask");
 
     const card = page.locator(".task-card").first();
-    await card.getByRole("button", { name: "开始开发", exact: true }).click();
+    await clickInView(page, card.getByRole("button", { includeHidden: true, name: "开始开发", exact: true }));
     await expect(card).toContainText("待验收", { timeout: 15000 });
 
-    await page.locator("#draft").fill("生成静态网页产物 弹窗拦截测试");
-    await page.locator("#send").click();
+    await fillInChat(page, page.locator('#draft'), "生成静态网页产物 弹窗拦截测试");
+    await clickInView(page, page.locator("#send"));
 
     await expect(page.locator(".message.assistant")).toHaveCount(2, { timeout: 20000 });
     const actionBtn = page.locator(".turn-result-actions").locator("button:has-text('打开网页'), button:has-text('查看结果'), button:has-text('查看效果')");
@@ -745,7 +748,7 @@ test.describe("Chat turn and result actions", () => {
       window.open = () => null;
     });
 
-    await actionBtn.click();
+    await clickInView(page, actionBtn);
 
     // Expect fallback notice and accessible link to be rendered
     const directLink = page.locator("a.preview-direct-link");
@@ -778,11 +781,11 @@ test.describe("Chat turn and result actions", () => {
     await newTask(page, "StaleRoundProj", "WebTopic", "StaleRoundTask");
 
     const card = page.locator(".task-card").first();
-    await card.getByRole("button", { name: "开始开发", exact: true }).click();
+    await clickInView(page, card.getByRole("button", { includeHidden: true, name: "开始开发", exact: true }));
     await expect(card).toContainText("待验收", { timeout: 15000 });
 
-    await page.locator("#draft").fill("生成静态网页产物 轮次一");
-    await page.locator("#send").click();
+    await fillInChat(page, page.locator('#draft'), "生成静态网页产物 轮次一");
+    await clickInView(page, page.locator("#send"));
     await expect(page.locator(".message.assistant")).toHaveCount(2, { timeout: 20000 });
 
     const actionBtn = page.locator(".turn-result-actions").locator("button:has-text('打开网页'), button:has-text('查看结果')").first();
@@ -790,13 +793,13 @@ test.describe("Chat turn and result actions", () => {
 
     probe.hold("previews/open");
     const popupPromise = context.waitForEvent("page", { timeout: 10000 });
-    await actionBtn.click();
+    await clickInView(page, actionBtn);
     const popup = await popupPromise;
     await expect.poll(() => probe.openCount()).toBe(1);
 
     // A new round lands in the same task while previews/open is still pending.
-    await page.locator("#draft").fill("继续迭代新轮次");
-    await page.locator("#send").click();
+    await fillInChat(page, page.locator('#draft'), "继续迭代新轮次");
+    await clickInView(page, page.locator("#send"));
     await expect(page.locator(".message.assistant")).toHaveCount(3, { timeout: 20000 });
 
     probe.release();
@@ -821,11 +824,11 @@ test.describe("Chat turn and result actions", () => {
     await newTask(page, "DebounceProj", "WebTopic", "DebounceTask");
 
     const card = page.locator(".task-card").first();
-    await card.getByRole("button", { name: "开始开发", exact: true }).click();
+    await clickInView(page, card.getByRole("button", { includeHidden: true, name: "开始开发", exact: true }));
     await expect(card).toContainText("待验收", { timeout: 15000 });
 
-    await page.locator("#draft").fill("生成静态网页产物 防重测试");
-    await page.locator("#send").click();
+    await fillInChat(page, page.locator('#draft'), "生成静态网页产物 防重测试");
+    await clickInView(page, page.locator("#send"));
     await expect(page.locator(".message.assistant")).toHaveCount(2, { timeout: 20000 });
 
     const actionBtn = page.locator(".turn-result-actions").locator("button:has-text('打开网页'), button:has-text('查看结果')").first();
@@ -840,7 +843,7 @@ test.describe("Chat turn and result actions", () => {
     expect(box).toBeTruthy();
     const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     probe.hold("previews/open");
-    await actionBtn.click();
+    await clickInView(page, actionBtn);
     await expect.poll(() => probe.openCount()).toBe(1);
     await page.bringToFront();
     await page.mouse.click(point.x, point.y);
@@ -890,20 +893,20 @@ test.describe("Chat turn and result actions", () => {
     await newTask(page, "SwitchProj", "WebTopic", "SwitchTaskA");
 
     const cardA = page.locator(".task-card").first();
-    await cardA.getByRole("button", { name: "开始开发", exact: true }).click();
+    await clickInView(page, cardA.getByRole("button", { includeHidden: true, name: "开始开发", exact: true }));
     await expect(cardA).toContainText("待验收", { timeout: 15000 });
 
-    await page.locator("#draft").fill("生成静态网页产物 切换卡片A");
-    await page.locator("#send").click();
+    await fillInChat(page, page.locator('#draft'), "生成静态网页产物 切换卡片A");
+    await clickInView(page, page.locator("#send"));
     await expect(page.locator(".message.assistant")).toHaveCount(2, { timeout: 20000 });
 
-    await page.getByRole("button", { name: "在 WebTopic 新建任务", exact: true }).click();
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "在 WebTopic 新建任务", exact: true }));
     await page.locator("input[name=title]").fill("SwitchTaskB");
     await page.locator("textarea[name=request]").fill("任务B");
-    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
     await expect(page.locator("#chat-title")).toContainText("SwitchTaskB");
 
-    await page.locator(".task-card").filter({ hasText: "SwitchTaskA" }).click();
+    await clickInView(page, page.locator(".task-card").filter({ hasText: "SwitchTaskA" }));
     await expect(page.locator("#chat-title")).toContainText("SwitchTaskA");
 
     const actionBtn = page.locator(".turn-result-actions").locator("button:has-text('打开网页'), button:has-text('查看结果')").first();
@@ -911,15 +914,15 @@ test.describe("Chat turn and result actions", () => {
 
     probe.hold("previews/open");
     const popupPromise = context.waitForEvent("page", { timeout: 10000 });
-    await actionBtn.click();
+    await clickInView(page, actionBtn);
     const popup = await popupPromise;
     await expect.poll(() => probe.openCount()).toBe(1);
 
     // A → B → A: the scope returns to the very same task/round, so a naive
     // "value is identical again" check would revive this late receipt.
-    await page.locator(".task-card").filter({ hasText: "SwitchTaskB" }).click();
+    await clickInView(page, page.locator(".task-card").filter({ hasText: "SwitchTaskB" }));
     await expect(page.locator("#chat-title")).toContainText("SwitchTaskB");
-    await page.locator(".task-card").filter({ hasText: "SwitchTaskA" }).click();
+    await clickInView(page, page.locator(".task-card").filter({ hasText: "SwitchTaskA" }));
     await expect(page.locator("#chat-title")).toContainText("SwitchTaskA");
 
     probe.release();
@@ -937,19 +940,19 @@ test.describe("Chat turn and result actions", () => {
     await newTask(page, "CommandProj", "CmdTopic", "CmdTask");
 
     const card = page.locator(".task-card").first();
-    await card.getByRole("button", { name: "开始开发", exact: true }).click();
+    await clickInView(page, card.getByRole("button", { includeHidden: true, name: "开始开发", exact: true }));
     await expect(card).toContainText("待验收", { timeout: 15000 });
 
     // Prompt produces kaiwu-preview.json command manifest
-    await page.locator("#draft").fill("命令网页产物 首次授权测试");
-    await page.locator("#send").click();
+    await fillInChat(page, page.locator('#draft'), "命令网页产物 首次授权测试");
+    await clickInView(page, page.locator("#send"));
     await expect(page.locator(".message.assistant")).toHaveCount(2, { timeout: 20000 });
 
     const actionBtn = page.locator(".turn-result-actions").locator("button:has-text('打开网页'), button:has-text('查看结果')").first();
     await expect(actionBtn).toBeVisible();
 
     // Clicking "查看结果" for unapproved command does NOT open popup immediately, but opens ResultPreview pane with authorization button
-    await actionBtn.click();
+    await clickInView(page, actionBtn);
     const resultPane = page.locator(".result-pane");
     await expect(resultPane).toBeVisible({ timeout: 5000 });
     await expect(resultPane.locator("code.preview-command")).toBeVisible();
@@ -960,7 +963,7 @@ test.describe("Chat turn and result actions", () => {
 
     const [cmdPage] = await Promise.all([
       context.waitForEvent("page", { timeout: 15000 }),
-      startBtn.click(),
+      clickInView(page, startBtn),
     ]);
 
     await cmdPage.waitForLoadState("networkidle");
@@ -976,7 +979,7 @@ test.describe("Chat turn and result actions", () => {
     // Now clicking preview button in chat will reuse approval and directly open without re-prompting
     const [secondPage] = await Promise.all([
       context.waitForEvent("page", { timeout: 15000 }),
-      actionBtn.click(),
+      clickInView(page, actionBtn),
     ]);
     await secondPage.waitForLoadState("networkidle");
     expect(await secondPage.title()).toContain("服务进程网页");
@@ -989,24 +992,24 @@ test.describe("Chat turn and result actions", () => {
     // Explicit Stop through the visible panel ends that preview.
     const stopBtn = page.locator(".result-pane button:has-text('停止预览')");
     await expect(stopBtn).toBeVisible();
-    await stopBtn.click();
+    await clickInView(page, stopBtn);
     await expect(page.locator(".result-pane")).toContainText("服务已停止", { timeout: 10000 });
     await expect(page.locator(".result-pane button.preview-start-btn")).toBeEnabled({ timeout: 10000 });
 
     // Logout clears the execution approval.
-    await page.locator("button.logout").click();
+    await clickInView(page, page.locator("button.logout"));
     await expect(page.getByLabel("本机访问令牌")).toBeVisible();
 
     // Re-login on the same stopped task: the approval is gone, so the panel must
     // ask again and must not issue a Start before the user agrees.
     await login(page);
-    await page.getByRole("button", { name: "当前项目", exact: true }).click();
-    await page.getByRole("menuitemradio", { name: "CommandProj" }).click();
-    await page.locator(".task-card").filter({ hasText: "CmdTask" }).click();
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "当前项目", exact: true }));
+    await clickInView(page, page.getByRole("menuitemradio", { includeHidden: true, name: "CommandProj" }));
+    await clickInView(page, page.locator(".task-card").filter({ hasText: "CmdTask" }));
     await expect(page.locator("#chat-title")).toContainText("CmdTask");
 
     const pagesBeforeAsk = context.pages().length;
-    await page.locator(".turn-result-actions button:has-text('查看结果'), .turn-result-actions button:has-text('打开网页')").first().click();
+    await clickInView(page, page.locator(".turn-result-actions button:has-text('查看结果'), .turn-result-actions button:has-text('打开网页')").first());
     await expect(page.locator(".result-pane code.preview-command")).toBeVisible();
     await expect(page.locator("button.preview-start-btn")).toBeVisible();
     await page.waitForTimeout(800);
@@ -1016,7 +1019,7 @@ test.describe("Chat turn and result actions", () => {
     // Explicitly authorizing again really starts once more (new run, new id).
     const [approvedPage] = await Promise.all([
       context.waitForEvent("page", { timeout: 20000 }),
-      page.locator("button.preview-start-btn").click(),
+      clickInView(page, page.locator("button.preview-start-btn")),
     ]);
     await approvedPage.waitForLoadState("load");
     expect(await approvedPage.locator("#proc-title").innerText()).toBe("开悟服务进程测试");
@@ -1028,11 +1031,11 @@ test.describe("Chat turn and result actions", () => {
     // that single user gesture must issue exactly one new Start (new id) and open a
     // real page — without going through the approval button again.
     const idsBeforeRestart = probe.operationIds();
-    await page.locator(".result-pane button:has-text('停止预览')").click();
+    await clickInView(page, page.locator(".result-pane button:has-text('停止预览')"));
     await expect(page.locator(".result-pane")).toContainText("服务已停止", { timeout: 10000 });
     const [restartedPage] = await Promise.all([
       context.waitForEvent("page", { timeout: 20000 }),
-      actionBtn.click(),
+      clickInView(page, actionBtn),
     ]);
     await restartedPage.waitForLoadState("load");
     expect(await restartedPage.locator("#proc-title").innerText()).toBe("开悟服务进程测试");
@@ -1050,20 +1053,20 @@ test.describe("Chat turn and result actions", () => {
     // round, same manifest) BEFORE logging out, then re-login.
     const stopBtn3 = page.locator(".result-pane button:has-text('停止预览')");
     await expect(stopBtn3).toBeVisible();
-    await stopBtn3.click();
+    await clickInView(page, stopBtn3);
     await expect(page.locator(".result-pane")).toContainText("服务已停止", { timeout: 10000 });
-    await page.locator("button.logout").click();
+    await clickInView(page, page.locator("button.logout"));
     await expect(page.getByLabel("本机访问令牌")).toBeVisible();
     await login(page);
-    await page.getByRole("button", { name: "当前项目", exact: true }).click();
-    await page.getByRole("menuitemradio", { name: "CommandProj" }).click();
-    await page.locator(".task-card").filter({ hasText: "CmdTask" }).click();
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "当前项目", exact: true }));
+    await clickInView(page, page.getByRole("menuitemradio", { includeHidden: true, name: "CommandProj" }));
+    await clickInView(page, page.locator(".task-card").filter({ hasText: "CmdTask" }));
     await expect(page.locator("#chat-title")).toContainText("CmdTask");
 
     // One click on the chat result action must only ask for approval now: no page,
     // no Start beyond the recorded 3.
     const pagesBeforeAskReLogin = context.pages().length;
-    await actionBtn.click();
+    await clickInView(page, actionBtn);
     await expect(page.locator(".result-pane code.preview-command")).toBeVisible();
     await expect(page.locator("button.preview-start-btn")).toBeVisible();
     await page.waitForTimeout(800);
@@ -1074,7 +1077,7 @@ test.describe("Chat turn and result actions", () => {
     // four pairwise-distinct operation ids.
     const [approvedPage2] = await Promise.all([
       context.waitForEvent("page", { timeout: 20000 }),
-      page.locator("button.preview-start-btn").click(),
+      clickInView(page, page.locator("button.preview-start-btn")),
     ]);
     await approvedPage2.waitForLoadState("load");
     expect(await approvedPage2.locator("#proc-title").innerText()).toBe("开悟服务进程测试");
@@ -1087,17 +1090,17 @@ test.describe("Chat turn and result actions", () => {
     // Contract B — a running preview is viewable without approval. Fresh login
     // while Start 4 is still running: one click on the chat result action opens a
     // real page read-only, adds no Start, and shows no command authorization.
-    await page.locator("button.logout").click();
+    await clickInView(page, page.locator("button.logout"));
     await expect(page.getByLabel("本机访问令牌")).toBeVisible();
     await login(page);
-    await page.getByRole("button", { name: "当前项目", exact: true }).click();
-    await page.getByRole("menuitemradio", { name: "CommandProj" }).click();
-    await page.locator(".task-card").filter({ hasText: "CmdTask" }).click();
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "当前项目", exact: true }));
+    await clickInView(page, page.getByRole("menuitemradio", { includeHidden: true, name: "CommandProj" }));
+    await clickInView(page, page.locator(".task-card").filter({ hasText: "CmdTask" }));
     await expect(page.locator("#chat-title")).toContainText("CmdTask");
 
     const [viewPage] = await Promise.all([
       context.waitForEvent("page", { timeout: 20000 }),
-      actionBtn.click(),
+      clickInView(page, actionBtn),
     ]);
     await viewPage.waitForLoadState("load");
     expect(await viewPage.locator("#proc-title").innerText()).toBe("开悟服务进程测试");
@@ -1115,23 +1118,23 @@ test.describe("Chat turn and result actions", () => {
     await newTask(page, "UnknownStartProj", "CmdTopic", "UnknownStartTask");
 
     const card = page.locator(".task-card").first();
-    await card.getByRole("button", { name: "开始开发", exact: true }).click();
+    await clickInView(page, card.getByRole("button", { includeHidden: true, name: "开始开发", exact: true }));
     await expect(card).toContainText("待验收", { timeout: 15000 });
 
-    await page.locator("#draft").fill("命令网页产物 未知回执测试");
-    await page.locator("#send").click();
+    await fillInChat(page, page.locator('#draft'), "命令网页产物 未知回执测试");
+    await clickInView(page, page.locator("#send"));
     await expect(page.locator(".message.assistant")).toHaveCount(2, { timeout: 20000 });
 
     const actionBtn = page.locator(".turn-result-actions").locator("button:has-text('打开网页'), button:has-text('查看结果')").first();
     await expect(actionBtn).toBeVisible();
-    await actionBtn.click();
+    await clickInView(page, actionBtn);
     const resultPane = page.locator(".result-pane");
     await expect(resultPane.locator("button.preview-start-btn")).toBeVisible({ timeout: 10000 });
 
     // First authorization: the service really runs the command, but the reply the
     // page receives is lost (socket cut), so the write's outcome is unknown.
     probe.drop("previews/start");
-    await resultPane.locator("button.preview-start-btn").click();
+    await clickInView(page, resultPane.locator("button.preview-start-btn"));
     await expect.poll(() => probe.startCount(), { timeout: 20000 }).toBe(1);
 
     // Repeat the explicit action: it may only reconcile read-only. No second
@@ -1142,7 +1145,7 @@ test.describe("Chat turn and result actions", () => {
     await page.bringToFront();
     await expect(actionBtn).toBeEnabled();
     const opensBeforeRepeat = probe.openCount();
-    await actionBtn.click();
+    await clickInView(page, actionBtn);
     await expect.poll(() => probe.openCount()).toBeGreaterThan(opensBeforeRepeat);
     await expect.poll(() => probe.statusCount(), { timeout: 15000 }).toBeGreaterThan(statusBeforeRepeat);
     await page.waitForTimeout(1500);
@@ -1169,7 +1172,7 @@ test.describe("Chat turn and result actions", () => {
     // Start stays blocked on the original id — no new write, no new page.
     const stopBtn = resultPane.getByRole("button", { name: "停止预览", exact: true });
     await expect(stopBtn).toBeVisible();
-    await stopBtn.click();
+    await clickInView(page, stopBtn);
     await expect(page.locator(".result-pane")).toContainText("服务已停止", { timeout: 10000 });
     const pagesAfterStop = page.context().pages().length;
     const startsAfterStop = probe.startCount();
@@ -1178,7 +1181,7 @@ test.describe("Chat turn and result actions", () => {
     await expect(repeatStart).toBeVisible();
     await expect(repeatStart).toBeEnabled();
     const statusesAfterStop = probe.statusCount();
-    await repeatStart.click();
+    await clickInView(page, repeatStart);
     await expect.poll(() => probe.statusCount()).toBeGreaterThan(statusesAfterStop);
     await expect(resultPane).toContainText("上次启动结果未知");
     await expect.poll(() => context.pages().length).toBe(pagesAfterStop);
@@ -1196,21 +1199,21 @@ test.describe("Chat turn and result actions", () => {
       // On mobile viewport, switch to 看板 to see card
       const boardTab = page.locator(".mobile-switch button:has-text('看板')");
       if (await boardTab.isVisible()) {
-        await boardTab.click();
+        await clickInView(page, boardTab);
       }
 
       const card = page.locator(".task-card").first();
-      await card.getByRole("button", { name: "开始开发", exact: true }).click();
+      await clickInView(page, card.getByRole("button", { includeHidden: true, name: "开始开发", exact: true }));
       await expect(card).toContainText("待验收", { timeout: 15000 });
 
       // Switch back to 聊天
       const chatTab = page.locator(".mobile-switch button:has-text('聊天')");
       if (await chatTab.isVisible()) {
-        await chatTab.click();
+        await clickInView(page, chatTab);
       }
 
-      await page.locator("#draft").fill(`移动端测试 ${width}`);
-      await page.locator("#send").click();
+      await fillInChat(page, page.locator('#draft'), `移动端测试 ${width}`);
+      await clickInView(page, page.locator("#send"));
       await expect(page.locator(".message.assistant")).toHaveCount(2, { timeout: 20000 });
 
       // Verify no horizontal overflow in document

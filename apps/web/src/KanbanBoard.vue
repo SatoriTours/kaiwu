@@ -21,6 +21,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   select: [Task];
+  project: [];
   start: [Task];
   merge: [Task];
   topic: [string];
@@ -47,6 +48,7 @@ function actionLabel(task: Task) {
   <section class="board-side" aria-label="项目任务看板">
     <div class="toolbar">
       <h1>项目看板</h1>
+      <button class="project-chat" aria-haspopup="dialog" @click="emit('project')">项目对话</button>
       <span class="running">{{ tasks.length }} 个任务</span
       ><button
         data-action="new-topic"
