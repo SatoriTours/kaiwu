@@ -204,6 +204,7 @@ test("reviewed round is the newest finished round or the legacy token", () => {
   const round = (id: string, phase: string, finished = "2026-01-01T00:00:00Z") => ({ id, phase, finishedAt: finished });
   assert.equal(reviewedRoundId({ rounds: [round("r1", "finished")] }, undefined), "r1");
   assert.equal(reviewedRoundId({ rounds: [round("r1", "confirmed")] }, undefined), "r1");
+  assert.equal(reviewedRoundId({ rounds: [round("dev", "finished"), round("qa", "answered")] }, undefined), "dev");
   // Still running / not finished: no round may be acknowledged yet.
   assert.equal(reviewedRoundId({ rounds: [round("r1", "finished"), round("r2", "running", "")] }, undefined), undefined);
   assert.equal(reviewedRoundId({ rounds: [round("r1", "interrupted", "")] }, undefined), undefined);

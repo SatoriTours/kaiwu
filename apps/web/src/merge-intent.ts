@@ -258,7 +258,7 @@ export function reviewedRoundId(
   execution: { id: string; finishedAt?: string; phase?: string } | undefined,
 ): string | undefined {
   const rounds = conversation?.rounds ?? [];
-  const latest = rounds.at(-1);
+  const latest = [...rounds].reverse().find(r => r.phase !== "answered");
   if (latest) {
     if (!latest.finishedAt) return undefined;
     if (latest.phase !== "finished" && latest.phase !== "confirmed") return undefined;

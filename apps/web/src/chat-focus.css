@@ -1,0 +1,47 @@
+/* V5 task chat: preserve the workbench and board; own only message content. */
+.chat .messages{background:#fdfefd}
+.chat .message{display:flex;align-items:flex-start;gap:8px;margin:0 0 23px;min-width:0}
+.chat .message.user{margin-left:0;flex-direction:row-reverse}
+.chat .message-stack{min-width:0;max-width:calc(100% - 31px);flex:1}
+.chat .message.user .message-stack{flex:0 1 auto;max-width:84%;display:flex;flex-direction:column;align-items:flex-end}
+.chat .message-avatar{width:23px;height:23px;flex:0 0 23px;display:grid;place-items:center;border-radius:7px;font-size:11px;margin-top:24px;background:#eaf0e7;color:#5d785f}
+.chat .message.user .message-avatar{background:#e2ebe2;font-size:10px}
+.chat .message-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px;font-size:10px;line-height:18px;color:#85917f}
+.chat .message-meta strong{font-weight:550;color:#5b725e;font-size:10px}
+.chat .message-round-time{font-size:9px;color:#9aa496;font-variant-numeric:tabular-nums}
+.chat .message-bubble{background:#f7f9f5;border:1px solid #e7ece3;border-radius:3px 11px 11px 11px;padding:11px 13px;font-size:13px;line-height:1.8;overflow-wrap:anywhere;min-width:0}
+.chat .message.user .text{width:fit-content;max-width:100%;background:#eaf1e7;border:1px solid #e1e9dc;border-radius:11px 3px 11px 11px;padding:10px 13px;color:#3e5140;font-size:13px;line-height:1.8}
+.chat .message-status{display:flex;flex-wrap:wrap;gap:8px;font-size:9px;line-height:1.6;color:#93a08d;margin-top:6px;padding:0 2px}
+.chat .assistant-summary-markdown{font-size:13px;line-height:1.85;color:#394c38}
+.chat .verification-brief,.chat .verification-warning{margin-top:9px;font-size:11px;line-height:1.75;color:#657c5d}
+.chat .verification-warning{margin-top:4px;color:#947d50}
+.chat .reply-footer{position:relative;margin-top:12px;padding-top:6px;border-top:1px solid #e3e9dd;min-height:30px}
+.chat .assistant-turn-container{display:block}
+.chat .assistant-turn-summary{font-size:11px;color:#6d846d;line-height:1.5;min-height:24px;align-items:center;gap:5px;max-width:fit-content}
+.chat .assistant-turn-body{margin-top:8px;padding-top:8px;max-height:none;overflow:visible}
+.chat .turn-result-actions,.chat .historical-result-actions{position:absolute;right:-4px;top:6px;margin:0;padding:0;border:0}
+.chat .result-action-row,.chat .completed-compact-actions{gap:7px;flex-wrap:wrap;justify-content:flex-end}
+.chat .turn-result-actions button,.chat .historical-result-actions button{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:24px;padding:2px 4px;border:0;border-radius:4px;font-size:11px;font-weight:400;line-height:1.5;color:#647b61;background:transparent;box-shadow:none;white-space:nowrap}
+.chat .turn-result-actions button:hover{background:#edf2e9;color:#3f6146}
+.chat .turn-result-actions .confirm-btn{color:#486b50;font-weight:500;background:transparent;border:0}
+.chat .turn-result-actions button:focus-visible,.chat summary:focus-visible{outline:2px solid #8ca88a;outline-offset:2px}
+.chat .result-note{font-size:10px;line-height:1.7;margin-top:9px;color:#8c9886}
+.chat .pending-line{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:11px;color:#7b8e73}
+.chat .history-disclosure{cursor:pointer;display:flex;gap:6px;list-style:none;font-size:11px;line-height:1.8;color:#6f826b;padding:9px 11px;background:#fafbf8;border:1px solid #e9ede5;border-radius:7px;overflow-wrap:anywhere}
+.chat .history-disclosure::-webkit-details-marker{display:none}
+.chat .history-disclosure:after{content:'⌄';margin-left:auto}
+.chat .historical[open]>.history-disclosure:after{content:'⌃'}
+.chat .history-body{margin-top:8px;background:#fafbf8}
+.chat .historical-result{margin-top:10px;padding:9px;background:#fff;border:1px solid #e3eadf;border-radius:6px;font-size:11px}
+.chat .historical-result p{margin:7px 0;color:#7c8c76}
+.chat .completed-compact-bar{border:0;padding:0;min-height:24px;background:transparent}
+.chat .completed-compact-status{display:none}
+@media(max-width:600px){
+ .chat .message{gap:7px}
+ .chat .message-avatar{width:21px;height:21px;flex-basis:21px}
+ .chat .message-stack{max-width:calc(100% - 28px)}
+ .chat .message-bubble{padding:10px 11px}
+ .chat .assistant-turn-summary,.chat .turn-result-actions button,.chat .historical-result-actions button{min-height:32px}
+ .chat .reply-footer{min-height:38px}
+}
+@media(prefers-reduced-motion:reduce){.chat .turn-spinner{animation:none}}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { Message, Task, GitStatus, Execution, DeliverySummary, ToolRecord, ReportCheck, Conversation } from './types.ts';
 import type { ChatEntry } from './chat-messages.ts';
 import MarkdownContent from './MarkdownContent.vue';
@@ -66,7 +66,7 @@ const round = computed(() => effectiveEntry.value.round);
 const report = computed(() => round.value?.report);
 
 const roundTools = computed<ToolRecord[]>(() => {
-  if (round.value?.tools?.length) return round.value.tools;
+  if (round.value) return round.value.tools ?? [];
   if (props.isLatest && props.execution?.tools?.length) return props.execution.tools;
   return [];
 });
@@ -95,7 +95,7 @@ const deliveryActive = computed(() => (props.delivery ? isDeliveryActive(props.d
 // Result actions for latest round only
 const presentation = computed(() => {
   if (!props.task) return undefined;
-  return taskState(props.task, props.conversation, props.execution, props.isLatest ? undefined : round.value?.id);
+  return taskState(props.task, props.conversation, props.execution, round.value?.id);
 });
 
 const latestPresentation = computed(() => {
@@ -103,8 +103,18 @@ const latestPresentation = computed(() => {
   return taskState(props.task, props.conversation, props.execution);
 });
 
+const currentResult = computed(() => !!latestPresentation.value?.resultRoundId &&
+  (round.value ? latestPresentation.value.resultRoundId === round.value.id : props.isLatest));
+// A finished chat turn is not necessarily a development result (project chat
+// and task discussion before development have no execution at all).
+const historical = computed(() => !!props.task?.executionId && !!round.value && ['finished','confirmed'].includes(round.value.phase) && !currentResult.value);
+const historicalResultVisible = ref(false);
+const hasDetails = computed(() => !!report.value || !!roundTools.value.length || !!round.value?.reportError || updatesList.value.length > 1);
+const missingChecks = computed(() => (report.value?.checks ?? []).filter(c => c.claim !== 'not_run' && !roundTools.value.some(t => t.id === c.toolId && !!t.result)).length);
+const evidencedChecks = computed(() => (report.value?.checks ?? []).filter(c => roundTools.value.some(t => t.id === c.toolId && !!t.result && !t.failed)).length);
+
 const confirmable = computed(() => {
-  if (!props.isLatest || !latestPresentation.value) return false;
+  if (!currentResult.value || !latestPresentation.value) return false;
   return (
     !deliveryActive.value &&
     latestPresentation.value.status !== 'waiting_user' &&
@@ -113,7 +123,7 @@ const confirmable = computed(() => {
 });
 
 const completedConfirmed = computed(() => {
-  if (!props.isLatest || !latestPresentation.value) return false;
+  if (!currentResult.value || !latestPresentation.value) return false;
   return latestPresentation.value.status === 'completed' && latestPresentation.value.resultConfirmed;
 });
 
@@ -152,18 +162,21 @@ function onPreviewClick() {
 </script>
 
 <template>
-  <div class="assistant-turn-container">
-    <details class="assistant-turn-details">
-      <summary class="assistant-turn-summary" :aria-label="'AI 回复及详情展开'">
-        <span v-if="loading" class="turn-loading-indicator" role="status" aria-label="执行中">
-          <span class="turn-spinner"></span>
-        </span>
-        <div class="turn-summary-wrapper">
-          <MarkdownContent class="assistant-summary-markdown" :text="summary" />
-        </div>
-        <span class="turn-expand-icon" aria-hidden="true">展开详情 ▾</span>
-      </summary>
-
+  <component :is="historical ? 'details' : 'div'" class="assistant-turn-container" :class="{historical}">
+    <summary v-if="historical" class="history-disclosure">上一轮结果 · {{ summary }}</summary>
+    <div class="message-bubble" :class="{'history-body':historical}">
+      <MarkdownContent class="assistant-summary-markdown" :text="summary" />
+      <div v-if="loading" class="pending-line" role="status">
+        <span class="turn-spinner" aria-hidden="true"></span>
+        {{ roundTools.length || report ? '正在开发…' : '正在回复…' }}
+      </div>
+      <p v-if="report?.checks?.length" class="verification-brief">
+        {{ report.checks.length }} 项检查 · {{ evidencedChecks }} 项有执行依据
+      </p>
+      <p v-if="missingChecks" class="verification-warning">{{ missingChecks }} 项缺少本轮依据，待核实</p>
+      <div v-if="hasDetails || currentResult || historical" class="reply-footer">
+    <details v-if="hasDetails" class="assistant-turn-details">
+      <summary class="assistant-turn-summary" aria-label="执行详情">执行详情 <span aria-hidden="true">⌄</span></summary>
       <div class="assistant-turn-body">
         <!-- 1. Report details (if round.report exists) -->
         <div v-if="report" class="round-report-section">
@@ -259,14 +272,13 @@ function onPreviewClick() {
     </details>
 
     <!-- 6. Bottom action bar for latest round only -->
-    <div v-if="isLatest && (confirmable || completedConfirmed)" class="turn-result-actions" role="region" aria-label="成果验收与操作">
+    <div v-if="confirmable || completedConfirmed" class="turn-result-actions" role="region" aria-label="成果验收与操作">
       <template v-if="confirmable">
         <div class="result-action-row">
-          <button type="button" class="primary compact-btn" @click.stop="onPreviewClick">
+          <button type="button" class="compact-btn" @click.stop="onPreviewClick">
             {{ previewButtonLabel }}
           </button>
           <button v-if="preview?.artifacts?.length" type="button" class="compact-btn" :disabled="!online || pending" @click.stop="emit('files', latestPresentation!.resultRoundId!)">文件产物（{{preview.artifacts.length}}）</button>
-          <button v-if="git && !deliveryActive" type="button" class="compact-btn merge-btn" :disabled="!online || pending" @click.stop="emit('merge')">{{ git.state === 'merged' ? '审核推送' : '合并到主分支' }}</button>
           <button type="button" class="compact-btn confirm-btn" :disabled="!online || pending" @click.stop="emit('confirm', latestPresentation!.confirmRoundId!)">
             确认完成
           </button>
@@ -284,18 +296,20 @@ function onPreviewClick() {
               {{ previewButtonLabel }}
             </button>
             <button v-if="preview?.artifacts?.length" type="button" class="compact-btn" :disabled="!online || pending" @click.stop="emit('files', latestPresentation!.resultRoundId!)">文件产物（{{preview.artifacts.length}}）</button>
-            <button
-              v-if="!deliveryActive && git"
-              type="button"
-              class="compact-btn merge-btn"
-              :disabled="!online || pending"
-              @click.stop="emit('merge')"
-            >
-              {{ git?.state === 'merged' ? '审核推送' : '合并到主分支' }}
-            </button>
           </div>
         </div>
       </template>
     </div>
-  </div>
+    <div v-if="historical" class="historical-result-actions">
+      <button type="button" class="compact-btn" :aria-expanded="historicalResultVisible" @click="historicalResultVisible = !historicalResultVisible">查看结果</button>
+    </div>
+      </div>
+      <div v-if="historicalResultVisible && historical" class="historical-result">
+        <strong>历史结果记录</strong>
+        <p>保留的是当轮回复与执行依据，历史网页效果未存档，不代表当前工作区。</p>
+        <MarkdownContent :text="round?.report?.summary || summary" />
+      </div>
+      <p v-if="confirmable" class="result-note">待你验收 · 确认不会提交、合并或推送代码</p>
+    </div>
+  </component>
 </template>

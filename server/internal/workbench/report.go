@@ -149,6 +149,18 @@ func UpdateRound(st *State, id, roundID string, fn func(*Round)) {
 		}
 	}
 }
+
+// LatestDevelopmentRound skips only settled, tool-free ordinary answers.
+// A running, failed or interrupted development round remains a safety barrier.
+func LatestDevelopmentRound(c *Conversation) *Round {
+	for i := len(c.Rounds) - 1; i >= 0; i-- {
+		if c.Rounds[i].Phase != "answered" {
+			return &c.Rounds[i]
+		}
+	}
+	return nil
+}
+
 func ConfirmResult(st *State, c Command) (Receipt, error) {
 	t, ok := st.Tasks[c.TaskID]
 	if !ok || t.ProjectID != c.ProjectID || t.ConversationID != c.ConversationID {
@@ -175,8 +187,8 @@ func ConfirmResult(st *State, c Command) (Receipt, error) {
 		}
 		conv.Rounds = append(conv.Rounds, Round{ID: token, Phase: "finished", StartedAt: x.StartedAt, FinishedAt: x.FinishedAt, Tools: append([]ToolRecord{}, x.Tools...)})
 	}
-	r := &conv.Rounds[len(conv.Rounds)-1]
-	if r.ID != c.RoundID || r.Phase != "finished" {
+	r := LatestDevelopmentRound(&conv)
+	if r == nil || r.ID != c.RoundID || r.Phase != "finished" {
 		return Receipt{}, Conflict("轮次已变化，请核对最新结果")
 	}
 	if x.Phase != "awaiting_review" {

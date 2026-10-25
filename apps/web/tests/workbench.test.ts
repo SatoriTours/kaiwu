@@ -193,6 +193,24 @@ test('only the scoped preview gateway can become an iframe target',async()=>{
 });
 
 import {groupChatMessages,replySummary,messageText,replyLinks,filterChatEntries,turnSummary} from '../src/chat-messages.ts';
+
+test('ordinary answers retain Markdown, code and all paragraphs instead of a two-sentence digest', () => {
+ const text = '这里解释实现方式。\\n\\n- 第一项\\n- 第二项\\n\\n```go\\nfmt.Println("world")\\n```\\n\\n最后一段同样可见。'.replaceAll('\\n','\n');
+ const entry:any = {id:'a',role:'assistant',message:{id:'a',role:'assistant',text,delivery:'complete'},updates:[]};
+ assert.equal(turnSummary(entry), text);
+});
+
+test('ordinary answered rounds do not replace the development result or its confirmation', async () => {
+ const {taskState} = await import('../src/task-state.ts');
+ const task:any = {status:'needs_confirmation',executionId:'x'};
+ const c:any = {runState:'idle', messages:[],rounds:[{id:'dev',phase:'finished',tools:[]},{id:'qa',phase:'answered',tools:[]}]};
+ const x:any = {id:'x',phase:'awaiting_review',finishedAt:'done',tools:[]};
+ assert.equal(taskState(task,c,x).confirmRoundId,'dev');
+ assert.equal(taskState(task,c,x).resultRoundId,'dev');
+ c.rounds.push({id:'new-development',phase:'running',tools:[]});
+ c.runState='running';
+ assert.equal(taskState(task,c,x).confirmRoundId,undefined);
+});
 test('chat grouping merges all progress and final messages per user turn into one AI bubble', () => {
  const messages = [
   { id: 'u1', role: 'user', text: '开发接口', delivery: 'complete' },
@@ -255,6 +273,7 @@ test('turnSummary uses report.summary when present, or 1-2 sentence status/reply
  const entryRunning: any = {
   id: 'a2',
   role: 'assistant',
+  round: {id:'u2',tools:[{id:'tool'}]},
   loading: true,
   message: { id: 'p1', role: 'assistant', kind: 'progress', text: '正在验证接口路由与数据库连接。\n\n具体执行：npm test -- --grep route', delivery: 'complete' },
  };
@@ -270,10 +289,11 @@ test('turnSummary uses report.summary when present, or 1-2 sentence status/reply
  };
  assert.equal(turnSummary(entryPlaceholder), '正在准备启动…');
 
- // Case 4: Raw text with code blocks stripped to 1-2 sentences
+ // Case 4: Development text with code blocks stripped to 1-2 sentences
  const entryCode: any = {
   id: 'a3',
   role: 'assistant',
+  round: {id:'u3',tools:[{id:'tool'}]},
   message: { id: 'm3', role: 'assistant', text: '服务已正常运行。请在浏览器测试。\n```bash\ncurl http://localhost:8000\n```\n更多详情见日志。', delivery: 'complete' },
  };
  assert.equal(turnSummary(entryCode), '服务已正常运行。请在浏览器测试。');
@@ -303,6 +323,7 @@ $ go test ./...
  const entryCmd: any = {
   id: 'a-cmd',
   role: 'assistant',
+  round: {id:'u-cmd',tools:[{id:'tool'}]},
   message: { id: 'm-cmd', role: 'assistant', text: commandSummary, delivery: 'complete' },
  };
  const sCmd = turnSummary(entryCmd);

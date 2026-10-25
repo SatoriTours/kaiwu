@@ -44,6 +44,50 @@ func settleExecution(st *workbench.State, id, responseID string, resumed bool) {
 	if !ok {
 		return
 	}
+	// No tools, report or interaction means this settled turn only answered a
+	// question. It cannot replace a real development result with an acceptance card.
+	c := st.Conversations[id]
+	if !resumed && len(c.Rounds) > 1 {
+		last := &c.Rounds[len(c.Rounds)-1]
+		previousConversation := c
+		previousConversation.Rounds = c.Rounds[:len(c.Rounds)-1]
+		previous := workbench.LatestDevelopmentRound(&previousConversation)
+		if previous != nil && (previous.Phase == "finished" || previous.Phase == "confirmed") &&
+			len(last.Tools) == 0 && last.Report == nil && last.ReportError == "" &&
+			last.InteractionError == "" && last.Origin == "" {
+			last.Phase = "answered"
+			x.Phase = "awaiting_review"
+			t.Status = "needs_confirmation"
+			if previous.Phase == "confirmed" {
+				x.Phase = "confirmed"
+				t.Status = "completed"
+			}
+			x.Error = ""
+			x.FinishedAt = previous.FinishedAt
+			x.Tools = append([]workbench.ToolRecord{}, previous.Tools...)
+			x.Summary = ""
+			active := false
+			for _, msg := range c.Messages {
+				if msg.ID == previous.ID {
+					active = true
+					continue
+				}
+				if active && msg.Role == "user" {
+					break
+				}
+				if active && msg.Role == "assistant" {
+					x.Summary = msg.Text
+				}
+			}
+			if previous.Report != nil {
+				x.Summary = previous.Report.Summary
+			}
+			st.Conversations[id] = c
+			st.Executions[x.ID] = x
+			st.Tasks[t.ID] = t
+			return
+		}
+	}
 	x.Phase = "awaiting_review"
 	x.Error = ""
 	t.Status = "needs_confirmation"

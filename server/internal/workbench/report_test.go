@@ -52,6 +52,16 @@ func TestRoundKeepsPreviousResultAndConfirmationRequiresLatestFinishedRound(t *t
 	}
 }
 
+func TestConfirmationAfterOrdinaryAnswerTargetsDevelopmentRound(t *testing.T) {
+	st := State{Tasks: map[string]Task{"t": {ID: "t", ProjectID: "p", ConversationID: "c", ExecutionID: "x", Status: "needs_confirmation"}}, Conversations: map[string]Conversation{"c": {ID: "c", RunState: "idle", Rounds: []Round{{ID: "dev", Phase: "finished"}, {ID: "qa", Phase: "answered"}}}}, Executions: map[string]Execution{"x": {ID: "x", Phase: "awaiting_review"}}}
+	if _, err := ConfirmResult(&st, Command{TaskID: "t", ProjectID: "p", ConversationID: "c", RoundID: "dev"}); err != nil {
+		t.Fatal(err)
+	}
+	if st.Conversations["c"].Rounds[0].Phase != "confirmed" || st.Conversations["c"].Rounds[1].Phase != "answered" {
+		t.Fatal("wrong round confirmed")
+	}
+}
+
 func TestRoundRestartPreservesReportAndEndsInterruptedRound(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "db")
 	s, e := Open(path, Profile{})

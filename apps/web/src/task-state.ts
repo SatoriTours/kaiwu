@@ -5,7 +5,7 @@ import {hasBlockingPendingInteraction} from './interaction.ts';
 // persisted, finished development result are independent facts.
 export function taskState(task:Task, conversation?:Conversation, execution?:Execution, selectedRoundId?:string) {
  const rounds=conversation?.rounds??[];
- const latest=rounds.at(-1);
+ const latest=[...rounds].reverse().find(r=>r.phase!=='answered');
  const round=selectedRoundId?rounds.find(r=>r.id===selectedRoundId):latest;
  const busy=['starting','running'].includes(conversation?.runState??'');
  const hasBlocking=hasBlockingPendingInteraction(conversation?.interactions);

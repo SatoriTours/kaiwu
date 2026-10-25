@@ -128,8 +128,8 @@ func (m *Manager) target(req Request) (string, error) {
 			return "", workbench.Conflict("没有最新已结束轮次可供预览")
 		}
 	} else {
-		r := c.Rounds[len(c.Rounds)-1]
-		if req.RoundID != r.ID || (r.Phase != "finished" && r.Phase != "confirmed") {
+		r := workbench.LatestDevelopmentRound(&c)
+		if r == nil || req.RoundID != r.ID || (r.Phase != "finished" && r.Phase != "confirmed") {
 			return "", workbench.Conflict("仅能预览最新已结束轮次；历史效果未存档")
 		}
 	}

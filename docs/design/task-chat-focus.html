@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>开悟 · 继续开发与问答状态（设计稿 V5）</title>
+<!-- Reuse the current product styles. Do not redesign the board or global layout. -->
+<link rel="stylesheet" href="../../apps/web/src/style.css">
+<link rel="stylesheet" href="../../apps/web/src/progress.css">
+<style>
+/* Header component styles follow ProjectMenu.vue; all other global/board styles
+   come directly from the existing product CSS above. */
+.project-trigger{display:flex;align-items:center;gap:8px;min-height:30px;padding:4px 8px;border:1px solid transparent;border-radius:7px;background:transparent;font-size:12px;text-align:left}.project-trigger svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.project-chevron{color:#8a938e;font-size:11px}.design-badge{font-size:10px!important;border:1px solid #dbe2dc!important;background:#f7faf7!important;border-radius:5px}body .mobile-switch #show-board,body .mobile-switch #show-chat{background:white;color:inherit}.mobile-switch #show-board.active,.mobile-switch #show-chat.active{background:#f1f4f2;color:#507363}.task-number{max-width:110px;overflow:hidden;text-overflow:ellipsis}.design-help{font-size:10px;color:#849087;margin-left:auto;white-space:nowrap}.board-bottom{display:flex;align-items:center;gap:8px}
+/* Proposed changes are scoped to the right-hand conversation. */
+.chat .chat-head .chat-actions{justify-content:flex-end;gap:6px}.chat .head-subline{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;color:#8a938b;font-size:10px;line-height:1.5}.chat .head-subline button{border:0;background:transparent;padding:0;min-height:19px;font-size:10px;color:#708675}.chat .chat-filter-bar{padding-top:4px;padding-bottom:4px}.chat .chat-filter-btn{min-height:24px;font-size:10px}.chat .messages{padding-top:20px}.chat .message .text p+p{margin-top:7px}.chat .reply-summary{font-size:13px;line-height:1.85;overflow-wrap:anywhere}.chat .reply-summary p+p{margin-top:7px}.chat .reply-summary ul{padding-left:18px;margin:8px 0}.chat .reply-summary li{margin:2px 0}.chat .result-actions{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:12px}.chat .result-actions button{font-size:11px;min-height:28px;padding:4px 9px}.chat .result-note{font-size:10px;color:#8d978c;margin-top:8px}.chat .execution-details{margin-top:13px;padding-top:9px;border-top:1px solid #edf1e9;font-size:11px;line-height:1.8}.chat .execution-details>summary{cursor:pointer;list-style:none;color:#6d846d;display:flex;align-items:center;gap:6px}.chat .execution-details>summary::-webkit-details-marker{display:none}.chat .execution-details>summary:before{content:'›';font-size:16px;line-height:1}.chat .execution-details[open]>summary:before{transform:rotate(90deg)}.chat .execution-details>summary small{margin-left:auto;font-size:9px;color:#98a18f}.chat .execution-body{padding-top:12px;overflow:visible;max-height:none}.chat .execution-body h3{font-size:11px;color:#5f775e;margin-bottom:5px}.chat .execution-body section+section{margin-top:16px}.chat .execution-body p{margin:6px 0}.chat .execution-body ul{padding-left:18px;margin:6px 0}.chat .check-row{font-size:11px}.chat .check-row small{font-size:9px;white-space:nowrap}.chat .check-row p{font-size:10px;color:#8e9785;margin:4px 0 0}.chat .check-row .missing{color:#9a8359}.chat .execution-body details{margin-top:9px}.chat .execution-body details summary{cursor:pointer;color:#788d71}.chat code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.92em;background:#f3f5f0;padding:1px 3px;border-radius:3px;overflow-wrap:anywhere}.chat pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:10px;background:#f6f8f3;border:1px solid #e7ece2;border-radius:6px;padding:10px;margin:9px 0;line-height:1.8}.chat .confirmed{font-size:11px;color:#5d7b61;margin-top:11px}.chat .confirmed:before{content:'✓';margin-right:6px}.chat .pending-line{display:flex;align-items:center;gap:7px;margin:10px 0;color:#7b8e73;font-size:11px}.chat .spinner{height:11px;width:11px;border:1.5px solid #dce6d6;border-top-color:#77936c;border-radius:50%;animation:spin 1.2s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.chat .inline-result{margin-top:12px;padding:11px;background:#fafcf8;border:1px solid #e3eadf;border-radius:7px;font-size:11px}.chat .inline-result h3{font-size:11px;margin-bottom:6px}.chat .inline-result p{color:#7c8c76;margin-top:6px}.chat .question-jump{display:block;border:0;background:transparent;color:#789070;font-size:10px;padding:5px 0;min-height:24px}.chat .question-jump[hidden]{display:none}.chat .question-only .message.assistant{display:none}.chat .question-only .message.user{margin-bottom:24px}.chat .context-label{display:flex;justify-content:space-between;gap:8px}.chat .context-label button{padding:0;border:0;min-height:16px;background:transparent;font-size:11px;color:#8e9b90}.chat #send{font-size:11px;min-height:28px}.chat .model-picker{border:0;background:transparent;color:#859080;font-size:10px;padding:0;min-height:20px}.design-dialog h2{font-size:16px}.design-dialog h3{font-size:12px;margin:17px 0 6px}.design-dialog p{font-size:12px;line-height:1.8;color:#7d877d;margin-top:9px}.design-dialog ul{font-size:12px;color:#6c7d6c;padding-left:20px;line-height:1.9}.state-choices{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.state-choices button{font-size:11px}.state-choices [aria-pressed=true]{background:#edf4e9;border-color:#a8bea0}.dialog-actions button{font-size:11px}.design-dialog code{overflow-wrap:anywhere}.chat .state-chip{font-size:9px;padding:1px 5px;border-radius:4px;background:#fff0df;color:#ac6a2d;white-space:nowrap}.chat .state-chip[data-status=completed]{background:#eaf4ee;color:#4f8765}.chat .state-chip[data-status=running]{background:#f8f1db;color:#937c25}.chat .state-chip[data-status=failed]{background:#fceeed;color:#b56260}
+/* V3: role, message and message status form one group; user right / AI left. */
+.chat .messages{background:#fdfefd}
+.chat .message{display:flex;align-items:flex-start;gap:8px;margin:0 0 23px;min-width:0}
+.chat .message.user{margin-left:0;justify-content:flex-end}
+.chat .message-stack{min-width:0;max-width:calc(100% - 43px)}
+.chat .message.user .message-stack{max-width:84%;display:flex;flex-direction:column;align-items:flex-end}
+.chat .message-avatar{width:23px;height:23px;flex:0 0 23px;display:grid;place-items:center;border-radius:7px;font-size:11px;margin-top:24px;background:#eaf0e7;color:#5d785f}
+.chat .message.user .message-avatar{background:#e2ebe2;color:#526b57;font-size:10px}
+.chat .message-meta{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:10px;line-height:18px;color:#85917f}
+.chat .message-meta strong{font-weight:550;color:#5b725e;font-size:10px}
+.chat .message-meta time{font-size:9px;color:#9aa496;margin-left:3px;font-variant-numeric:tabular-nums}
+.chat .message.user .message-meta{justify-content:flex-end}
+.chat .message-bubble{background:#f7f9f5;border:1px solid #e7ece3;border-radius:3px 11px 11px 11px;padding:11px 13px;font-size:13px;line-height:1.8;overflow-wrap:anywhere;min-width:0}
+.chat .message.user .text{width:fit-content;max-width:100%;background:#eaf1e7;border:1px solid #e1e9dc;border-radius:11px 3px 11px 11px;padding:10px 13px;color:#3e5140;font-size:13px;line-height:1.8}
+.chat .message-status{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:9px;line-height:1.6;color:#93a08d;margin-top:6px;padding:0 2px}
+.chat .message.user .message-status{justify-content:flex-end}
+.chat .message-status .question-jump{font-size:10px;min-height:20px;padding:0}
+.chat .reply-summary{font-size:13px;line-height:1.8}
+.chat .result-title{font-size:13px;font-weight:550;display:block;margin-bottom:7px;color:#3f5942}
+.chat .verification-brief,.chat .verification-warning{display:flex;gap:7px;align-items:flex-start;margin-top:10px;font-size:11px;line-height:1.75;color:#657c5d}
+.chat .verification-warning{margin-top:5px;color:#947d50}
+.chat .verification-mark{font-size:10px;flex:0 0 12px;width:12px;text-align:center;font-weight:600}
+/* V4: one quiet footer, not a second block of form buttons. */
+.chat .reply-footer{position:relative;margin-top:12px;padding-top:6px;border-top:1px solid #e3e9dd}
+.chat .reply-footer .execution-details{margin:0;padding:0;border:0}
+.chat .reply-footer .execution-details>summary{min-height:24px;padding-right:154px;flex-wrap:nowrap;white-space:nowrap;font-size:11px}
+.chat .reply-footer .execution-details>summary small{display:none}
+.chat .reply-footer .execution-body{padding-top:11px}
+.chat .result-actions{position:absolute;right:-4px;top:6px;margin:0;gap:8px;flex-wrap:nowrap}
+.chat .result-actions button{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:24px;padding:2px 4px;border:0;border-radius:4px;font-size:11px;font-weight:400;line-height:1.5;color:#647b61;background:transparent;box-shadow:none;white-space:nowrap}
+.chat .result-actions button:hover{background:#edf2e9;color:#3f6146}
+.chat .result-actions .confirm-action{color:#486b50;font-weight:500}
+.chat .result-actions .action-icon{display:inline-block;font-size:12px;line-height:1;width:11px;text-align:center;color:inherit}
+.chat .reply-footer .inline-result{margin-top:10px}
+.chat .result-note{font-size:10px;line-height:1.7;margin-top:9px;color:#8c9886}
+.chat .execution-details{margin-top:13px;padding-top:10px;border-top:1px solid #e3e9dd}
+.chat .execution-details>summary{font-size:10px;gap:5px;flex-wrap:wrap}
+.chat .execution-details>summary small{font-size:9px;color:#9aa58f;margin-left:4px}
+.chat .inline-result{background:#fff}
+.chat .message.latest .message-status{color:#829379}
+.chat .confirmed{font-size:11px}
+.chat .question-only .message.user{margin-bottom:23px}
+@media(max-width:599px){
+ .chat .message-stack{max-width:calc(100% - 38px)}
+ .chat .message.user .message-stack{max-width:84%}
+ .chat .message{gap:7px}
+ .chat .message-avatar{width:21px;height:21px;flex-basis:21px}
+ .chat .message-bubble{padding:10px 11px}
+ .chat .message.user .text{padding:10px 11px}
+ .chat .result-actions{gap:6px}
+ .chat .result-actions button{min-height:32px;padding:4px 3px}
+ .chat .reply-footer .execution-details>summary{min-height:32px}
+}
+@media(max-width:1023px){.app.chat-visible .chat{display:flex}.app.chat-visible .board-side{display:none}.app:not(.chat-visible) .board-side{display:flex}.chat .head-subline{font-size:10px}.design-help{display:none}}
+@media(max-width:599px){.project-trigger{font-size:11px;gap:6px;min-width:0;max-width:150px}.project-trigger .project-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.top{padding-left:14px;padding-right:14px}.global-actions .logout{display:none}.chat .reply-summary{font-size:13px}.chat .chat-head .chat-actions{gap:3px}.chat .chat-actions .return{white-space:nowrap;font-size:9px}.chat .head-subline .git-fact{max-width:65%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chat .execution-details>summary small{font-size:9px}.chat .messages{padding-top:16px}.chat .composer{padding-bottom:12px}.chat .composer-tip{font-size:9px}}
+.chat .history-disclosure>summary{cursor:pointer;display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;list-style:none;font-size:11px;line-height:1.8;color:#6f826b}
+.chat .history-disclosure>summary::-webkit-details-marker{display:none}
+.chat .history-disclosure>summary:after{content:'⌄';margin-left:auto;color:#99a28f}
+.chat .history-disclosure[open]>summary:after{content:'⌃'}
+.chat .history-label{font-size:9px;color:#94a08b}
+.chat .history-body{margin-top:12px;padding-top:10px;border-top:1px solid #e3e9dd}
+.chat .message.historical .message-bubble{background:#fafbf8;border-color:#e9ede5}
+.chat .message.historical .message-status{color:#9ba490}
+.chat .stream-cursor{display:inline-block;width:2px;height:13px;margin-left:4px;background:#849b77;vertical-align:-2px;animation:cursor-pulse 1s ease-in-out infinite}
+.chat .reply-summary .explanation-list{margin-top:9px;margin-bottom:0}
+.chat .followup-note{font-size:11px;line-height:1.8;color:#86947d;margin-top:10px}
+.chat .example-stage-line{display:flex;align-items:center;gap:6px;font-size:11px;color:#6e8465;margin-top:11px}
+@keyframes cursor-pulse{50%{opacity:.25}}
+@media(prefers-reduced-motion:reduce){.chat .spinner,.chat .stream-cursor{animation:none}}
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="logo" aria-hidden="true">悟</span><span class="brand">开悟</span><span class="slash">/</span>
+  <button class="project-trigger" title="示例项目 · 保留现有项目菜单样式"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg><span class="project-name">Hello · 接口示例</span><span class="project-chevron">⌄</span></button>
+  <div class="global-actions"><button class="design-badge" data-open="design-notes" title="查看设计范围与状态示例">设计稿 V5 ⓘ</button><button>默认模型</button><span class="connection">● 已连接</span><button class="logout">退出</button></div>
+</header>
+<nav class="mobile-switch" aria-label="看板与聊天"><button id="show-board">▦ 看板</button><button id="show-chat" class="active">◌ 聊天</button></nav>
+<div class="app">
+  <section class="board-side" aria-label="项目任务看板">
+    <div class="toolbar"><h1>项目看板</h1><span class="running">6 个任务</span><button>＋ 专题</button><button class="primary">＋ 任务</button></div>
+    <div class="board" id="board">
+      <section class="column" aria-label="接口开发">
+        <header class="column-head"><span class="column-dot"></span><h2>接口开发</h2><span class="count">3</span><div class="column-actions"><button class="icon" aria-label="接口开发专题菜单">⋯</button><button class="icon" aria-label="在接口开发新建任务">＋</button></div></header>
+        <div class="column-cards">
+          <article class="task-card selected" data-taskid="hello"><button class="task-select" aria-pressed="true"><div class="task-top"><span class="task-number">KW-hello</span><span class="task-status selected-status" data-status="needs_confirmation">待验收</span></div><h3>实现 /hello 接口</h3></button><div class="task-bottom"><span class="owner"><span class="avatar">π</span>pi</span><span class="git-state" data-git-state="dirty"><i class="git-state-dot"></i>待提交</span><button class="merge-task" aria-label="审核合并"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M6 7v10M18 7c0 7-12 2-12 9"/></svg></button><button class="start-task" aria-label="查看当前任务结果">→</button></div></article>
+          <article class="task-card"><button class="task-select"><div class="task-top"><span class="task-number">KW-health</span><span class="task-status" data-status="idle">未开始</span></div><h3>增加健康检查接口</h3></button><div class="task-bottom"><span class="owner"><span class="avatar">π</span>pi</span><button class="start-task" aria-label="开始健康检查任务">▷</button></div></article>
+          <article class="task-card"><button class="task-select"><div class="task-top"><span class="task-number">KW-errors</span><span class="task-status" data-status="completed">已完成</span></div><h3>统一错误响应格式</h3></button><div class="task-bottom"><span class="owner"><span class="avatar">π</span>pi</span><span class="git-state" data-git-state="merged"><i class="git-state-dot"></i>已合并</span><button class="start-task" aria-label="查看错误响应任务">→</button></div></article>
+        </div>
+      </section>
+      <section class="column" aria-label="工程基础">
+        <header class="column-head"><span class="column-dot"></span><h2>工程基础</h2><span class="count">2</span><div class="column-actions"><button class="icon" aria-label="工程基础专题菜单">⋯</button><button class="icon" aria-label="在工程基础新建任务">＋</button></div></header>
+        <div class="column-cards">
+          <article class="task-card"><button class="task-select"><div class="task-top"><span class="task-number">KW-config</span><span class="task-status" data-status="running">执行中</span></div><h3>支持配置服务监听地址</h3></button><div class="task-bottom"><span class="owner"><span class="avatar">π</span>pi</span><span class="git-state" data-git-state="dirty"><i class="git-state-dot"></i>待提交</span><button class="start-task" aria-label="查看配置任务">◌</button></div></article>
+          <article class="task-card"><button class="task-select"><div class="task-top"><span class="task-number">KW-tests</span><span class="task-status" data-status="idle">未开始</span></div><h3>补充接口测试用例</h3></button><div class="task-bottom"><span class="owner"><span class="avatar">π</span>pi</span><button class="start-task" aria-label="开始测试任务">▷</button></div></article>
+        </div>
+      </section>
+      <section class="column" aria-label="其他">
+        <header class="column-head"><span class="column-dot"></span><h2>其他</h2><span class="count">1</span><div class="column-actions"><button class="icon" aria-label="在其他新建任务">＋</button></div></header>
+        <div class="column-cards"><article class="task-card"><button class="task-select"><div class="task-top"><span class="task-number">KW-readme</span><span class="task-status" data-status="idle">未开始</span></div><h3>整理本地运行说明</h3></button><div class="task-bottom"><span class="owner"><span class="avatar">π</span>pi</span><button class="start-task" aria-label="开始运行说明任务">▷</button></div></article></div>
+      </section>
+    </div>
+    <div class="board-bottom"><span>专题组织任务 · 选择卡片沟通 · 点击开始开发执行任务</span><span class="design-help">设计稿 · 仅调整右侧聊天</span></div>
+  </section>
+  <aside class="chat" id="chat" aria-label="任务聊天设计">
+    <header class="chat-head">
+      <div class="row"><span class="avatar">π</span><div><h2 id="chat-title">任务对话 · 实现 /hello 接口</h2></div></div>
+      <div class="chat-actions"><button class="merge-task" data-open="merge-notes" aria-label="审核合并" title="审核合并"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M6 7v10M18 7c0 7-12 2-12 9"/></svg></button><button class="return" title="设计稿只展示当前任务">← 返回项目对话</button></div>
+      <div class="head-subline"><span><span class="state-chip" data-status="needs_confirmation">待验收</span> <span class="git-fact">5 个文件待提交 · main</span></span><button data-open="task-notes">任务信息 ⌄</button></div>
+    </header>
+    <div class="chat-filter-bar" role="toolbar" aria-label="聊天过滤"><div class="chat-filter-tabs"><button class="chat-filter-btn active" data-filter="all" aria-pressed="true">全部</button><button class="chat-filter-btn" data-filter="questions" aria-pressed="false">只看我的问题</button></div><span class="chat-filter-count"></span></div>
+    <div class="messages" tabindex="0" aria-label="当前任务对话">
+      <article class="message user" id="question-1" aria-label="你的消息">
+        <div class="message-stack"><div class="message-meta"><strong>你</strong><time>14:32</time></div><div class="text message-bubble">使用 Go 开发一个 Web 服务，目前只要一个 /hello 接口，返回 world。</div><div class="message-status"><span>已发送</span><button class="question-jump" hidden data-locate="question-1">查看此问题的回复 ↗</button></div></div><span class="message-avatar" aria-hidden="true">我</span>
+      </article>
+      <article class="message assistant" aria-label="AI 的回复">
+        <span class="message-avatar" aria-hidden="true">π</span><div class="message-stack"><div class="message-meta"><strong>pi</strong><span>任务 Agent</span><time>14:32</time></div><div class="text message-bubble">我会先完成接口和测试，再核对 HTTP 响应。代码在这个任务的独立工作区中修改。</div></div>
+      </article>
+      <article class="message user" id="question-2" aria-label="你的消息">
+        <div class="message-stack"><div class="message-meta"><strong>你</strong><time>14:34</time></div><div class="text message-bubble">继续验证，确认服务能正常运行。</div><div class="message-status"><span>已发送</span><button class="question-jump" hidden data-locate="question-2">查看此问题的回复 ↗</button></div></div><span class="message-avatar" aria-hidden="true">我</span>
+      </article>
+      <article class="message assistant latest" aria-label="AI 的本轮结果">
+        <span class="message-avatar" aria-hidden="true">π</span><div class="message-stack"><div class="message-meta"><strong>pi</strong><span>任务 Agent</span><time>14:35</time></div><div id="latest-reply" class="message-bubble"></div><div class="message-status"><span class="reply-delivery">本轮结束 · 待你确认</span></div></div>
+      </article>
+    </div>
+    <div class="composer"><div class="context-label"><span>发送至任务 实现 /hello 接口</span><button title="设计稿保留现有输入框位置">◎</button></div><div class="editor"><textarea aria-label="当前任务草稿（设计稿不发送）" placeholder="补充这个任务的要求……"></textarea><div class="row"><button class="model-picker">pi · 示例模型 ⌄</button><button class="primary" id="send" disabled>发送 ↑</button></div></div><div class="composer-tip">Enter 发送 · Shift + Enter 换行 · 设计稿不连接真实会话</div></div>
+  </aside>
+</div>
+<dialog class="design-dialog" id="design-notes" aria-labelledby="design-title"><h2 id="design-title">V5 · 看结果，也能继续沟通</h2><p>左侧 Kanban、顶栏、左右比例与“你在右、AI 在左”的消息布局不变。只精简 AI 结果气泡底部，所有内容均为设计示例。</p><h3>本轮视觉调整</h3><ul><li>移除深色实心块和白色描边块，改为文字＋小图标。</li><li>“执行详情、查看结果、确认完成”收在同一行，正文始终是主角。</li><li>不重复常驻一整句操作说明；确认按钮的悬停提示与任务信息保留“确认不等于提交／合并”的边界。</li><li>桌面操作区域高 24px；手机保留 32px 点击高度，但不画大按钮底色。展开详情仍随聊天滚动。</li></ul><h3>查看任务状态示例</h3><div class="state-choices"><button data-state="running" aria-pressed="false">执行中</button><button data-state="review" aria-pressed="true">待验收</button><button data-state="done" aria-pressed="false">已完成</button><button data-state="failed" aria-pressed="false">执行失败</button></div><h3>不满意以后，或者只是提个问题</h3><div class="state-choices"><button data-scene="continue" aria-pressed="false">继续修改中</button><button data-scene="revised" aria-pressed="false">修改后待验收</button><button data-scene="qa" aria-pressed="false">普通问答</button><button data-scene="answering" aria-pressed="false">正在回答</button></div><p>明确要求修改后，旧结果留作历史，不再显示旧的确认入口；只提解释性问题时，原开发结果仍待验收，新回答不附带验收操作。正在回答只展示部分正文与回复提示，不伪装成正在改代码。</p><p>全部为固定示例，不会真正流式生成、调用模型、修改文件或执行 Git。顶部“设计稿”入口可随时切换示例，输入框仅保留草稿演示。</p><div class="dialog-actions"><button class="primary" data-close>返回设计稿</button></div></dialog>
+<dialog class="design-dialog" id="task-notes" aria-labelledby="task-info-title"><h2 id="task-info-title">任务信息</h2><h3>原始要求</h3><p>使用 Go 开发一个 Web 服务，目前只需一个 /hello 接口，返回 world。</p><h3>工作区与 Git</h3><p>原任务独立工作区 · 目标分支 main。5 个文件待提交，未合并，未推送。</p><p>任务信息按需打开，不在聊天顶部重复整篇报告。</p><div class="dialog-actions"><button class="primary" data-close>关闭</button></div></dialog>
+<dialog class="design-dialog" id="merge-notes" aria-labelledby="merge-title"><h2 id="merge-title">保留现有 Git 审核入口</h2><p>确认任务结果与提交、合并、推送是不同操作。此入口沿用现有审核流程；本稿不重新设计审核，也不会执行 Git。</p><div class="dialog-actions"><button class="primary" data-close>关闭</button></div></dialog>
+<template id="evidence-template">
+  <details class="execution-details"><summary>执行详情 <small>方案 · 验证 · 记录</small></summary><div class="execution-body">
+    <section><h3>本轮做了什么</h3><p>沿用原任务会话，验证现有 /hello 实现。未改任务归属，没有新建执行会话。</p><ul><li>检查工具链、运行测试与构建。</li><li>临时启动服务，检查 GET、HEAD 和未知路由。</li><li>结束进程并释放端口。</li></ul></section>
+    <section><h3>验证与依据</h3><div class="check-row"><div class="row between"><span>Go 单元测试 · 4 个用例</span><small>命令退出 0</small></div><p><code>GOTOOLCHAIN=local go test ./...</code><br>工具返回：ok helloserver（示例）</p></div><div class="check-row"><div class="row between"><span>静态检查与构建</span><small>命令退出 0</small></div><p><code>go vet ./...</code>、<code>go build</code></p></div><div class="check-row"><div class="row between"><span>GET /hello</span><small>工具返回 200</small></div><p>正文 world · text/plain; charset=utf-8</p></div><div class="check-row"><div class="row between"><span>格式检查</span><small>AI 报告通过</small></div><p class="missing">缺少本轮关联工具依据，结果仍待核实。<br>AI 的声明与真实执行证据分开呈现。</p></div></section>
+    <section><h3>修改与 Git</h3><p>5 个文件待提交 · main。未提交、未合并、未推送；不展示源码或 diff。</p></section>
+    <details><summary>查看工具输出</summary><pre>$ curl -i http://127.0.0.1:33725/hello
+HTTP/1.1 200 OK
+Content-Type: text/plain; charset=utf-8
+
+world
+
+临时服务已停止，端口已释放。
+以上全部为设计示例，不是本次实际执行记录。</pre></details>
+    <details><summary>查看本轮完整回复</summary><p>在原任务工作区继续验证现有实现。4 个测试、静态检查和构建通过，临时回环 HTTP 检查返回 200 与正文 world；HEAD 无正文，未知路径返回 404。格式检查缺少关联工具依据，仍待核实。临时服务已停止，未提交或合并。</p></details>
+  </div></details>
+</template>
+<script>
+// Static, in-memory prototype. No model requests, API calls, storage or Git.
+const app=document.querySelector('.app'), messages=document.querySelector('.messages');
+const baseMessagesHTML=messages.innerHTML;
+let reply=document.querySelector('#latest-reply');
+const stateMap={running:['执行中','running'],review:['待验收','needs_confirmation'],done:['已完成','completed'],failed:['执行失败','failed']};
+function setTaskBadge(state){
+ const [label,status]=stateMap[state];
+ document.querySelectorAll('.selected-status,.state-chip').forEach(el=>{el.textContent=label;el.dataset.status=status;});
+}
+function render(state){
+ messages.innerHTML=baseMessagesHTML;
+ reply=document.querySelector('#latest-reply');
+ document.querySelectorAll('[data-scene]').forEach(b=>b.setAttribute('aria-pressed','false'));
+ setFilter('all');
+ document.querySelectorAll('[data-state]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.state===state)));
+ setTaskBadge(state);
+ document.querySelector('.reply-delivery').textContent=({running:'执行中 · 尚未形成结果',review:'本轮结束 · 待你确认',done:'本轮结果已确认 · 尚未合并',failed:'本轮失败 · 可继续原任务'})[state];
+ const content={
+  review:'<div class="reply-summary"><strong class="result-title">/hello 已实现</strong><p>GET 返回 <code>200</code>，正文为 <code>world</code>。临时测试服务已停止。</p><div class="verification-brief"><span class="verification-mark" aria-hidden="true">✓</span><span>4 个测试、静态检查与构建通过</span></div><div class="verification-warning"><span class="verification-mark" aria-hidden="true">!</span><span>格式检查缺少依据，待核实</span></div></div><div class="result-actions"><button data-action="result" aria-expanded="false">查看结果<span class="action-icon" aria-hidden="true">↗</span></button><button class="confirm-action" data-action="confirm" title="仅确认本轮任务结果，不会提交、合并或推送代码" aria-label="确认完成（不提交或合并代码）"><span class="action-icon" aria-hidden="true">✓</span>确认完成</button></div>',
+  done:'<div class="reply-summary"><strong class="result-title">/hello 已实现</strong><p>测试与 HTTP 响应检查通过，临时服务已停止。格式检查依据仍待补。</p></div><p class="confirmed">你已确认本轮结果</p><div class="result-actions"><button data-action="result" aria-expanded="false">查看结果<span class="action-icon" aria-hidden="true">↗</span></button><button data-open="merge-notes">审核合并<span class="action-icon" aria-hidden="true">↗</span></button></div>',
+  running:'<div class="reply-summary"><p>接口已实现，正在检查测试与真实 HTTP 响应。</p></div><div class="pending-line" role="status"><span class="spinner"></span>正在运行 go test ./...</div><p class="result-note">切换任务只改变聊天目标，不会停止执行。</p><details class="execution-details"><summary>查看本轮过程</summary><div class="execution-body"><p>已完成接口实现，测试命令执行中。尚无最终验证结论。</p></div></details>',
+  failed:'<div class="reply-summary"><p>本轮验证未完成，没有产生可确认的新结果。</p></div><div class="chat-failure" style="margin-top:12px"><strong class="chat-failure-title">未找到 Go 工具链</strong><p class="chat-failure-reason"><code>go: command not found</code></p><small class="chat-failure-hint">现有文件和原会话保留，修复环境后发送新消息即可继续。</small></div><details class="execution-details"><summary>查看失败记录</summary><div class="execution-body"><pre>$ go test ./...\ngo: command not found\nexit code: 127</pre><p>示例错误依据；没有自动重试或确认结果。</p></div></details>'
+ };
+ reply.innerHTML=content[state];
+ if(['review','done'].includes(state)){
+  const footer=document.createElement('div');footer.className='reply-footer';
+  footer.append(document.querySelector('#evidence-template').content.cloneNode(true));
+  footer.append(reply.querySelector('.result-actions'));
+  reply.append(footer);
+ }
+}
+function appendExampleUser(text){
+ const node=document.createElement('article');node.className='message user example-question';node.id='question-3';node.setAttribute('aria-label','你的后续消息');
+ node.innerHTML='<div class="message-stack"><div class="message-meta"><strong>你</strong><time>14:38</time></div><div class="text message-bubble"></div><div class="message-status"><span>已发送</span><button class="question-jump" hidden data-locate="question-3">查看此问题的回复 ↗</button></div></div><span class="message-avatar" aria-hidden="true">我</span>';
+ node.querySelector('.text').textContent=text;messages.append(node);
+}
+function appendExampleAI(body,status){
+ const node=document.createElement('article');node.className='message assistant latest example-reply';node.setAttribute('aria-label','AI 的后续回复');
+ node.innerHTML='<span class="message-avatar" aria-hidden="true">π</span><div class="message-stack"><div class="message-meta"><strong>pi</strong><span>任务 Agent</span><time>14:38</time></div><div class="message-bubble"></div><div class="message-status"><span class="reply-delivery"></span></div></div>';
+ node.querySelector('.message-bubble').innerHTML=body;node.querySelector('.reply-delivery').textContent=status;messages.append(node);
+ return node.querySelector('.message-bubble');
+}
+function renderScene(scene){
+ render('review');
+ document.querySelectorAll('[data-state]').forEach(b=>b.setAttribute('aria-pressed','false'));
+ document.querySelectorAll('[data-scene]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.scene===scene)));
+ const previous=reply.closest('.message');previous.classList.remove('latest');
+ if(scene==='continue'||scene==='revised'){
+  const currentActions=reply.querySelector('.result-actions').outerHTML;
+  previous.classList.add('historical');
+  reply.querySelector('[data-action=confirm]').remove();
+  const oldContents=reply.innerHTML;
+  reply.innerHTML='<details class="history-disclosure"><summary><span class="history-label">上一轮结果</span><span>/hello 已实现</span></summary><div class="history-body">'+oldContents+'</div></details>';
+  previous.querySelector('.reply-delivery').textContent='已继续修改 · 旧结果保留查看';
+  appendExampleUser('返回格式还不合适，改成 JSON，并补上对应的测试。');
+  if(scene==='continue'){
+   setTaskBadge('running');
+   appendExampleAI('<div class="reply-summary"><p>收到，继续在原任务中调整：把响应改为 JSON，并同步更新测试。</p></div><div class="pending-line" role="status"><span class="spinner"></span>正在修改响应与测试</div><details class="execution-details"><summary>查看本轮过程</summary><div class="execution-body"><p>本轮目标：返回 {"message":"world"}，检查 JSON 类型和正文，再运行测试。</p><p>当前仅展示进行中的设计状态，尚无新结果可确认。</p></div></details>','执行中 · 修改完成后再交给你确认');
+  }else{
+   setTaskBadge('review');
+   const bubble=appendExampleAI('<div class="reply-summary"><strong class="result-title">已按反馈改为 JSON</strong><p>/hello 现在返回 <code>{"message":"world"}</code>，响应类型为 JSON。</p><div class="verification-brief"><span class="verification-mark" aria-hidden="true">✓</span><span>6 个测试、静态检查与构建通过</span></div></div>','新结果待你确认 · 尚未合并');
+   const footer=document.createElement('div');footer.className='reply-footer';
+   footer.innerHTML='<details class="execution-details"><summary>执行详情</summary><div class="execution-body"><h3>本轮修改 · 示例</h3><p>将纯文本响应改为 JSON，并新增响应类型与内容测试。</p><h3>验证依据 · 示例</h3><p>go test ./...、go vet ./...、go build 的示例工具记录均为退出 0。</p><pre>GET /hello → 200\nContent-Type: application/json\n{"message":"world"}</pre><p>这些是固定设计数据，不是本次实际执行的测试。</p></div></details>'+currentActions;
+   bubble.append(footer);
+  }
+ }else{
+  previous.querySelector('.reply-delivery').textContent='开发结果仍待验收 · 下方仅讨论';
+  appendExampleUser('为什么还要测 HEAD 请求？和 GET 有什么区别？');
+  if(scene==='answering'){
+   appendExampleAI('<div class="reply-summary"><p>HEAD 可以检查接口的状态和响应头，但不会返回正文。所以除了 GET，还需要确认<span class="stream-cursor" aria-hidden="true"></span></p></div>','正在回复…');
+  }else{
+   appendExampleAI('<div class="reply-summary"><p>区别主要在于是否返回正文：</p><ul class="explanation-list"><li><code>GET</code>：返回响应头和正文，例如 <code>world</code>。</li><li><code>HEAD</code>：只返回响应头，正文应为空。</li></ul><p>一起检查，可以确认接口状态、响应类型和正文行为都符合预期。</p></div>','已回答 · 仅作说明，未修改代码');
+  }
+ }
+ setFilter('all');
+ requestAnimationFrame(()=>{messages.scrollTop=messages.scrollHeight;});
+}
+function confirmResult(button){
+ const bubble=button.closest('.message-bubble');
+ const note=document.createElement('p');note.className='confirmed';note.textContent='你已确认本轮结果';
+ bubble.querySelector('.reply-summary').after(note);
+ const merge=document.createElement('button');merge.dataset.open='merge-notes';merge.innerHTML='审核合并<span class="action-icon" aria-hidden="true">↗</span>';
+ button.replaceWith(merge);
+ bubble.closest('.message').querySelector('.reply-delivery').textContent='本轮结果已确认 · 尚未合并';
+ setTaskBadge('done');
+ document.querySelectorAll('[data-state]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.state==='done')));
+ document.querySelectorAll('[data-scene]').forEach(b=>b.setAttribute('aria-pressed','false'));
+}
+function setFilter(value){
+ messages.classList.toggle('question-only',value==='questions');
+ document.querySelectorAll('[data-filter]').forEach(b=>{b.classList.toggle('active',b.dataset.filter===value);b.setAttribute('aria-pressed',String(b.dataset.filter===value));});
+ document.querySelectorAll('.question-jump').forEach(b=>b.hidden=value!=='questions');
+ document.querySelector('.chat-filter-count').textContent=value==='questions'?'共 '+messages.querySelectorAll('.message.user').length+' 个提问':'';
+}
+function showBoard(show){app.classList.toggle('chat-visible',!show);document.querySelector('#show-board').classList.toggle('active',show);document.querySelector('#show-chat').classList.toggle('active',!show);}
+document.addEventListener('click',e=>{
+ const open=e.target.closest('[data-open]');if(open){document.getElementById(open.dataset.open).showModal();return;}
+ const close=e.target.closest('[data-close]');if(close){close.closest('dialog').close();return;}
+ const scene=e.target.closest('[data-scene]');if(scene){renderScene(scene.dataset.scene);return;}
+ const state=e.target.closest('button[data-state]');if(state){render(state.dataset.state);return;}
+ const filter=e.target.closest('[data-filter]');if(filter){setFilter(filter.dataset.filter);return;}
+ const locate=e.target.closest('[data-locate]');if(locate){setFilter('all');document.getElementById(locate.dataset.locate).scrollIntoView({block:'start'});return;}
+ if(e.target.closest('#show-board')){showBoard(true);return;}if(e.target.closest('#show-chat')){showBoard(false);return;}
+ const action=e.target.closest('[data-action]');if(!action)return;
+ if(action.dataset.action==='confirm'){confirmResult(action);return;}
+ if(action.dataset.action==='result'){
+  const bubble=action.closest('.message-bubble');
+  const existing=bubble.querySelector('.inline-result');if(existing){existing.remove();action.setAttribute('aria-expanded','false');return;}
+  const panel=document.createElement('div');panel.className='inline-result';
+  const revised=bubble.closest('.example-reply')!==null;
+  panel.innerHTML='<h3>运行结果 · 示例</h3><p>这是 HTTP 接口任务，没有网页界面。直接展示所属轮次的运行输出，不打开空白预览页。</p><pre>'+(revised?'GET /hello → 200\nContent-Type: application/json\n{"message":"world"}':'GET /hello → 200\nContent-Type: text/plain; charset=utf-8\n正文：world')+'</pre><p>临时服务已停止；本稿不启动真实进程。</p>';action.closest('.result-actions').after(panel);action.setAttribute('aria-expanded','true');
+ }
+});
+const mobile=matchMedia('(max-width:1023px)');
+function syncViewport(){if(mobile.matches)showBoard(false);else app.classList.remove('chat-visible');}
+mobile.addEventListener('change',syncViewport);
+syncViewport();
+render('review');
+requestAnimationFrame(()=>{messages.scrollTop=messages.scrollHeight;});
+</script>
+</body>
+</html>

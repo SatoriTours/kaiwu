@@ -163,6 +163,12 @@ export function turnSummary(entry: ChatEntry): string {
   return '等待回复…';
  }
 
+ // Ordinary conversation is the content, not an execution digest. Preserve
+ // Markdown and streamed partial text; development keeps its concise summary.
+ if (!entry.round?.report && !entry.round?.tools?.length) {
+  const text = messageText(entry.message).trim();
+  if (text) return text;
+ }
  const reportSummary = entry.round?.report?.summary?.trim();
  if (reportSummary) {
   const summarized = truncateToSentences(reportSummary, 2, 200);

@@ -240,8 +240,8 @@ func ReviewedTask(st State, req MergeRequest) (Task, error) {
 		}
 		return t, nil
 	}
-	r := conv.Rounds[len(conv.Rounds)-1]
-	if r.ID != req.RoundID || r.FinishedAt == "" {
+	r := LatestDevelopmentRound(&conv)
+	if r == nil || r.ID != req.RoundID || r.FinishedAt == "" {
 		return Task{}, Conflict("轮次已变化，请核对最新结果后重新审核")
 	}
 	switch r.Phase {

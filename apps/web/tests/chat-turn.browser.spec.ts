@@ -66,7 +66,7 @@ async function addProject(page: Page, name: string): Promise<void> {
   await page.locator("input[name=name]").fill(name);
   await page.locator("input[name=path]").fill(dir);
   await page.getByRole("button", { name: "保存", exact: true }).click();
-  await expect(page.locator("#chat-title")).toContainText("项目对话");
+  await expect(page.locator("#chat-title")).toHaveText("项目对话 · " + name);
 }
 
 async function newTask(page: Page, project: string, topic: string, title: string, request = "任务对话流") {
@@ -82,6 +82,26 @@ async function newTask(page: Page, project: string, topic: string, title: string
   await expect(page.locator("#chat-title")).toContainText(title);
 }
 
+
+test("Project setup waits for the selected project under delayed command replies", async ({page}) => {
+  const probe = await routePreviewSocket(page);
+  await login(page);
+  await addProject(page, "PreviousProject");
+  probe.hold("commands");
+  const changing = addProject(page, "SelectedProject");
+  // Hold only the real command receipt; the server still performs the request.
+  await expect.poll(() => probe.calls.some(c => c.method === "commands" && c.body?.name === "SelectedProject")).toBe(true);
+  const release = setTimeout(() => probe.release(), 250);
+  try {
+    await changing;
+    // Inspect immediately: a retrying title assertion here would hide the race.
+    expect((await page.locator("#chat-title").textContent())?.trim()).toBe("项目对话 · SelectedProject");
+  } finally {
+    clearTimeout(release);
+    probe.release();
+    await changing;
+  }
+});
 
 for (const delayMs of [0, 250, 400]) {
   test(`Fixture login UI-ready: actual unauthenticated snapshot delayed ${delayMs}ms`, async ({ page }) => {
@@ -424,6 +444,78 @@ async function routePreviewSocket(page: Page, mergeUI?: { pushOnly: boolean; pha
 }
 
 test.describe("Chat turn and result actions", () => {
+  test("V5 project conversation keeps ordinary answers visible, not collapsed development history", async ({page}) => {
+    await page.setViewportSize({width:1440,height:900});
+    await login(page);
+    await addProject(page,"ProjectQuestions");
+    for(let i=0;i<2;i++){
+      await page.locator("#draft").fill("__CHAT_FOCUS_QA__ 项目问题 "+i);
+      await page.locator("#send").click();
+      await expect(page.locator(".message.assistant")).toHaveCount(i+1);
+      await expect(page.locator(".message.assistant").last().locator(".assistant-summary-markdown")).toContainText("最后一段解释同样保留。");
+    }
+    await expect(page.locator(".assistant-turn-container.historical")).toHaveCount(0);
+    await expect(page.locator(".historical-result-actions")).toHaveCount(0);
+    for (const reply of await page.locator(".message.assistant .assistant-summary-markdown").all()) await expect(reply).toBeVisible();
+    await expect(page.locator(".confirm-btn")).toHaveCount(0);
+  });
+
+  test("V5 ordinary answers preserve the original result, stream full Markdown, and continued development archives it", async ({page}) => {
+    await page.setViewportSize({width:1440,height:900});
+    await login(page);
+    await newTask(page,"FocusChat","接口开发","实现 Hello");
+    await page.locator(".task-card").first().getByRole("button",{name:"开始开发",exact:true}).click();
+    await expect(page.locator(".confirm-btn")).toBeVisible();
+    const originalID = await page.locator(".message.assistant").first().getAttribute("data-message-id");
+    const artifacts = process.env.KAIWU_CHAT_FOCUS_ARTIFACTS;
+    if(artifacts) await page.screenshot({path:join(artifacts,"desktop.png")});
+    await page.locator("#draft").fill("__CHAT_FOCUS_QA__ 请解释实现，不修改");
+    await page.locator("#send").click();
+    const answer=page.locator(".message.assistant").last();
+    await expect(answer).toContainText("正在回复");
+    await expect(answer.locator(".assistant-summary-markdown pre")).toBeVisible();
+    await expect(answer.locator(".pending-line")).toContainText("正在回复");
+    if(artifacts) await page.screenshot({path:join(artifacts,"answering.png")});
+    await expect(answer).toContainText("最后一段解释同样保留。");
+    await expect(answer).toContainText("普通问答 · 不改变开发结果");
+    await expect(answer.locator(".confirm-btn")).toHaveCount(0);
+    await expect(page.locator(".confirm-btn")).toHaveCount(1);
+    await expect(page.locator(".message.assistant").first().locator(".confirm-btn")).toBeVisible();
+    expect(await page.locator(".message.assistant").first().getAttribute("data-message-id")).toBe(originalID);
+    await expect(page.locator(".task-card").first()).toContainText("待验收");
+    if(artifacts) await page.screenshot({path:join(artifacts,"qa.png")});
+    // A reload must not lose the old result or promote the explanation to one.
+    await page.reload();
+    await expect(page.locator(".confirm-btn")).toHaveCount(1);
+    await expect(page.locator(".message.assistant").last()).toContainText("最后一段解释同样保留。");
+    await page.locator(".confirm-btn").click();
+    await expect(page.locator(".task-card").first()).toContainText("已完成");
+    // New development supersedes the accepted result without deleting its history.
+    await page.locator("#draft").fill("结构化登录恢复 继续修改");
+    await page.locator("#send").click();
+    await expect(page.locator(".confirm-btn")).toHaveCount(1);
+    await expect(page.locator(".message.assistant").last()).toContainText("登录恢复已实现");
+    const history=page.locator(".assistant-turn-container.historical").first();
+    expect(await history.getAttribute("open")).toBeNull();
+    await expect(history.locator(".confirm-btn")).toHaveCount(0);
+    await history.locator("> summary").focus();
+    await page.keyboard.press("Enter");
+    await expect(history.locator(".historical-result-actions button")).toBeVisible();
+    await history.locator(".historical-result-actions button").click();
+    await expect(history.locator(".historical-result")).toContainText("历史网页效果未存档");
+    for(const width of [390,360]){
+      await page.setViewportSize({width,height:844});
+      await page.locator(".mobile-switch button:has-text('聊天')").click();
+      await expect(page.locator("#draft")).toBeVisible();
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+      const last=page.locator(".message.assistant").last();
+      await last.locator(".assistant-turn-summary").click();
+      await expect(last.locator(".assistant-turn-body")).toBeVisible();
+      if(artifacts) await page.screenshot({path:join(artifacts,"mobile-"+width+".png")});
+      await last.locator(".assistant-turn-summary").click();
+    }
+  });
+
   test("Desktop 1440px: No pinned top overview, multiple progress+final merged to 1 bubble, loading to settled, keyboard details, question filter & locate, and draft isolation", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await login(page);
@@ -449,6 +541,24 @@ test.describe("Chat turn and result actions", () => {
     const assistantMsg = page.locator(".message.assistant").last();
     // Wait for the final report text to arrive
     await expect(assistantMsg).toContainText("登录恢复已实现", { timeout: 15000 });
+
+    // V5: clear message ownership and quiet footer, with content outside details.
+    await expect(assistantMsg.locator(".assistant-summary-markdown")).toBeVisible();
+    await expect(assistantMsg.locator(".message-stack")).toBeVisible();
+    await expect(assistantMsg.locator(".message-meta")).toContainText("任务 Agent");
+    await expect(assistantMsg.locator(".verification-brief")).toBeVisible();
+    const user = page.locator(".message.user").last();
+    const userBox = await user.locator(".text").boundingBox();
+    const aiBox = await assistantMsg.locator(".message-bubble").boundingBox();
+    expect(userBox!.x).toBeGreaterThan(aiBox!.x);
+    const confirmStyle = await assistantMsg.locator(".confirm-btn").evaluate(el => ({
+      background: getComputedStyle(el).backgroundColor,
+      border: getComputedStyle(el).borderTopWidth,
+      height: el.getBoundingClientRect().height,
+    }));
+    expect(confirmStyle.background).toBe("rgba(0, 0, 0, 0)");
+    expect(confirmStyle.border).toBe("0px");
+    expect(confirmStyle.height).toBeLessThanOrEqual(28);
 
     const details = assistantMsg.locator("details.assistant-turn-details");
     const summary = assistantMsg.locator("summary.assistant-turn-summary");

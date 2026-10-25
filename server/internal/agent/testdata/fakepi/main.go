@@ -175,7 +175,8 @@ func main() {
 			} else if strings.Contains(promptText, "关于「") {
 				chunks = []string{"已收到本轮交互答复，原会话继续推进。"}
 			}
-			if development {
+			chatOnly := strings.Contains(promptText, "__CHAT_FOCUS_QA__")
+			if development && !chatOnly {
 				_ = out.Encode(map[string]any{"type": "tool_execution_start", "toolCallId": "fixture-write", "toolName": "write", "args": map[string]string{"path": "kaiwu-fixture-result.txt"}})
 				err := os.WriteFile("kaiwu-fixture-result.txt", []byte(fmt.Sprint(c["message"])), 0600)
 				_ = out.Encode(map[string]any{"type": "tool_execution_end", "toolCallId": "fixture-write", "toolName": "write", "result": map[string]string{"text": "fixed fixture file written"}, "isError": err != nil})
@@ -221,6 +222,9 @@ func main() {
 				_ = out.Encode(map[string]any{"type": "tool_execution_start", "toolCallId": "fixture-check", "toolName": "bash", "args": map[string]string{"command": "fixture check"}})
 				_ = out.Encode(map[string]any{"type": "tool_execution_end", "toolCallId": "fixture-check", "toolName": "bash", "result": map[string]string{"text": "PASS fixture"}, "isError": false})
 				chunks = []string{`刷新恢复已实现，结果已整理。<kaiwu-report>{"summary":"登录恢复已实现，等待确认","stage":"awaiting_review","plan":["保存登录","验证恢复"],"results":["刷新自动恢复","退出撤销凭证"],"checks":[{"title":"登录恢复检查","claim":"passed","toolId":"fixture-check"}],"blockers":[],"next":["确认使用效果"],"question":""}</kaiwu-report>`}
+			}
+			if chatOnly {
+				chunks = []string{"这是实现说明，不修改代码。\n\n```go\n", "fmt.Println(\"world\")\n```\n\n", "最后一段解释同样保留。"}
 			}
 			for i, chunk := range chunks {
 				if i > 0 {

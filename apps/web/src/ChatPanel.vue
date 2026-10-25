@@ -379,17 +379,16 @@ const deliveryLabels: Record<string, string> = {
         @click="chatFilter === 'questions' ? locateQuestion(entry.message.id) : undefined"
         @keydown="chatFilter === 'questions' ? onQuestionKeydown($event, entry.message.id) : undefined"
       >
-        <div class="author">
-          <span class="avatar">{{ entry.role === 'user' ? '我' : 'π' }}</span>
+        <span class="message-avatar" aria-hidden="true">{{ entry.role === 'user' ? '我' : 'π' }}</span>
+        <div class="message-stack">
+        <div class="message-meta">
           <strong>{{
             entry.role === 'user'
               ? '你'
-              : entry.updates ? '执行进展' : task
-                ? 'pi · 任务 Agent'
-                : 'pi · 项目 Agent'
+              : entry.role === 'assistant' ? (task ? 'pi · 任务 Agent' : 'pi · 项目 Agent') : '系统'
           }}</strong>
           <span v-if="chatFilter === 'questions'" class="jump-hint">点击定位至对话 ↗</span>
-          <span v-else>{{ entry.updates ? entry.updates.length + ' 条更新' : deliveryLabel(entry.message) }}</span>
+          <span v-if="entry.round?.startedAt" class="message-round-time">{{ new Date(entry.round.startedAt).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}) }}</span>
         </div>
         <AssistantReply
           v-if="entry.role === 'assistant'"
@@ -412,6 +411,15 @@ const deliveryLabels: Record<string, string> = {
           @reply="showLatestReply"
         />
         <MarkdownContent v-else class="text" :text="entry.message.text" />
+        <div class="message-status">
+          <span v-if="entry.role !== 'assistant'">{{ deliveryLabel(entry.message) }}</span>
+          <span v-else-if="entry.loading">{{ entry.round?.tools?.length || entry.round?.report ? '正在开发' : '正在回复' }}</span>
+          <span v-else-if="entry.round?.phase === 'answered'">普通问答 · 不改变开发结果</span>
+          <span v-else-if="entry.round?.phase === 'confirmed'">结果已确认</span>
+          <span v-else-if="entry.round?.phase === 'finished' && task?.executionId">本轮执行已结束</span>
+          <span v-else> {{ deliveryLabel(entry.message) }}</span>
+        </div>
+        </div>
       </article>
 
       <!-- A settled failure belongs where it happened: in the conversation,
