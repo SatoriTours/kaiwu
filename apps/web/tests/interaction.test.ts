@@ -327,8 +327,76 @@ test("taskState correctly identifies waiting_user status and label", () => {
 
   const state = taskState(task, conv, exec);
   assert.equal(state.status, "waiting_user");
-  assert.equal(state.label, "待你处理");
+  assert.equal(state.label, "待你回答");
   assert.equal(state.confirmRoundId, undefined, "should not prompt for acceptance when waiting for user");
+});
+
+test("native blocking interaction outranks a running process and distinguishes confirmation from input", () => {
+  const task = { status: 'running', executionId: 'e1' } as Task;
+  const conv = { runState: 'running', messages: [], interactions: [interaction({
+    source: 'agent_ui', fields: [{ id: 'allow', type: 'confirm', label: '允许启动服务？', required: true }],
+  })] } as unknown as Conversation;
+  let view = taskState(task, conv);
+  assert.equal(view.status, 'waiting_user', 'a live pi waiter is not AI activity');
+  assert.equal(view.label, '待你确认');
+  assert.equal(view.interactionKind, 'confirm');
+  assert.equal(view.pendingInteractionCount, 1);
+  assert.equal(view.confirmRoundId, undefined);
+  conv.interactions![0].fields = [{ id: 'answer', type: 'textarea', label: '环境' }];
+  view = taskState(task, conv);
+  assert.equal(view.label, '待你回答');
+  assert.equal(view.interactionKind, 'answer');
+});
+
+test("answered or expired requests do not disguise actual AI execution as waiting", () => {
+  const task = { status: 'waiting_user', executionId: 'e1' } as Task;
+  const conv = { runState: 'running', messages: [], interactions: [interaction({ status: 'answered' }), interaction({ expiresAt: '2000-01-01T00:00:00Z' })] } as unknown as Conversation;
+  const view = taskState(task, conv);
+  assert.equal(view.status, 'running');
+  assert.equal(view.pendingInteractionCount, 0);
+  assert.equal(view.interactionKind, undefined);
+});
+
+test("an uncertain native answer is not evidence that the blocked pi call resumed", () => {
+  const task = { status: 'running', executionId: 'e1' } as Task;
+  const conv = { runState: 'running', messages: [], interactions: [interaction({
+    source: 'agent_ui', status: 'answered', response: { operationId: 'op', mode: 'form', answers: { allow: true }, delivery: 'uncertain' },
+  })] } as unknown as Conversation;
+  assert.equal(taskState(task, conv).label, '送达待核查');
+  assert.equal(taskState(task, conv).status, 'waiting_user');
+  conv.interactions![0].response!.delivery = 'accepted';
+  assert.equal(taskState(task, conv).status, 'running');
+});
+
+test("native delivery attention belongs to its still-active round, not future work or a finished result", () => {
+  const task = { status: 'running', executionId: 'e1' } as Task;
+  const ix = interaction({ source: 'agent_ui', roundId: 'r1', status: 'answered', response: { operationId: 'op', mode: 'form', delivery: 'uncertain' } });
+  const conv = { runState: 'running', messages: [], rounds: [{ id: 'r2', phase: 'running' }], interactions: [ix] } as unknown as Conversation;
+  assert.equal(taskState(task, conv).status, 'running', 'an older uncertain answer must not mask a new round');
+  conv.runState = 'idle';
+  conv.rounds = [{ id: 'r1', phase: 'finished', finishedAt: '2026-10-25T12:00:00Z', tools: [], startedAt: '' }];
+  task.status = 'needs_confirmation';
+  const execution = { id: 'e1', phase: 'awaiting_review', finishedAt: '2026-10-25T12:00:00Z' } as Execution;
+  assert.equal(taskState(task, conv, execution).status, 'needs_confirmation', 'settled work remains reviewable');
+});
+
+test("an unsent native cancellation still needs attention while its original waiter runs", () => {
+  const task = { status: 'running', executionId: 'e1' } as Task;
+  const conv = { runState: 'running', messages: [], interactions: [interaction({ source: 'agent_ui', status: 'cancelled', response: { operationId: 'op', mode: 'cancel', delivery: 'not_sent' } })] } as unknown as Conversation;
+  assert.equal(taskState(task, conv).label, '回答待发送');
+});
+
+test("multiple pending questions count only live blockers and do not imply result acceptance", () => {
+  const task = { status: 'needs_confirmation', executionId: 'e1' } as Task;
+  const conv = { runState: 'idle', messages: [], rounds: [{ id: 'r1', phase: 'finished' }], interactions: [
+    interaction({ fields: [{ id: 'env', type: 'single_select', label: '环境', options: [{ id: 'a', label: '现有环境' }] }] }),
+    interaction({ id: 'ix_2' }), interaction({ id: 'ix_3', status: 'cancelled' }),
+  ] } as unknown as Conversation;
+  const view = taskState(task, conv, { phase: 'awaiting_review' } as Execution);
+  assert.equal(view.status, 'waiting_user');
+  assert.equal(view.label, '待你选择');
+  assert.equal(view.pendingInteractionCount, 2);
+  assert.equal(view.confirmRoundId, undefined);
 });
 
 test("loadInteractionDraft and saveInteractionDraft works with sessionStorage mock", () => {
@@ -387,6 +455,35 @@ function interaction(overrides: Partial<InteractionRequest> = {}): InteractionRe
     ...overrides,
   };
 }
+
+test("interaction presentation uses field semantics, not question marks or optimistic delivery", async () => {
+  const { interactionPresentation, interactionHistoryTitle } = await import('../src/interaction.ts');
+  const confirm = interaction({ fields: [{ id: 'a', type: 'confirm', label: '允许？' }] });
+  assert.deepEqual(interactionPresentation(confirm), { kind: 'confirm', label: '待你确认', heading: '需要你确认', submitLabel: '提交决定' });
+  assert.equal(interactionPresentation(interaction({ title: '是否使用 Go？', fields: [{ id: 'a', type: 'textarea', label: '回答' }] })).kind, 'answer');
+  assert.equal(interactionPresentation(interaction({ fields: [{ id: 'a', type: 'single_select', label: '环境' }] })).label, '待你选择');
+  assert.equal(interactionPresentation(interaction({ fields: [{ id: 'a', type: 'confirm', label: '确认' }, { id: 'b', type: 'text', label: '地址' }] })).kind, 'answer');
+  assert.equal(interactionHistoryTitle(interaction({ title: '请补充信息', status: 'answered', response: { operationId: 'op', mode: 'text', delivery: 'uncertain', text: '回答' } })), '已回答：补充信息');
+  assert.equal(interactionHistoryTitle(interaction({ title: '确认环境', status: 'cancelled' })), '已取消：确认环境');
+  assert.equal(interactionHistoryTitle(interaction({ title: '选择环境', expiresAt: '2000-01-01T00:00:00Z' })), '已失效：选择环境');
+});
+
+test("collapse memory survives remount, isolates versions and clears on logout without clearing drafts on close", async () => {
+  const { setInteractionCollapsed, isInteractionCollapsed } = await import('../src/interaction.ts');
+  const req = interaction();
+  setInteractionCollapsed(req, true);
+  assert.equal(isInteractionCollapsed({ ...req }), true);
+  assert.equal(isInteractionCollapsed({ ...req, conversationId: 'other' }), false);
+  assert.equal(isInteractionCollapsed({ ...req, version: 2 }), false);
+  const draft = { mode: 'form' as const, answers: { a: '已填' }, others: {}, otherFlags: {}, comment: '', text: '' };
+  saveInteractionDraft(req.conversationId, req.id, req.version, draft);
+  setInteractionCollapsed(req, false);
+  assert.equal(isInteractionCollapsed(req), false);
+  assert.deepEqual(loadInteractionDraft(req.conversationId, req.id, req.version), draft);
+  setInteractionCollapsed(req, true);
+  clearInteractionDrafts();
+  assert.equal(isInteractionCollapsed(req), false);
+});
 
 test("splitInteractions moves an expired pending request into history", () => {
   const now = Date.parse("2026-10-18T12:00:00Z");

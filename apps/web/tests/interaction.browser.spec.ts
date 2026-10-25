@@ -230,6 +230,8 @@ test.describe("real Go + fake pi interaction integration", () => {
     await expect(page.locator(".interaction-card")).toHaveCount(0);
     const history = await openHistory(page, "部署参数确认");
     await expect(history).toContainText("已发送给 AI");
+    await expect(history.locator('summary')).toContainText('已回答：部署参数确认');
+    await expect(history.locator('xpath=ancestor::article[contains(@class,"message")][1]')).toHaveClass(/assistant/);
     await expect(history).toContainText("不允许");
     await expect(history).toContainText("端口: 0 端口");
     await expect(history).toContainText("环境: 其他（独立专线）");
@@ -297,7 +299,7 @@ test.describe("real Go + fake pi interaction integration", () => {
     const conversationId = await currentConversation(page);
     await send(page, "[ix-six] 第一个问题");
     const first = await waitPending(page, conversationId, "部署参数确认");
-    await page.getByRole("button", { name: "改用普通聊天回复 ↗", exact: true }).click();
+    await page.getByRole("button", { name: "发送其他消息 ↗", exact: true }).click();
     await send(page, "[ix-two] 第二个问题");
     const second = await waitPending(page, conversationId, "第二个问题");
     await expect(page.locator(".interaction-queue-nav")).toContainText("1/2");
@@ -453,6 +455,89 @@ test.describe("real Go + fake pi interaction integration", () => {
     await page.reload();
     await expect(page.locator("#chat-title")).toContainText("抢答任务");
     await expect(page.locator(".interaction-card")).toHaveCount(0);
+  });
+
+  test("V2 native waiting is actionable on the board and local Escape does not dismiss chat", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    const frames = frameProbe(page);
+    await login(page);
+    await newTask(page, 'V2 原生等待', '交互联动', '需要我确认');
+    const conversationId = await currentConversation(page);
+    await send(page, '[ix-native-confirm] 等待我的决定');
+    await waitPending(page, conversationId, '原生确认请求');
+    await expect(page.locator('.interaction-card .interaction-kind')).toHaveText('需要你确认');
+    await expect(page.locator('.chat-interaction-status')).toContainText('待你确认');
+    const before = frames.commands.length;
+    await page.locator('.interaction-confirm-btn').first().focus();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.interaction-collapsed-bar')).toBeVisible();
+    await expect(page.getByRole('dialog', { name: '聊天面板', exact: true })).toBeVisible();
+    expect(frames.commands.length).toBe(before, 'Escape is not an answer/cancel command');
+    await closeChat(page);
+    const taskCard = page.locator('.task-card').filter({ hasText: '需要我确认' });
+    await expect(taskCard.locator('.task-status')).toHaveText('待你确认');
+    const action = taskCard.getByRole('button', { name: '待你确认', exact: true });
+    await expect(action).toBeEnabled();
+    await expect(action).toHaveAttribute('aria-busy', 'false');
+    await expect(action.locator('svg')).not.toHaveClass(/task-action-spinner/);
+    await expect(page.locator('.board-interaction-count')).toContainText('1 项待你处理');
+    await action.click();
+    await expect(page.locator('.interaction-card')).toBeVisible();
+    await expect(page.locator('.interaction-confirm-btn').first()).toBeFocused();
+    if (process.env.KAIWU_INTERACTION_ARTIFACTS) await page.screenshot({ path: process.env.KAIWU_INTERACTION_ARTIFACTS + '/native-dark-desktop.png' });
+    await page.getByRole('button', { name: '不允许', exact: true }).click();
+    const response = await submitAndReconcile(page, frames, page.locator('.interaction-card'));
+    expect(response.cmd.body.answers.confirmed).toBe(false);
+    await expect(page.locator('.interaction-history-head')).toContainText('已回答：原生确认请求');
+    await expect(page.locator('.interaction-card')).toHaveCount(0);
+    await expect(page.locator('.interaction-history-body')).not.toBeVisible();
+    await expect(page.locator('.message.assistant').last()).toContainText('原生确认结果：false');
+    if (process.env.KAIWU_INTERACTION_ARTIFACTS) await page.screenshot({ path: process.env.KAIWU_INTERACTION_ARTIFACTS + '/history-dark-desktop.png' });
+    await page.getByRole('button', { name: '只看我的问题', exact: true }).click();
+    await expect(page.locator('.interaction-history-head')).toHaveCount(1);
+    await expect(page.locator('.interaction-history-head')).toBeVisible();
+    await page.locator('.interaction-history-head').click();
+    await expect(page.locator('.interaction-history-summary')).toContainText('不允许');
+    await page.getByRole('button', { name: '全部', exact: true }).click();
+    await expect(page.locator('.interaction-history-head')).toHaveCount(1);
+  });
+
+  test("V2 input dismissal survives reload and task switching without losing its own draft", async ({ page }) => {
+    const frames = frameProbe(page);
+    await login(page);
+    await newTask(page, 'V2 输入等待', '输入联动', '需要我填写');
+    const conversationId = await currentConversation(page);
+    await send(page, '[ix-native-empty] 输入等待');
+    await waitPending(page, conversationId, '原生空串输入');
+    await expect(page.locator('.interaction-kind')).toHaveText('需要你回答');
+    await page.locator('.interaction-input').fill('仅此任务的环境说明');
+    const count = frames.commands.length;
+    await page.getByRole('button', { name: '稍后处理', exact: true }).click();
+    await page.reload();
+    await expect(page.locator('.interaction-collapsed-bar')).toBeVisible();
+    await expect(page.locator('.interaction-card')).toHaveCount(0);
+    await closeChat(page);
+    const card = page.locator('.task-card').filter({ hasText: '需要我填写' });
+    await expect(card.locator('.task-status')).toHaveText('待你回答');
+    await page.getByRole('button', { name: '项目对话', exact: true }).click();
+    await expect(page.locator('.interaction-card')).toHaveCount(0);
+    await closeChat(page);
+    await card.getByRole('button', { name: '待你回答', exact: true }).click();
+    await expect(page.locator('.interaction-input')).toHaveValue('仅此任务的环境说明');
+    expect(frames.commands.length).toBe(count, 'view changes cannot send a reply');
+    // Wait for the real drawer transition rather than sampling an opening frame.
+    await page.locator('.chat-drawer').evaluate(async el => { await Promise.allSettled(el.getAnimations().map(a => a.finished)); });
+    for (const [width, height] of [[390, 844], [360, 740]]) {
+      await page.setViewportSize({ width, height });
+      const dialog = page.locator('.interaction-card');
+      const box = (await dialog.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      expect(box.y + box.height).toBeLessThanOrEqual(height);
+      await expect(page.getByRole('button', { name: '发送回答', exact: true })).toBeVisible();
+      if (process.env.KAIWU_INTERACTION_ARTIFACTS) await page.screenshot({ path: process.env.KAIWU_INTERACTION_ARTIFACTS + '/input-light-' + width + '.png' });
+    }
   });
 
   test("360px viewport keeps the long interaction card usable", async ({ page }) => {

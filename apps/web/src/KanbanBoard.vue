@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 import type { Topic, Task, Conversation, GitStatus, Execution, DeliverySummary } from "./types.ts";
 import {taskState} from "./task-state.ts";
 import {deliveryView, isDeliveryActive} from "./delivery.ts";
@@ -21,6 +22,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   select: [Task];
+  process: [Task];
   project: [];
   start: [Task];
   merge: [Task];
@@ -29,10 +31,15 @@ const emit = defineEmits<{
   addTask: [string];
   deleteTopic: [Topic];
 }>();
-function presentation(task:Task){return taskState(task,props.conversations[task.conversationId],props.executions[task.executionId??''])}
+const now = ref(Date.now());
+let expiryClock: ReturnType<typeof setInterval> | undefined;
+onMounted(()=>{ expiryClock=setInterval(()=>{now.value=Date.now()},1000); });
+onUnmounted(()=>{ if(expiryClock)clearInterval(expiryClock); });
+function presentation(task:Task){return taskState(task,props.conversations[task.conversationId],props.executions[task.executionId??''],undefined,now.value)}
+const waitingCount = computed(()=>props.tasks.filter(task=>presentation(task).pendingInteractionCount>0).length);
 function actionLabel(task: Task) {
  if(presentation(task).status==='interrupted')return '继续开发';
- if(presentation(task).status==='waiting_user')return '待你处理';
+ if(presentation(task).status==='waiting_user')return presentation(task).label;
   return props.pending[task.conversationId]
     ? "启动中…"
     : task.status === "running"
@@ -49,8 +56,9 @@ function actionLabel(task: Task) {
     <div class="toolbar">
       <h1>项目看板</h1>
       <button class="project-chat" aria-haspopup="dialog" @click="emit('project')">项目对话</button>
-      <span class="running">{{ tasks.length }} 个任务</span
-      ><button
+      <span class="running">{{ tasks.length }} 个任务</span>
+      <span v-if="waitingCount" class="board-interaction-count" role="status">{{ waitingCount }} 项待你处理</span>
+      <button
         data-action="new-topic"
         :disabled="!online"
         @click="emit('addTopic')"
@@ -116,7 +124,7 @@ function actionLabel(task: Task) {
             v-for="task in tasks.filter((t) => t.topicId === topic.id)"
             :key="task.id"
             class="task-card"
-            :class="{ selected: selected === task.id }"
+            :class="{ selected: selected === task.id, 'waiting-for-user': presentation(task).pendingInteractionCount > 0 }"
             :data-taskid="task.id"
             @click="emit('select', task)"
           >
@@ -136,7 +144,7 @@ function actionLabel(task: Task) {
                 >{{ deliveryView(deliveries[task.id]).label }}</span>
                 <span class="task-status" :data-status="presentation(task).status">{{
                   presentation(task).label
-                }}</span>
+                }}<small v-if="presentation(task).pendingInteractionCount > 1"> · {{ presentation(task).pendingInteractionCount }}</small></span>
               </div>
               <h3>
                 {{ task.title }}
@@ -153,36 +161,40 @@ function actionLabel(task: Task) {
                 class="merge-task"
                 aria-label="合并到主分支"
                 :title="git[task.id]?.reason || '合并到主分支'"
-                :disabled="!online || task.status === 'running'"
+                :disabled="!online || task.status === 'running' || presentation(task).status === 'waiting_user'"
                 @click.stop="emit('merge', task)"
               >
                 <MergeIcon />
               </button>
               <button
-                v-if="!isDeliveryActive(deliveries?.[task.id]?.phase)"
+                v-if="presentation(task).status === 'waiting_user' || !isDeliveryActive(deliveries?.[task.id]?.phase)"
                 class="start-task"
+                :class="{ 'needs-participation': presentation(task).status === 'waiting_user' }"
                 :aria-label="actionLabel(task)"
                 :title="actionLabel(task)"
                 :aria-busy="
-                  !!pending[task.conversationId] || task.status === 'running'
+                  presentation(task).status !== 'waiting_user' && (!!pending[task.conversationId] || task.status === 'running')
                 "
                 :disabled="
-                  !online ||
+                  presentation(task).status !== 'waiting_user' && (!online ||
                   pending[task.conversationId] ||
                   task.status === 'running' ||
                   (['idle', 'failed', 'interrupted'].includes(presentation(task).status) &&
                     ['starting', 'running'].includes(
                       conversations[task.conversationId]?.runState ?? '',
-                    ))
+                    )))
                 "
                 @click.stop="
-                  ['idle', 'failed', 'interrupted'].includes(presentation(task).status)
-                    ? emit('start', task)
-                    : emit('select', task)
+                  presentation(task).status === 'waiting_user'
+                    ? emit('process', task)
+                    : ['idle', 'failed', 'interrupted'].includes(presentation(task).status)
+                      ? emit('start', task)
+                      : emit('select', task)
                 "
               >
                 <TaskActionIcon
                   :status="presentation(task).status"
+                  :interaction-kind="presentation(task).interactionKind"
                   :pending="pending[task.conversationId]"
                 />
               </button>

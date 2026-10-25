@@ -386,7 +386,7 @@ test('taskState correctly tracks confirmRoundId and resultRoundId across finishe
  const waitingConv: any = {
   ...conversation,
   interactions: [
-   { id: 'ix1', status: 'pending', blocking: true, expiresAt: new Date(Date.now() + 60000).toISOString() },
+   { schemaVersion: 1, id: 'ix1', version: 1, projectId: 'p1', conversationId: 'c1', source: 'assistant_question', title: '补充环境', fields: [{ id: 'answer', type: 'textarea', label: '回答' }], status: 'pending', blocking: true, allowCancel: true, createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60000).toISOString() },
   ],
  };
  const stateWaiting = taskState(task, waitingConv, execution);

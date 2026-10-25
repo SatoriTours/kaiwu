@@ -7,19 +7,20 @@ import MergeIcon from "./MergeIcon.vue";
 import { isMergeRequest } from "./git.ts";
 import TaskActionIcon from "./TaskActionIcon.vue";
 import AssistantReply from "./AssistantReply.vue";
-import {groupChatMessages, filterChatEntries} from './chat-messages.ts';
+import {groupChatMessages, filterChatEntries, type ChatEntry} from './chat-messages.ts';
 import {failureView} from './failure.ts';
 import MarkdownContent from "./MarkdownContent.vue";
 import DeliveryStatus from "./DeliveryStatus.vue";
 import { isDeliveryActive } from "./delivery.ts";
 import InteractionCard from "./InteractionCard.vue";
+import InteractionHistory from './InteractionHistory.vue';
+import InteractionIcon from './InteractionIcon.vue';
 import "./interaction.css";
 import {
-  formatAnswerSummary,
   splitInteractions,
-  effectiveInteractionStatus,
-  INTERACTION_DELIVERY_LABELS,
-  INTERACTION_STATUS_LABELS,
+  interactionPresentation,
+  isInteractionCollapsed,
+  type InteractionRequest,
   type InteractionAnswers,
   type InteractionOthers,
 } from "./interaction.ts";
@@ -71,7 +72,8 @@ const emit = defineEmits<{
   cancelInteraction: [payload: { conversationId: string; requestId: string; requestVersion: number }];
   retryInteraction: [payload: { conversationId: string; requestId: string; requestVersion: number }];
 }>();
-const taskStatus=computed(()=>props.task?taskState(props.task,props.conversation,props.execution).status:'idle');
+const now = ref(Date.now());
+const taskStatus=computed(()=>props.task?taskState(props.task,props.conversation,props.execution,undefined,now.value).status:pendingInteractions.value.some(ix=>ix.blocking)?'waiting_user':'idle');
 // The notice is derived from the selected conversation only, so switching scope
 // can never carry another conversation's reason.
 const failure=computed(()=>failureView(props.conversation,props.execution));
@@ -117,7 +119,6 @@ async function locateQuestion(messageId: string) {
 }
 // Expiry is wall-clock driven: a pending native request past its deadline must
 // leave the answer queue even when no snapshot arrives in between.
-const now = ref(Date.now());
 let expiryClock: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
   expiryClock = setInterval(() => {
@@ -129,11 +130,13 @@ onUnmounted(() => {
 });
 const interactionLists = computed(() => splitInteractions(props.conversation.interactions, now.value));
 const pendingInteractions = computed(() => interactionLists.value.pending);
+const interactionCard = ref<InstanceType<typeof InteractionCard>>();
+const interactionView = computed(() => pendingInteractions.value[0] ? interactionPresentation(pendingInteractions.value[0]) : undefined);
 const interactionCollapsed = ref(false);
 const userChoseChatOverride = ref(false);
 
 watch(() => props.conversation.id, () => {
-  interactionCollapsed.value = false;
+  interactionCollapsed.value = pendingInteractions.value[0] ? isInteractionCollapsed(pendingInteractions.value[0]) : false;
   userChoseChatOverride.value = false;
 });
 
@@ -141,9 +144,45 @@ const shouldCollapseComposer = computed(() => {
   return pendingInteractions.value.length > 0 && !interactionCollapsed.value && !userChoseChatOverride.value;
 });
 
+watch(() => pendingInteractions.value.map(ix=>`${ix.id}:${ix.version}`).join(','), () => {
+  // A new prompt must not remove the composer while the user is typing in it.
+  userChoseChatOverride.value = document.activeElement === editor.value;
+});
 const historyInteractions = computed(() => interactionLists.value.history);
-function interactionStatus(ix: { status: string; expiresAt?: string }) {
-  return effectiveInteractionStatus(ix as any, now.value);
+const interactionEntries = computed(() => {
+  const byMessage = new Map<string, string>(), byRound = new Map<string, string>();
+  for (const entry of rawChatEntries.value) {
+    if (entry.role !== 'assistant') continue;
+    for (const message of entry.updates ?? [entry.message]) byMessage.set(message.id, entry.id);
+    const roundId = entry.round?.id ?? entry.userMessage?.id;
+    if (roundId && !byRound.has(roundId)) byRound.set(roundId, entry.id);
+  }
+  return new Map((props.conversation.interactions ?? []).map(ix=>[ix.id,
+    (ix.sourceMessageId ? byMessage.get(ix.sourceMessageId) : undefined) ?? (ix.roundId ? byRound.get(ix.roundId) : undefined)]));
+});
+function interactionEntryId(ix: InteractionRequest): string | undefined { return interactionEntries.value.get(ix.id); }
+function entryInteractions(entry: ChatEntry, requests: InteractionRequest[]) {
+  return requests.filter(ix=>interactionEntryId(ix) === entry.id);
+}
+const detachedHistory = computed(() => {
+  // Filtering messages must not hide the only route to a saved answer.
+  const visibleEntries = new Set(chatEntries.value.map(entry=>entry.id));
+  return historyInteractions.value.filter(ix=>!visibleEntries.has(interactionEntryId(ix) ?? ''));
+});
+function retryInteraction(ix: InteractionRequest) {
+  emit('retryInteraction', { conversationId: props.conversation.id, requestId: ix.id, requestVersion: ix.version });
+}
+async function openInteraction(requestId?: string) {
+  userChoseChatOverride.value = false;
+  await nextTick();
+  if (interactionCard.value) {
+    await interactionCard.value.openRequest(requestId);
+    return;
+  }
+  // A saved but unconfirmed answer is handled in history, never resent by viewing it.
+  const target = Array.from(messages.value?.querySelectorAll<HTMLDetailsElement>('details.interaction-history-card') ?? []).find(el=>
+    requestId ? el.dataset.interactionId === requestId : !!el.querySelector('.uncertain, .not_sent, .recorded, .dispatching'));
+  if (target) { target.open = true; target.scrollIntoView({ block: 'nearest' }); target.querySelector('summary')?.focus(); }
 }
 const messages = ref<HTMLElement>();
 const userInteractedScroll = ref(false);
@@ -166,7 +205,7 @@ async function showLatestReply(messageID?: string) {
 const editor = ref<HTMLTextAreaElement>();
 const previewing = ref(false);
 async function focusEditor(){previewing.value=false;await nextTick();editor.value?.focus()}
-defineExpose({focusEditor});
+defineExpose({focusEditor,openInteraction});
 watch(
   () => props.conversation.id,
   () => {
@@ -268,6 +307,7 @@ const deliveryLabels: Record<string, string> = {
           <small id="chat-session"
             >pi 独立会话 · {{ conversation.sessionId.slice(0, 18) }}</small
           >
+          <button v-if="interactionView" class="chat-interaction-status" @click="openInteraction()"><InteractionIcon :kind="interactionView.kind" />{{ interactionView.label }}<span v-if="pendingInteractions.length > 1"> · {{ pendingInteractions.length }}</span></button>
         </div>
       </div>
       <div v-if="task" class="chat-actions">
@@ -393,7 +433,7 @@ const deliveryLabels: Record<string, string> = {
           <span v-if="entry.round?.startedAt" class="message-round-time">{{ new Date(entry.round.startedAt).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}) }}</span>
         </div>
         <AssistantReply
-          v-if="entry.role === 'assistant'"
+          v-if="entry.role === 'assistant' && (!entry.isPlaceholder || !entryInteractions(entry, pendingInteractions).length)"
           :entry="entry"
           :message="entry.message"
           :updates="entry.updates"
@@ -412,9 +452,12 @@ const deliveryLabels: Record<string, string> = {
           @merge="emit('merge')"
           @reply="showLatestReply"
         />
-        <MarkdownContent v-else class="text" :text="entry.message.text" />
+        <MarkdownContent v-else-if="entry.role !== 'assistant'" class="text" :text="entry.message.text" />
+        <button v-for="ix in entryInteractions(entry, pendingInteractions)" :key="ix.id" class="interaction-inline-prompt" @click="openInteraction(ix.id)"><InteractionIcon :kind="interactionPresentation(ix).kind" />{{ interactionPresentation(ix).heading }} · 打开处理</button>
+        <InteractionHistory :requests="entryInteractions(entry, historyInteractions)" :now="now" :pending="pending" :online="online" @retry="retryInteraction" />
         <div class="message-status">
           <span v-if="entry.role !== 'assistant'">{{ deliveryLabel(entry.message) }}</span>
+          <span v-else-if="entryInteractions(entry, pendingInteractions).length">等待你处理 · 不是开发完成</span>
           <span v-else-if="entry.loading">{{ entry.round?.tools?.length || entry.round?.report ? '正在开发' : '正在回复' }}</span>
           <span v-else-if="entry.round?.phase === 'answered'">普通问答 · 不改变开发结果</span>
           <span v-else-if="entry.round?.phase === 'confirmed'">结果已确认</span>
@@ -453,50 +496,8 @@ const deliveryLabels: Record<string, string> = {
         </button>
       </div>
 
-      <!-- Historical completed/cancelled/expired interactions with collapsible details -->
-      <div v-if="historyInteractions.length > 0" class="interaction-history-list" aria-label="交互历史记录">
-        <details
-          v-for="ix in historyInteractions"
-          :key="ix.id"
-          class="interaction-history-card"
-          :data-interaction-id="ix.id"
-        >
-          <summary class="interaction-history-head">
-            <span class="interaction-history-title">{{ ix.title }}</span>
-            <span
-              class="interaction-history-status"
-              :class="ix.response?.delivery || ix.status"
-            >
-              {{ interactionStatus(ix) === 'answered' && ix.response ? (INTERACTION_DELIVERY_LABELS[ix.response.delivery] || '已答复') : (INTERACTION_STATUS_LABELS[interactionStatus(ix)] || interactionStatus(ix)) }}
-            </span>
-          </summary>
-          <div class="interaction-history-body" style="padding-top: 6px;">
-            <p v-if="ix.description" class="interaction-desc" style="margin-bottom: 6px;">{{ ix.description }}</p>
-            <div class="interaction-history-summary">
-              <strong>答复内容：</strong>{{ ix.response ? formatAnswerSummary(ix) : '未答复（已失效，只可查看）' }}
-            </div>
-            <div v-if="interactionStatus(ix) === 'expired' && ix.statusReason" class="interaction-history-note">
-              {{ ix.statusReason }}
-            </div>
-            <div v-if="ix.response?.answeredAt" class="interaction-history-time" style="font-size: 11px; opacity: 0.7; margin-top: 4px;">
-              提交时间：{{ new Date(ix.response.answeredAt).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}
-            </div>
-            <div v-if="ix.response?.note" class="interaction-history-note">
-              {{ ix.response.note }}
-            </div>
-            <div v-if="ix.response?.delivery === 'not_sent'" class="interaction-retry-wrap" style="margin-top: 6px;">
-              <button
-                type="button"
-                class="interaction-btn primary"
-                :disabled="pending || !online"
-                @click="emit('retryInteraction', { conversationId: conversation.id, requestId: ix.id, requestVersion: ix.version })"
-              >
-                重试发送
-              </button>
-            </div>
-          </div>
-        </details>
-      </div>
+      <!-- Legacy requests without a matching message remain readable, never reactivated. -->
+      <InteractionHistory :requests="detachedHistory" :now="now" :pending="pending" :online="online" @retry="retryInteraction" />
 
       <!-- Interaction parse error if any -->
       <div v-if="conversation.rounds?.some(r => r.interactionError)" class="context-card" role="alert">
@@ -521,6 +522,7 @@ const deliveryLabels: Record<string, string> = {
     <!-- Active pending interaction card (non-modal local card inside chat panel) -->
     <InteractionCard
       v-if="pendingInteractions.length > 0"
+      ref="interactionCard"
       :requests="pendingInteractions"
       :conversation-id="conversation.id"
       :pending="pending"
@@ -532,13 +534,13 @@ const deliveryLabels: Record<string, string> = {
     />
 
     <div v-if="shouldCollapseComposer" class="composer-collapsed-bar" role="status">
-      <span>正在等待处理交互问题</span>
+      <span>{{ interactionView?.label }}，不是开发完成</span>
       <button
         type="button"
         class="composer-expand-btn"
         @click="userChoseChatOverride = true"
       >
-        改用普通聊天回复 ↗
+        发送其他消息 ↗
       </button>
     </div>
 

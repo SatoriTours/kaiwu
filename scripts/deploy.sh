@@ -32,6 +32,9 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)
 # lifecycles: preview/history cases first, then the remaining scenarios. Each
 # process keeps the product's eight-resident-session limit; no test is skipped.
 HISTORY_GREP='result history UI:|result review opens|a real task HTTP preview|late preview responses'
+# New V2 requests need their own fresh eight-session budget too. Complementary
+# selectors retain every interaction test and all existing assertions.
+INTERACTION_V2_GREP='V2 native|V2 input'
 BUILDINFO_PKG='github.com/SatoriTours/kaiwu/server/internal/buildinfo'
 # Documented default browser ports; DEPLOY_BROWSER_PORTS may move the whole
 # suite to a free range so another task on the same machine cannot conflict.
@@ -427,8 +430,10 @@ deploy_sha() {
 	if [ "$BROWSER_ENABLED" = 1 ]; then
 		patch_browser_ports "$work/src"
 		check_browser_ports || pipeline_fail "浏览器端口被占用"
-		run_step "$work/src" "浏览器交互测试" npm --prefix apps/web run test:browser -- --config playwright.interaction.config.ts ||
-			pipeline_fail "浏览器交互测试"
+		run_step "$work/src" "浏览器交互测试（原有用例独立生命周期）" npm --prefix apps/web run test:browser -- --config playwright.interaction.config.ts --grep-invert "$INTERACTION_V2_GREP" ||
+			pipeline_fail "浏览器交互测试原有用例"
+		run_step "$work/src" "浏览器交互测试（V2独立生命周期）" npm --prefix apps/web run test:browser -- --config playwright.interaction.config.ts --grep "$INTERACTION_V2_GREP" ||
+			pipeline_fail "浏览器交互测试V2用例"
 		run_step "$work/src" "浏览器主流程（独立生命周期一）" npm --prefix apps/web run test:browser -- --project=existing --grep "$HISTORY_GREP" ||
 			pipeline_fail "浏览器主流程分组一"
 		run_step "$work/src" "浏览器主流程（独立生命周期二）" npm --prefix apps/web run test:browser -- --grep-invert "$HISTORY_GREP" ||

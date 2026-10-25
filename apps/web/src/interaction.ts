@@ -307,6 +307,52 @@ export function normalizeSubmissionAnswers(
   return out;
 }
 
+export type InteractionKind = 'answer' | 'confirm' | 'select';
+
+/** Only explicit field semantics can turn a question into a decision. */
+export function interactionPresentation(request: InteractionRequest) {
+  const fields = request.fields;
+  const kind: InteractionKind = fields.length && fields.every(f => f.type === 'confirm')
+    ? 'confirm'
+    : fields.length && fields.every(f => ['single_select', 'multi_select'].includes(f.type))
+      ? 'select' : 'answer';
+  return {
+    kind,
+    label: { answer: '待你回答', confirm: '待你确认', select: '待你选择' }[kind],
+    heading: { answer: '需要你回答', confirm: '需要你确认', select: '需要你选择' }[kind],
+    submitLabel: kind === 'confirm' ? '提交决定' : '发送回答',
+  };
+}
+
+export function interactionHistoryTitle(request: InteractionRequest, now = Date.now()): string {
+  const status = effectiveInteractionStatus(request, now);
+  const prefix = { pending: '待处理', answered: '已回答', cancelled: '已取消', expired: '已失效', superseded: '已被替代' }[status];
+  const title = request.title === '请补充信息' ? '补充信息' : request.title;
+  return `${prefix}：${title}`;
+}
+
+// Remember a manual dismissal across component remounts; storage denial must
+// not break the interaction or discard the in-memory preference.
+const collapsedRequests = new Set<string>();
+function collapsedKey(request: InteractionRequest): string {
+  return `kaiwu_ix_collapsed:${request.conversationId}:${request.id}:${request.version}`;
+}
+export function isInteractionCollapsed(request: InteractionRequest): boolean {
+  const key = collapsedKey(request);
+  try {
+    if (typeof sessionStorage !== 'undefined') return sessionStorage.getItem(key) === '1';
+  } catch { /* use the in-memory fallback */ }
+  return collapsedRequests.has(key);
+}
+export function setInteractionCollapsed(request: InteractionRequest, collapsed: boolean): void {
+  const key = collapsedKey(request);
+  if (collapsed) collapsedRequests.add(key); else collapsedRequests.delete(key);
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    if (collapsed) sessionStorage.setItem(key, '1'); else sessionStorage.removeItem(key);
+  } catch { /* keep the in-memory preference */ }
+}
+
 export function getPendingInteractions(
   interactions?: InteractionRequest[],
   now = Date.now(),
@@ -385,12 +431,13 @@ export function clearInteractionDraft(
 }
 
 export function clearInteractionDrafts(): void {
+  collapsedRequests.clear();
   try {
     if (typeof sessionStorage === "undefined") return;
     const keys: string[] = [];
     for (let i = 0; i < sessionStorage.length; i++) {
       const k = sessionStorage.key(i);
-      if (k && k.startsWith("kaiwu_ix_draft:")) {
+      if (k && (k.startsWith("kaiwu_ix_draft:") || k.startsWith("kaiwu_ix_collapsed:"))) {
         keys.push(k);
       }
     }

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from "vue";
+import InteractionIcon from './InteractionIcon.vue';
+import MarkdownContent from './MarkdownContent.vue';
 import type {
   InteractionRequest,
   InteractionField,
@@ -10,6 +12,9 @@ import {
   loadInteractionDraft,
   saveInteractionDraft,
   normalizeSubmissionAnswers,
+  interactionPresentation,
+  isInteractionCollapsed,
+  setInteractionCollapsed,
   type InteractionAnswers,
   type InteractionOthers,
   type InteractionDraft,
@@ -42,8 +47,7 @@ const emit = defineEmits<{
 
 const currentIndex = ref(0);
 const collapsed = ref(false);
-// User manual collapse memory keyed by conversation:request:version
-const collapsedByUserKeys = ref<Set<string>>(new Set());
+const presentation = computed(() => currentRequest.value ? interactionPresentation(currentRequest.value) : undefined);
 
 // DOM refs for accessible focus management
 const cardSectionRef = ref<HTMLElement | null>(null);
@@ -109,13 +113,7 @@ function initDraft(req?: InteractionRequest) {
     fallbackText.value = "";
   }
 
-  // Check if user manually collapsed this exact request version
-  const key = `${props.conversationId}:${req.id}:${req.version}`;
-  if (collapsedByUserKeys.value.has(key)) {
-    collapsed.value = true;
-  } else {
-    collapsed.value = false;
-  }
+  collapsed.value = isInteractionCollapsed(req);
   emit("collapseChange", collapsed.value);
 }
 
@@ -159,13 +157,11 @@ async function toggleCollapse() {
   emit("collapseChange", collapsed.value);
   const req = currentRequest.value;
   if (req) {
-    const key = `${props.conversationId}:${req.id}:${req.version}`;
+    setInteractionCollapsed(req, collapsed.value);
     if (collapsed.value) {
-      collapsedByUserKeys.value.add(key);
       await nextTick();
       expandBtnRef.value?.focus();
     } else {
-      collapsedByUserKeys.value.delete(key);
       await nextTick();
       focusFirstField();
     }
@@ -175,10 +171,25 @@ async function toggleCollapse() {
 function focusFirstField() {
   if (!cardSectionRef.value) return;
   const focusable = cardSectionRef.value.querySelector<HTMLElement>(
-    'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]',
+    '.interaction-body button:not([disabled]), .interaction-body input:not([disabled]), .interaction-body textarea:not([disabled]), .interaction-body select:not([disabled])',
   );
   focusable?.focus();
 }
+
+async function openRequest(requestId?: string) {
+  const index = requestId ? props.requests.findIndex(req => req.id === requestId) : currentIndex.value;
+  if (index < 0) return;
+  currentIndex.value = index;
+  await nextTick();
+  const req = currentRequest.value;
+  if (!req) return;
+  setInteractionCollapsed(req, false);
+  collapsed.value = false;
+  emit('collapseChange', false);
+  await nextTick();
+  focusFirstField();
+}
+defineExpose({ openRequest });
 
 function handleCardKeyDown(e: KeyboardEvent) {
   // Scoped strictly to the card's local non-modal dialog DOM
@@ -348,7 +359,7 @@ function retryAnswer() {
     >
       <div class="interaction-collapsed-info">
         <span class="interaction-badge" :class="{ blocking: currentRequest.blocking }">
-          {{ currentRequest.blocking ? "待你处理 · 阻塞" : "待你处理" }}
+          <InteractionIcon :kind="presentation?.kind" />{{ presentation?.label }}
         </span>
         <strong>{{ currentRequest.title }}</strong>
         <span v-if="requests.length > 1" class="interaction-queue-hint">
@@ -378,12 +389,7 @@ function retryAnswer() {
       <header class="interaction-header">
         <div class="interaction-title-group">
           <div class="interaction-badges">
-            <span
-              class="interaction-badge"
-              :class="{ blocking: currentRequest.blocking, native: currentRequest.source === 'agent_ui' }"
-            >
-              {{ currentRequest.blocking ? "待你处理" : "可选补充" }}
-            </span>
+            <span class="interaction-kind"><InteractionIcon :kind="presentation?.kind" />{{ presentation?.heading }}</span>
             <span v-if="currentRequest.source === 'agent_ui'" class="interaction-badge native">
               原生交互
             </span>
@@ -391,11 +397,10 @@ function retryAnswer() {
           <h3 :id="'interaction-title-' + currentRequest.id" class="interaction-title">
             {{ currentRequest.title }}
           </h3>
-          <p v-if="currentRequest.description" class="interaction-desc">
-            {{ currentRequest.description }}
-          </p>
+          <MarkdownContent v-if="currentRequest.description" class="interaction-desc" :text="currentRequest.description" />
         </div>
 
+        <button type="button" class="interaction-text-btn interaction-header-collapse" aria-label="收起待处理问题" @click="toggleCollapse">收起 ⌄</button>
         <div v-if="requests.length > 1" class="interaction-queue-nav">
           <span>待答 ({{ currentIndex + 1 }}/{{ requests.length }})</span>
           <button
@@ -712,8 +717,10 @@ function retryAnswer() {
         </button>
       </div>
 
+      <p class="interaction-scope-note">{{ currentRequest.source === 'agent_ui' ? '来自 pi 的交互请求，回答仅作用于本次请求。' : '回答将发回此任务或项目的原 pi 会话。' }}</p>
       <!-- Actions footer -->
       <footer class="interaction-actions">
+        <small class="interaction-wait-note">仅此会话等待处理，其他任务不受影响</small>
         <div class="interaction-actions-left">
           <button
             type="button"
@@ -743,7 +750,7 @@ function retryAnswer() {
             :disabled="pending || !online"
             @click="submitForm"
           >
-            {{ pending ? "提交中…" : "发送答复" }}
+            {{ pending ? "提交中…" : presentation?.submitLabel }}
           </button>
         </div>
       </footer>

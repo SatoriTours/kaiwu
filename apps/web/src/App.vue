@@ -184,6 +184,11 @@ function navigate(task?: Task) {
   );
   chatVisible.value = true;
 }
+async function processInteraction(task: Task) {
+  navigate(task);
+  await nextTick();
+  await chatPanel.value?.openInteraction();
+}
 function chooseProject(id: string) {
   projectID.value = id;
   taskID.value = "";
@@ -1597,6 +1602,7 @@ onBeforeUnmount(() => {
           :pending="local.pending"
           :conversations="state?.conversations ?? {}"
           @select="navigate"
+          @process="processInteraction"
           @project="navigate()"
           @start="start($event)"
           @merge="openMerge($event)"
