@@ -29,8 +29,9 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)
 # The Git reference-transaction hook fires for every repository, so a browser
 # suite in one lifecycle can exhaust the product's eight resident sessions. The
 # documented regression splits it into two independent fresh service
-# lifecycles: first the one long history test alone, then everything else.
-HISTORY_GREP='result history UI:'
+# lifecycles: preview/history cases first, then the remaining scenarios. Each
+# process keeps the product's eight-resident-session limit; no test is skipped.
+HISTORY_GREP='result history UI:|result review opens|a real task HTTP preview|late preview responses'
 BUILDINFO_PKG='github.com/SatoriTours/kaiwu/server/internal/buildinfo'
 # Documented default browser ports; DEPLOY_BROWSER_PORTS may move the whole
 # suite to a free range so another task on the same machine cannot conflict.

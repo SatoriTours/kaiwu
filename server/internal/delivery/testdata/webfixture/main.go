@@ -148,14 +148,16 @@ func (f *fixture) Close() {
 	}
 }
 
-func (f *fixture) remoteCommand(ctx context.Context, dir string, target gitops.RemoteTarget, args []string, _ string, _ gitops.ProcessLease) (string, error) {
+func (f *fixture) remoteCommand(ctx context.Context, dir string, target gitops.RemoteTarget, args []string, _ string, lease gitops.ProcessLease) (string, error) {
 	a := append([]string{}, args...)
 	for i := range a {
 		if strings.Contains(a[i], "github.com/") {
 			a[i] = f.remote
 		}
 	}
-	out, err := git(ctx, dir, a...)
+	// This transport spawns real Git against an isolated bare remote. Attribute
+	// its actual child to the write lease, just like the production transport.
+	out, err := gitops.Run(ctx, dir, gitops.LeaseTrack(lease), a...)
 	if err == nil && len(a) > 0 && a[0] == "push" {
 		sha, ref, _ := strings.Cut(a[len(a)-1], ":")
 		f.mu.Lock()

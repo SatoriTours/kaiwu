@@ -76,6 +76,8 @@ test.describe("UI Consistency & CustomSelect Verification", () => {
     await expect(modelDialog).toBeVisible();
 
     const providerTrigger = modelDialog.getByRole("combobox", { name: "提供商" });
+    // Model discovery is asynchronous; key presses on a disabled trigger are ignored.
+    await expect(providerTrigger).toBeEnabled();
     await providerTrigger.press("ArrowDown");
     const dropdown = modelDialog.locator('[role="listbox"]');
     await expect(dropdown).toBeVisible();
