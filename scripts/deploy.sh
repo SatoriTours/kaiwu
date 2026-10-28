@@ -436,8 +436,12 @@ deploy_sha() {
 			pipeline_fail "浏览器交互测试V2用例"
 		run_step "$work/src" "浏览器主流程（独立生命周期一）" npm --prefix apps/web run test:browser -- --project=existing --grep "$HISTORY_GREP" ||
 			pipeline_fail "浏览器主流程分组一"
-		run_step "$work/src" "浏览器主流程（独立生命周期二）" npm --prefix apps/web run test:browser -- --grep-invert "$HISTORY_GREP" ||
+		run_step "$work/src" "浏览器主流程（独立生命周期二）" npm --prefix apps/web run test:browser -- --project=existing --project=delivery --project=ui-consistency --project=theme --project=drawer --grep-invert "$HISTORY_GREP" ||
 			pipeline_fail "浏览器主流程分组二"
+		# Project tools create persistent projects and sessions. Run them in a
+		# fresh service, preserving the legacy suite's empty-database premise.
+		run_step "$work/src" "浏览器项目工具（独立生命周期）" npm --prefix apps/web run test:browser -- --project=project-tools ||
+			pipeline_fail "浏览器项目工具套件"
 		run_step "$work/src" "浏览器版本套件" env KAIWU_VERSION_TEST_PORT="$DEPLOY_VERSION_BROWSER_PORT" KAIWU_VERSION_TEST_REVISION="$sha" npm --prefix apps/web run test:browser -- --config playwright.version.config.ts ||
 			pipeline_fail "浏览器版本套件"
 	fi

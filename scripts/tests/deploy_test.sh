@@ -350,6 +350,9 @@ case " $* " in
 *" test:browser "*)
 	if [ "${FAKE_NPM_FAIL:-}" = browser ]; then exit 1; fi
 	case " $* " in
+	*"--project=project-tools"*)
+		if [ "${FAKE_NPM_FAIL:-}" = projecttoolsbrowser ]; then exit 1; fi
+		;;
 	*"playwright.version.config.ts"*)
 		if [ "${FAKE_NPM_FAIL:-}" = versionbrowser ]; then exit 1; fi
 		;;
@@ -821,6 +824,8 @@ expect_contains "V2交互用例在全新服务执行且无跳过" "$FAKE_LOG_DIR
 result_group='result history UI:|result review opens|a real task HTTP preview|late preview responses'
 expect_contains "预览与历史用例在独立生命周期执行" "$FAKE_LOG_DIR/npm.calls" "--project=existing --grep $result_group"
 expect_contains "其余用例使用互补分组而非跳过" "$FAKE_LOG_DIR/npm.calls" "--grep-invert $result_group"
+expect_contains "原主流程显式排除会污染初始空库的工具套件" "$FAKE_LOG_DIR/npm.calls" "--project=existing --project=delivery --project=ui-consistency --project=theme --project=drawer --grep-invert $result_group"
+expect_contains "工具套件在独立新服务生命周期执行" "$FAKE_LOG_DIR/npm.calls" "test:browser -- --project=project-tools"
 expect_eq "浏览器门禁成功后激活候选" "$(activation_revision)" "$shaB"
 
 CFG_BUSY=$REPO/.kaiwu/busy.conf
@@ -964,6 +969,13 @@ expect_eq "版本浏览器失败不切换当前版本" "$(current_release)" "$re
 expect_eq "版本浏览器失败保留激活修订号" "$(activation_revision)" "$shaV0"
 expect_eq "版本浏览器失败记录尝试" "$(attempt_revision)" "$shaV"
 expect_absent "版本浏览器失败不上传候选" "$FAKE_LOG_DIR/scp.calls" "$shaV"
+export FAKE_NPM_FAIL=projecttoolsbrowser
+run_cfg "$CFG_VER" >/dev/null 2>&1
+expect_exit "独立工具浏览器失败则部署失败" "$?" 1
+unset FAKE_NPM_FAIL
+expect_eq "工具浏览器失败不切换当前版本" "$(current_release)" "$releaseV"
+expect_eq "工具浏览器失败保留激活修订号" "$(activation_revision)" "$shaV0"
+expect_absent "工具浏览器失败不上传候选" "$FAKE_LOG_DIR/scp.calls" "$shaV"
 python3 -m http.server 19461 --bind 127.0.0.1 >/dev/null 2>&1 &
 vbusy=$!
 sleep 0.6
