@@ -281,6 +281,13 @@ test.describe("VersionBadge UI and Interactions", () => {
     await page.setViewportSize({ width: 360, height: 640 });
     await page.waitForTimeout(300);
 
+    await expect(trigger).not.toBeVisible();
+    const settings=page.getByRole("button",{name:"全局设置",exact:true});
+    await expect(settings).toBeVisible();
+    const settingsBox=(await settings.boundingBox())!;
+    expect(settingsBox.x).toBeGreaterThanOrEqual(0);
+    expect(settingsBox.x+settingsBox.width).toBeLessThanOrEqual(360);
+    await settings.click();
     await expect(trigger).toBeVisible();
     const triggerBox = await trigger.boundingBox();
     expect(triggerBox).not.toBeNull();
