@@ -24,9 +24,10 @@ export async function openChat(page: Page) {
 }
 export async function clickInView(page: Page, target: Locator) {
   if(await target.evaluate(el=>el.ownerDocument.defaultView!==el.ownerDocument.defaultView?.top)){await target.click();return;}
-  const location = await target.evaluate(el => ({ chat: !!el.closest('.chat-drawer'), modal: !!el.closest('dialog') }));
+  const location = await target.evaluate(el => ({ chat: !!el.closest('.chat-drawer'), modal: !!el.closest('dialog'), global: !!el.closest('.global-actions') }));
   if (location.chat) await openChat(page);
   else if (!location.modal) await closeChat(page);
+  if(location.global && !await target.isVisible()) await page.getByRole('button',{name:'全局设置',exact:true}).click();
   await target.click();
 }
 export async function fillInChat(page: Page, target: Locator, text: string) {

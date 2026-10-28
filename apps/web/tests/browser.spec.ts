@@ -786,10 +786,10 @@ test("WebSocket updates render an unfinished code fence before the reply ends", 
   const reply = page.locator(".message.assistant").last();
   await expect(reply.getByRole("heading", { name: "流式格式" })).toBeVisible();
   await expect(reply.locator("pre code")).toContainText("package main");
-  await expect(page.locator(".scope")).toContainText("回复中");
+  await expect(reply.locator(".pending-line")).toContainText("正在回复");
   await expect(reply.locator("strong").last()).toHaveText("完成");
   await expect(reply.locator("pre code")).toContainText('println("ready")');
-  await expect(page.locator(".scope")).toContainText("就绪");
+  await expect(reply.locator(".pending-line")).toHaveCount(0);
 });
 
 test("merge icon and chat approve real Git integration and track later edits", async ({
@@ -1016,10 +1016,13 @@ test('structured progress uses bidirectional socket and keeps verification evide
   const state=(await(await page.request.get('/api/snapshot')).json()).state;
   const task=Object.values(state.tasks).find((t:any)=>t.title==='结构化进展验收') as any;
   const firstRound=state.conversations[task.conversationId].rounds[0];
-  const priorGit=state.taskGit[task.id].state;
+  const workspace=state.executions[task.executionId].workspace;
+  expect(workspace).toBeTruthy();
+  const priorGit=execFileSync('git',['status','--porcelain=v1','--untracked-files=all'],{cwd:workspace,encoding:'utf8'});
   await markTaskComplete(page);
   await expect(card).toContainText('已完成');
   await expect(reply.locator('.message-status')).toHaveCount(0);
+  expect(execFileSync('git',['status','--porcelain=v1','--untracked-files=all'],{cwd:workspace,encoding:'utf8'})).toBe(priorGit);
   await fillInChat(page, page.locator('#draft'), '结构化登录恢复：补充边界检查');
   await clickInView(page, page.locator('#send'));
   await expect(page.locator('.message.assistant').last().locator('.turn-result-actions')).toBeVisible();
@@ -1032,7 +1035,6 @@ test('structured progress uses bidirectional socket and keeps verification evide
   const after=(await(await page.request.get('/api/snapshot')).json()).state;
   expect(after.conversations[task.conversationId].rounds[0].id).toBe(firstRound.id);
   expect(after.conversations[task.conversationId].rounds[0].phase).toBe('confirmed');
-  expect(after.taskGit[task.id].state).toBe(priorGit);
   await page.screenshot({path:'../../docs/design/web-service/progress-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});
   await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'◌ 聊天',exact:true}));
@@ -1435,7 +1437,7 @@ test('project menu keyboard selection preserves scope drafts and dismisses predi
   await clickInView(page, menu.getByRole('menuitemradio', { includeHidden: true, name: 'abc', exact: true }));
   await expect(page.locator('#draft')).toHaveValue('第一个项目的草稿');
   await clickInView(page, trigger);
-  await clickInView(page, page.locator('.toolbar h1'));
+  await page.locator('.board').click({position:{x:2,y:2}});
   await expect(menu).toHaveCount(0);
   await trigger.focus();
   await trigger.press('ArrowUp');
@@ -1473,7 +1475,9 @@ test('project menu stays usable with long names on desktop and mobile', async ({
     await page.setViewportSize({ width, height: 900 });
     await expect(trigger).toHaveAttribute('data-project-id', ids[1]);
     const header = await page.locator('.top').boundingBox();
-    const model = await page.getByRole('button', { name: '默认模型', exact: true }).boundingBox();
+    const modelButton=page.getByRole('button',{name:'默认模型',exact:true});
+    const headerAction=await modelButton.isVisible()?modelButton:page.getByRole('button',{name:'全局设置',exact:true});
+    const model = await headerAction.boundingBox();
     expect(model!.x).toBeGreaterThan(width / 2);
     expect(header!.height).toBeLessThanOrEqual(52);
     await clickInView(page, trigger);

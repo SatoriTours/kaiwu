@@ -436,8 +436,12 @@ deploy_sha() {
 			pipeline_fail "浏览器交互测试V2用例"
 		run_step "$work/src" "浏览器主流程（独立生命周期一）" npm --prefix apps/web run test:browser -- --project=existing --grep "$HISTORY_GREP" ||
 			pipeline_fail "浏览器主流程分组一"
-		run_step "$work/src" "浏览器主流程（独立生命周期二）" npm --prefix apps/web run test:browser -- --project=existing --project=delivery --project=ui-consistency --project=theme --project=drawer --grep-invert "$HISTORY_GREP" ||
+		run_step "$work/src" "浏览器主流程（独立生命周期二）" npm --prefix apps/web run test:browser -- --project=existing --project=delivery --project=ui-consistency --grep-invert "$HISTORY_GREP" ||
 			pipeline_fail "浏览器主流程分组二"
+		# UI regressions must not inherit the business suite's authentication
+		# rate budget or its eight resident agent sessions.
+		run_step "$work/src" "浏览器主题与抽屉（独立生命周期）" npm --prefix apps/web run test:browser -- --project=theme --project=drawer ||
+			pipeline_fail "浏览器主题与抽屉套件"
 		# Project tools create persistent projects and sessions. Run them in a
 		# fresh service, preserving the legacy suite's empty-database premise.
 		run_step "$work/src" "浏览器项目工具（独立生命周期）" npm --prefix apps/web run test:browser -- --project=project-tools ||
