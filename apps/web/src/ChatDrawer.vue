@@ -55,7 +55,7 @@ function dismiss(event: MouseEvent) {
   transition: transform .22s ease, display .22s allow-discrete, overlay .22s allow-discrete;
 }
 .chat-drawer[open] { display: flex; transform: translateX(0); }
-.chat-drawer::backdrop { background: #101a164d; }
+.chat-drawer::backdrop { background: var(--theme-backdrop, #101a164d); }
 @starting-style { .chat-drawer[open] { transform: translateX(100%); } }
 .chat-drawer .chat { display: flex; flex: 1; width: 100%; height: 100%; border: 0; }
 .chat-drawer .chat-close { flex: 0 0 30px; width: 30px; height: 30px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 20px; }

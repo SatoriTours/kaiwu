@@ -46,8 +46,8 @@ button:disabled {
   cursor: not-allowed;
 }
 button.primary {
-  background: #3c5448;
-  color: white;
+  background: var(--theme-primary, #3c5448);
+  color: var(--theme-primary-ink, white);
   border-color: var(--theme-border, #3c5448);
 }
 :focus-visible {
@@ -123,7 +123,7 @@ small {
   height: 23px;
   display: grid;
   place-items: center;
-  background: #27352f;
+  background: var(--theme-brand-bg, #27352f);
   color: #fff;
   border-radius: 6px;
   font-size: 13px;
@@ -367,13 +367,6 @@ small {
   color: var(--theme-muted, #a0a5a7);
   font-size: 12px;
 }
-.board-bottom {
-  font-size: 11px;
-  color: var(--theme-muted, #94999c);
-  padding: 9px 22px;
-  flex-shrink: 0;
-  border-top: 1px solid var(--theme-border, #f0f0f0);
-}
 .chat {
   min-width: 0;
   min-height: 0;
@@ -388,7 +381,7 @@ small {
   flex-shrink: 0;
 }
 .chat-head .avatar {
-  background: #27352f;
+  background: var(--theme-brand-bg, #27352f);
   color: white;
   width: 25px;
   height: 25px;
@@ -570,8 +563,8 @@ small {
   border: 0;
   resize: none;
   width: 100%;
-  height: 80px;
-  min-height: 50px;
+  height: 48px;
+  min-height: 48px;
   max-height: 150px;
   font-size: 13px;
   line-height: 1.8;
@@ -619,6 +612,8 @@ small {
   display: none;
 }
 dialog:not(.chat-drawer) {
+  background: var(--theme-surface, Canvas);
+  color: var(--ink);
   width: min(460px, calc(100vw - 30px));
   max-height: 85dvh;
   overflow: auto;
@@ -628,7 +623,7 @@ dialog:not(.chat-drawer) {
   box-shadow: 0 12px 48px var(--theme-shadow, #17203220);
 }
 dialog:not(.chat-drawer)::backdrop {
-  background: #20293655;
+  background: var(--theme-backdrop, #20293655);
 }
 dialog:not(.chat-drawer) h2 {
   font-size: 16px;
@@ -805,9 +800,6 @@ dialog:not(.chat-drawer) textarea {
   .task-status {
     font-size: 11px;
   }
-  .board-bottom {
-    padding: 8px 15px;
-  }
   .chat-head {
     padding: 14px 17px;
   }
@@ -885,7 +877,7 @@ dialog:not(.chat-drawer) textarea {
   width: 30px;
   height: 30px;
   border-radius: 9px;
-  background: #2d4439;
+  background: var(--theme-brand-bg, #2d4439);
   color: #fff;
   font-size: 18px;
   font-weight: 500;
@@ -1006,15 +998,15 @@ dialog:not(.chat-drawer) textarea {
   margin-top: 16px;
   border: 1px solid var(--theme-border, #39594a);
   border-radius: 7px;
-  background: #39594a;
-  color: #fff;
+  background: var(--theme-primary, #39594a);
+  color: var(--theme-primary-ink, #fff);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s;
 }
 .login-page .submit:hover:not(:disabled) {
-  background: #2e493c;
+  background: var(--theme-primary-hover, #2e493c);
 }
 .login-page .submit:disabled {
   opacity: 0.6;
@@ -1153,7 +1145,7 @@ dialog:not(.chat-drawer) textarea {
   outline: 2px solid var(--theme-focus, #849e90);
 }
 .app.chat-visible .board-side {
-  display: block;
+  display: flex;
 }
 @media (max-width: 1023px) {
   .app.chat-visible .board-side {
@@ -1314,3 +1306,14 @@ h3 {
   background: transparent;
   border-color: transparent;
 }
+
+/* Project tools V3: a single compact row; no repeated project/path toolbar. */
+.top{height:48px;min-height:48px;padding:0 18px;gap:10px;position:relative}
+.project-tools-nav{display:flex;align-items:center;gap:3px;border-left:1px solid var(--border);padding-left:10px}
+.project-tools-nav button{display:flex;align-items:center;gap:6px;border:0;background:transparent;font-size:11px;padding:4px 8px}
+.project-tools-nav button[aria-pressed=true]{background:var(--theme-inset,#edf2eb);color:var(--blue)}
+.project-chat-top{border:0;background:transparent;margin-left:auto;font-size:11px;white-space:nowrap}
+.compact-global-actions{display:flex;align-items:center;gap:6px}.settings-toggle{display:none}
+.app:has(.project-tools){grid-template-columns:minmax(0,1fr)}
+@media(max-width:1100px){.settings-toggle{display:block;border:0;background:transparent}.compact-global-actions>.global-actions{display:none;position:absolute;right:12px;top:45px;z-index:40;min-width:180px;padding:12px;background:var(--theme-surface,#fff);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 30px #0002}.compact-global-actions>.global-actions.settings-open{display:flex;flex-direction:column;align-items:stretch}.global-actions .connection{display:block}.global-actions button{display:block}}
+@media(max-width:650px){.top{padding:0 10px;gap:5px}.top>.slash,.top>.brand{display:none}.project-tools-nav{padding-left:5px;gap:0}.project-tools-nav button{width:29px;padding:3px}.tool-nav-label,.project-chat-top span{display:none}.project-chat-top{padding:3px 5px;min-width:25px}.compact-global-actions{gap:2px}.project-trigger{max-width:100px!important;padding:3px!important;gap:4px!important}.project-trigger-name{max-width:65px!important}.compact-global-actions .theme-picker{max-width:31px}.app:has(.project-tools){display:flex}.mobile-switch:has(+.app .project-tools){display:none}}

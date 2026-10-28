@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests",
   projects: [
+    { name: "project-tools", testMatch: "project-tools.browser.spec.ts" },
     { name: "existing", testMatch: "browser.spec.ts" },
     { name: "delivery", testMatch: "delivery.browser.spec.ts", use: { baseURL: "http://127.0.0.1:17332" } },
     { name: "ui-consistency", testMatch: "ui-consistency.browser.spec.ts" },

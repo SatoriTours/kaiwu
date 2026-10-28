@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {createLocalState,selectConversation,setDraft,acceptSent} from '../src/workbench.ts';
+import {addDraftAttachments,removeDraftAttachment,attachmentURL} from '../src/attachments.ts';
+const local=createLocalState();selectConversation(local,'a');setDraft(local,'question');
+const item={id:'one',name:'note.txt',mime:'text/plain',size:4};
+addDraftAttachments(local,'a',[item]);const revision=local.drafts.a.revision;
+selectConversation(local,'b');addDraftAttachments(local,'b',[{...item,id:'two'}]);
+assert.equal(local.drafts.a.attachments?.[0]?.id,'one');
+acceptSent(local,'a',revision);assert.deepEqual(local.drafts.a.attachments,[]);assert.equal(local.drafts.b.attachments?.length,1);
+removeDraftAttachment(local,'b','two');assert.equal(local.drafts.b.attachments?.length,0);
+assert.throws(()=>addDraftAttachments(local,'b',Array.from({length:9},(_,i)=>({...item,id:String(i)}))),/8/);
+assert.equal(attachmentURL('conv/a','one'),'/api/attachments/one?conversationId=conv%2Fa');
+console.log('attachment draft tests passed');

@@ -287,7 +287,7 @@ func (s *Store) PreparedCommand(c Command, prepare func() error) (Receipt, error
 	if s.closed {
 		return Receipt{}, errors.New("store closed")
 	}
-	if c.Type == "send_message" && IsStartRequest(c.Text) {
+	if c.Type == "send_message" && len(c.Attachments) == 0 && IsStartRequest(c.Text) {
 		c.Type = "start_task"
 		if c.TaskID == "" {
 			c.TaskID = s.state.Conversations[c.ConversationID].TaskID

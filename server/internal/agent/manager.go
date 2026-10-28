@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/SatoriTours/kaiwu/server/internal/pirpc"
+	"github.com/SatoriTours/kaiwu/server/internal/projecttools"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -72,7 +74,7 @@ func (m *Manager) begin(conversationID, messageID string) error {
 		return nil
 	}
 	c, ok := m.store.Snapshot().Conversations[conversationID]
-	if !ok || c.RunState != "starting" || m.reserved[c.TaskID] || workbench.TaskMerging(m.store.Snapshot(), c.TaskID) {
+	if !ok || c.RunState != "starting" || m.reserved[c.TaskID] || m.reserved["project:"+c.ProjectID] || workbench.TaskMerging(m.store.Snapshot(), c.TaskID) {
 		return workbench.Conflict("会话不能启动")
 	}
 	entry := m.instances[conversationID]
@@ -151,7 +153,7 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 			m.release(c.ID, entry, true)
 			return
 		}
-		opts := pirpc.Options{}
+		opts := pirpc.Options{MaxRecordBytes: 40 << 20, MaxWriteBytes: 48 << 20, MaxEventBytes: 64 << 20}
 		if entry.lease != nil {
 			// Record the real child identity at spawn time. Handshake failures then
 			// release against a known pid instead of an unattributable window.
@@ -233,9 +235,11 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 		return
 	}
 	var text string
+	var attachments []workbench.Attachment
 	for _, message := range c.Messages {
 		if message.ID == messageID {
 			text = message.Text
+			attachments = message.Attachments
 		}
 	}
 	if c.TaskID != "" && workbench.IsStartRequest(text) {
@@ -255,7 +259,11 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 		m.stopFailed(c.ID, entry, client, "无法保存发送状态", false)
 		return
 	}
-	params, _ := json.Marshal(map[string]string{"message": text + replyTurnInstructions})
+	params, attachmentErr := attachmentPrompt(projecttools.Attachments{Dir: filepath.Join(m.cfg.DataDir, "attachments")}, c.ID, text, attachments)
+	if attachmentErr != nil {
+		m.stopFailed(c.ID, entry, client, "附件不可用，消息未发送；请重新选择附件", false)
+		return
+	}
 	response, e := client.Call(m.ctx, pirpc.Command{Type: "prompt", Params: params})
 	if e != nil {
 		var rpc *pirpc.Error

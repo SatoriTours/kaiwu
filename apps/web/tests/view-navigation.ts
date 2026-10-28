@@ -23,6 +23,7 @@ export async function openChat(page: Page) {
   await expect(page.locator('.chat-drawer')).toBeVisible();
 }
 export async function clickInView(page: Page, target: Locator) {
+  if(await target.evaluate(el=>el.ownerDocument.defaultView!==el.ownerDocument.defaultView?.top)){await target.click();return;}
   const location = await target.evaluate(el => ({ chat: !!el.closest('.chat-drawer'), modal: !!el.closest('dialog') }));
   if (location.chat) await openChat(page);
   else if (!location.modal) await closeChat(page);
@@ -31,4 +32,16 @@ export async function clickInView(page: Page, target: Locator) {
 export async function fillInChat(page: Page, target: Locator, text: string) {
   await openChat(page);
   await target.fill(text);
+}
+
+// The explicit completion entry is a card action, never a hidden chat control.
+export async function markTaskComplete(page:Page, card?:Locator){
+ await closeChat(page);
+ const back=page.getByRole('button',{name:'← 返回看板',exact:true});if(await back.isVisible())await back.click();
+ const taskId=new URL(page.url()).pathname.match(/\/tasks\/([^/]+)$/)?.[1];
+ card??=taskId?page.locator('.task-card[data-taskid="'+taskId+'"]'):page.locator('.task-card').first();
+ await card.getByRole('button',{name:'任务操作',exact:true}).click();
+ await page.getByRole('menuitem',{name:'标记任务完成',exact:true}).click();
+ await page.getByRole('dialog',{name:'标记任务完成',exact:true}).getByRole('button',{name:'标记完成',exact:true}).click();
+ await expect(card.locator('.task-status')).toHaveText('已完成');await openChat(page);
 }

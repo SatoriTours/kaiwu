@@ -177,7 +177,7 @@ test("a task failure shows the provider reason inline and keeps the existing res
   // A failure that did not destroy the result must keep the result actions.
   await expect(card).toContainText("此前的结果仍然保留");
   await expect(page.locator(".result-review")).toBeVisible();
-  await expect(page.getByRole("button", { name: "确认完成", exact: true })).toBeVisible();
+  await expect(page.locator('.message.assistant').last().locator('.turn-result-actions')).toBeVisible();
   await page.screenshot({ path: "/tmp/kaiwu-failure-desktop.png" });
   expect(errors).toEqual([]);
 });

@@ -47,7 +47,9 @@ export interface Execution {
     failed: boolean;
   }[];
 }
+export interface Attachment { id:string; name:string; mime:string; size:number }
 export interface Message {
+ attachments?:Attachment[];
  kind?:string;
  displayText?:string;
   id: string;

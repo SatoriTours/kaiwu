@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue';
+import { computed, ref, nextTick, onMounted, onUnmounted } from 'vue';
 import type { Topic, Task, Conversation, GitStatus, Execution, DeliverySummary } from "./types.ts";
 import {taskState} from "./task-state.ts";
 import {deliveryView, isDeliveryActive} from "./delivery.ts";
+import {createCompletionIntent} from './task-completion.ts';
 import GitStatusView from "./GitStatus.vue";
 import MergeIcon from "./MergeIcon.vue";
 import TaskActionIcon from "./TaskActionIcon.vue";
@@ -26,15 +27,23 @@ const emit = defineEmits<{
   project: [];
   start: [Task];
   merge: [Task];
+  complete: [Task];
   topic: [string];
   addTopic: [];
   addTask: [string];
   deleteTopic: [Topic];
 }>();
 const now = ref(Date.now());
+const openMenu=ref('');let menuTrigger:HTMLElement|undefined;
+function completion(task:Task){return createCompletionIntent({task,conversation:props.conversations[task.conversationId],execution:props.executions[task.executionId??''],delivery:props.deliveries?.[task.id],online:props.online,pending:props.pending[task.conversationId]})}
+async function toggleMenu(id:string,event:MouseEvent){menuTrigger=event.currentTarget as HTMLElement;openMenu.value=openMenu.value===id?'':id;await nextTick();document.getElementById('task-menu-'+id)?.querySelector<HTMLButtonElement>('button')?.focus()}
+function dismissMenu(e:Event){if(!(e.target as Element).closest('.task-actions-menu'))openMenu.value=''}
+function menuKeys(e:KeyboardEvent){const el=e.currentTarget as HTMLElement;const items=[...el.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];if(e.key==='Escape'){e.preventDefault();e.stopPropagation();openMenu.value='';menuTrigger?.focus()}else if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){e.preventDefault();const i=items.indexOf(document.activeElement as HTMLButtonElement);items[e.key==='Home'?0:e.key==='End'?items.length-1:(i+(e.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus()}}
+function menuBlur(e:FocusEvent){if(!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node|null))openMenu.value=''}
+
 let expiryClock: ReturnType<typeof setInterval> | undefined;
-onMounted(()=>{ expiryClock=setInterval(()=>{now.value=Date.now()},1000); });
-onUnmounted(()=>{ if(expiryClock)clearInterval(expiryClock); });
+onMounted(()=>{document.addEventListener('pointerdown',dismissMenu); expiryClock=setInterval(()=>{now.value=Date.now()},1000); });
+onUnmounted(()=>{document.removeEventListener('pointerdown',dismissMenu); if(expiryClock)clearInterval(expiryClock); });
 function presentation(task:Task){return taskState(task,props.conversations[task.conversationId],props.executions[task.executionId??''],undefined,now.value)}
 const waitingCount = computed(()=>props.tasks.filter(task=>presentation(task).pendingInteractionCount>0).length);
 function actionLabel(task: Task) {
@@ -54,8 +63,6 @@ function actionLabel(task: Task) {
 <template>
   <section class="board-side" aria-label="项目任务看板">
     <div class="toolbar">
-      <h1>项目看板</h1>
-      <button class="project-chat" aria-haspopup="dialog" @click="emit('project')">项目对话</button>
       <span class="running">{{ tasks.length }} 个任务</span>
       <span v-if="waitingCount" class="board-interaction-count" role="status">{{ waitingCount }} 项待你处理</span>
       <button
@@ -198,6 +205,13 @@ function actionLabel(task: Task) {
                   :pending="pending[task.conversationId]"
                 />
               </button>
+              <div class="task-actions-menu" @focusout="menuBlur" @click.stop @keydown.stop>
+                <button type="button" class="task-menu-toggle" aria-label="任务操作" title="任务操作" aria-haspopup="menu" :aria-expanded="openMenu===task.id" :aria-controls="'task-menu-'+task.id" @click.stop="toggleMenu(task.id,$event)">⋯</button>
+                <div v-if="openMenu===task.id" :id="'task-menu-'+task.id" class="task-menu-panel" role="menu" aria-label="任务操作" @keydown="menuKeys">
+                  <button role="menuitem" @click="openMenu='';emit('select',task)">打开任务对话</button>
+                  <button v-if="completion(task)" role="menuitem" @click="openMenu='';menuTrigger?.focus();emit('complete',task)">标记任务完成</button>
+                </div>
+              </div>
             </div>
           </article>
           <div v-if="!tasks.some((t) => t.topicId === topic.id)" class="empty">
@@ -206,8 +220,9 @@ function actionLabel(task: Task) {
         </div>
       </section>
     </div>
-    <div class="board-bottom">
-      专题组织任务 · 选择卡片沟通 · 点击开始开发执行任务
-    </div>
   </section>
 </template>
+
+<style scoped>
+.task-actions-menu{position:relative;flex-shrink:0}.task-menu-toggle{border:0;background:transparent;color:var(--muted);width:26px;min-height:28px;padding:0;font-size:16px}.task-menu-panel{position:absolute;right:0;bottom:32px;width:180px;border:1px solid var(--border);border-radius:8px;background:var(--theme-surface,#fff);padding:5px;box-shadow:0 6px 20px var(--theme-shadow,#17203220);z-index:2}.task-menu-panel button{display:flex;width:100%;text-align:left;min-height:32px;border:0;background:transparent;font-size:12px;padding:5px 9px}.task-menu-panel button:hover{background:var(--theme-hover,#f0f3ef)}
+</style>

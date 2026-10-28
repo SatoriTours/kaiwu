@@ -60,7 +60,7 @@ func (h *handler) socketCall(r *http.Request, input socketRequest) socketReply {
 	path := ""
 	query := ""
 	switch input.Method {
-	case "commands", "git/refresh", "git/preview", "git/merge", "previews/status", "previews/start", "previews/stop", "previews/open",
+	case "tools/mkdir", "tools/attach", "tools/terminal/start", "tools/terminal/stop", "tools/terminal/list", "commands", "git/refresh", "git/preview", "git/merge", "previews/status", "previews/start", "previews/stop", "previews/open",
 		"delivery/policy", "delivery/preflight", "delivery/accept", "delivery/control", "delivery/status", "delivery/steps":
 		path = "/api/" + input.Method
 	case "models", "models?refresh=1":
@@ -113,7 +113,7 @@ func (h *handler) Close() error {
 	h.cancel()
 	h.mu.Unlock()
 	h.socketWG.Wait()
-	return nil
+	return h.terminals.Close()
 }
 func (h *handler) socket(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()

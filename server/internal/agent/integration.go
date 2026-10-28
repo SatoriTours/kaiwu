@@ -73,7 +73,7 @@ func (m *Manager) reserveTask(ctx context.Context, taskID string) (func() error,
 		return nil, workbench.Missing()
 	}
 	m.mu.Lock()
-	if m.closed || m.reserved[taskID] {
+	if m.closed || m.reserved[taskID] || m.reserved["project:"+task.ProjectID] {
 		m.mu.Unlock()
 		return nil, workbench.Conflict("任务正在集成")
 	}

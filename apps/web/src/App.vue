@@ -8,9 +8,13 @@ import {
   onBeforeUnmount,
   nextTick,
 } from "vue";
+import ProjectTools from "./ProjectTools.vue";
+import {addDraftAttachments,removeDraftAttachment,uploadAttachment} from "./attachments.ts";
 import KanbanBoard from "./KanbanBoard.vue";
 import ProjectMenu from "./ProjectMenu.vue";
 import ChatPanel from "./ChatPanel.vue";
+import CompleteTaskDialog from './CompleteTaskDialog.vue';
+import {createCompletionIntent,type CompletionIntent} from './task-completion.ts';
 import ChatDrawer from "./ChatDrawer.vue";
 import ResultPreview from "./ResultPreview.vue";
 import {safePreviewURL, preserveArtifactLinks, isWebPreviewable, isManifestApproved, recordManifestApproval, clearManifestApprovals} from "./preview.ts";
@@ -100,6 +104,15 @@ const authenticated = ref(false),
   dialogTopic = ref(""),
   formError = ref(""),
   saving = ref(false);
+const completionTarget=ref<Readonly<CompletionIntent>>();
+const completionBusy=ref(false),completionError=ref('');
+function completionFor(t:Task){return createCompletionIntent({task:t,conversation:state.value?.conversations[t.conversationId],execution:state.value?.executions?.[t.executionId??''],delivery:state.value?.deliveries?.[t.id],online:online.value,pending:!!local.pending[t.conversationId]})}
+const completionEligible=computed(()=>{const target=completionTarget.value;if(!target)return false;const t=state.value?.tasks[target.taskId];return !!t&&completionFor(t)?.roundId===target.roundId});
+function requestCompletion(t:Task){const target=completionFor(t);if(!target)return;completionTarget.value=target;completionError.value=''}
+async function finishCompletion(){const target=completionTarget.value,epoch=authEpoch;if(!target||!completionEligible.value||completionBusy.value)return;completionBusy.value=true;completionError.value='';try{await command({type:'confirm_result',projectId:target.projectId,taskId:target.taskId,conversationId:target.conversationId,roundId:target.roundId});if(epoch===authEpoch&&completionTarget.value===target)completionTarget.value=undefined}catch(e){if(epoch===authEpoch&&completionTarget.value===target)completionError.value=e instanceof Error?e.message:String(e)}finally{if(epoch===authEpoch)completionBusy.value=false}}
+const settingsOpen=ref(false);
+const mainView=ref<"board"|"files"|"terminal">("board");
+const uploading=reactive<Record<string,boolean>>({});
 const chatPanel=ref<InstanceType<typeof ChatPanel>>();
 const resultTarget=ref<{projectId:string;taskId:string;roundId:string}>();
 const taskPreview=ref<TaskPreview>();
@@ -197,6 +210,7 @@ function chooseProject(id: string) {
   chatVisible.value = false;
 }
 function clearIdentity() {
+  completionTarget.value=undefined;completionBusy.value=false;completionError.value='';
   clearManifestApprovals();
   invalidatePreview('auth');
   previewBlockedURL.value = '';
@@ -362,7 +376,7 @@ async function logout() {
     if (epoch === authEpoch) report(e);
   }
 }
-async function command(body: Record<string, string>): Promise<Receipt> {
+async function command(body: Record<string, unknown> & {conversationId?:string;text?:string}): Promise<Receipt> {
   const epoch = authEpoch;
   if (!state.value) throw new Error("服务数据尚未就绪");
   const scope = body.type + ":" + (body.conversationId ?? "form");
@@ -836,12 +850,31 @@ async function save(values: Record<string, string>) {
     if (epoch === authEpoch) saving.value = false;
   }
 }
+async function attachFiles(files:File[],target=local.current){
+ const id=target,epoch=authEpoch;if(!id||uploading[id])return;
+ if((local.drafts[id]?.attachments?.length??0)+files.length>8){error.value="每条消息最多 8 个附件";return}
+ if(files.some(f=>f.size>8*1024*1024)){error.value="单个附件不能超过 8 MiB";return}
+ uploading[id]=true;
+ try{for(const file of files){if(epoch!==authEpoch)break;const item=await uploadAttachment(id,file);if(epoch===authEpoch)addDraftAttachments(local,id,[item])}}catch(e){if(epoch===authEpoch)report(e)}finally{if(epoch===authEpoch)uploading[id]=false}
+}
+async function screenshot(){
+ const target=local.current,epoch=authEpoch;
+ let stream:MediaStream|undefined;
+ try{
+  if(!navigator.mediaDevices?.getDisplayMedia)throw new Error("当前浏览器不支持截图；请粘贴截图或选择图片。浏览器截图需要 HTTPS 或 localhost。");
+  stream=await navigator.mediaDevices.getDisplayMedia({video:true});
+  const video=document.createElement('video');video.srcObject=stream;await video.play();
+  const canvas=document.createElement('canvas');canvas.width=video.videoWidth;canvas.height=video.videoHeight;canvas.getContext('2d')?.drawImage(video,0,0);
+  const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve,'image/png'));
+  if(blob&&epoch===authEpoch)await attachFiles([new File([blob],'截图.png',{type:'image/png'})],target);
+ }catch(e){report(e)}finally{stream?.getTracks().forEach(track=>track.stop())}
+}
 async function send() {
   const epoch = authEpoch;
   const id = local.current,
     conv = conversation.value,
     d = local.drafts[id];
-  if (d && isMergeRequest(d.text)) {
+  if (d && !d.attachments?.length && isMergeRequest(d.text)) {
     const target = conv?.taskId ? state.value?.tasks[conv.taskId] : undefined;
     if (!target) {
       error.value = "请先选择一张任务卡片，再合并到主分支";
@@ -850,7 +883,7 @@ async function send() {
     await openMerge(target, { conversationId: id, revision: d.revision });
     return;
   }
-  if (d && isStartRequest(d.text)) {
+  if (d && !d.attachments?.length && isStartRequest(d.text)) {
     const target = conv?.taskId ? state.value?.tasks[conv.taskId] : undefined;
     if (!target) {
       error.value = "请先选择一张任务卡片，再开始开发";
@@ -861,7 +894,8 @@ async function send() {
   }
   if (
     !conv ||
-    !d?.text.trim() ||
+    (!d?.text.trim()&&!d?.attachments?.length) ||
+    uploading[id] ||
     local.pending[id] ||
     !online.value ||
     !agentAvailable.value ||
@@ -891,6 +925,7 @@ async function send() {
       conversationId: id,
       taskId: conv.taskId ?? "",
       text,
+      attachments:d.attachments??[],
     });
     if (epoch === authEpoch) acceptSent(local, id, revision);
   } catch (e) {
@@ -1431,10 +1466,6 @@ async function loadTaskPreview(action:'status'|'start'|'stop'='status',forceOpen
 }
 watch(online,value=>{if(value&&resultTarget.value)void loadTaskPreview()});
 function previewVisibility(){if(document.visibilityState==='visible'&&resultTarget.value)void loadTaskPreview();else clearTimeout(previewTimer)}
-async function confirmResult(roundID:string){
- const target=task.value;if(!target)return;
- try{await command({type:"confirm_result",projectId:target.projectId,taskId:target.id,conversationId:target.conversationId,roundId:roundID})}catch(e){report(e)}
-}
 function beforeUnload(event: BeforeUnloadEvent) {
   if (Object.values(local.drafts).some((d) => d.text.trim())) {
     event.preventDefault();
@@ -1552,14 +1583,19 @@ onBeforeUnmount(() => {
         @delivery="deliverySettingsOpen = true"
         @refresh="pollGit(true)"
       />
-      <div class="global-actions" role="group" aria-label="全局操作">
+      <nav v-if="project" class="project-tools-nav" aria-label="项目视图">
+        <button v-for="v in (['board','files','terminal'] as const)" :key="v" :aria-pressed="mainView===v" :aria-label="({board:'看板',files:'文件',terminal:'终端'})[v]" :title="({board:'看板',files:'文件',terminal:'终端'})[v]" @click="mainView=v;closeResult()"><span aria-hidden="true">{{({board:'▦',files:'▱',terminal:'>_'})[v]}}</span><span class="tool-nav-label">{{({board:'看板',files:'文件',terminal:'终端'})[v]}}</span></button>
+      </nav>
+      <button v-if="project" class="project-chat-top" aria-label="项目对话" title="项目对话" @click="navigate()">◌<span> 项目对话</span></button>
+      <div class="compact-global-actions"><ThemePicker /><button class="settings-toggle" aria-label="全局设置" :aria-expanded="settingsOpen" @click="settingsOpen=!settingsOpen">⋯</button>
+      <div class="global-actions" :class="{'settings-open':settingsOpen}" role="group" aria-label="全局操作">
         <VersionBadge />
-        <ThemePicker />
         <button aria-label="默认模型" title="为新项目和任务选择默认模型" @click="openModels()">默认模型</button>
         <span class="connection" :class="{ off: !online }" role="status">{{
           online ? "● 已连接" : "○ 正在重连"
         }}</span>
         <button class="logout" @click="logout">退出</button>
+      </div>
       </div>
     </header>
     <div v-if="error || operations.size" class="global-error" role="alert">
@@ -1589,6 +1625,7 @@ onBeforeUnmount(() => {
       </nav>
       <div class="app" :class="{ 'chat-visible': chatVisible, 'result-visible': !!resultTarget }">
         <ResultPreview v-if="resultTarget&&task&&conversation" :task="task" :conversation="conversation" :execution="task.executionId?state?.executions?.[task.executionId]:undefined" :round-id="resultTarget.roundId" :preview="taskPreview" :preview-blocked-url="previewBlockedURL" :busy="previewBusy" :error="previewError" :online="online" @back="closeResult();chatVisible=false" @chat="resultChat" @refresh="loadTaskPreview('status',true)" @start="resultTarget && runPreviewFlow(resultTarget, true)" @stop="loadTaskPreview('stop')" @revise="reviseResult" @instructions="previewInstructions"/>
+        <ProjectTools v-else-if="mainView!=='board'" :key="projectID" :view="mainView" :project="project" :tasks="tasks" :executions="state?.executions??{}" :conversation-id="local.current" :online="online" @attach="addDraftAttachments(local,$event.conversationId,[$event.attachment]);chatVisible=true" />
         <KanbanBoard v-else
           :executions="state?.executions??{}"
           :git="state?.taskGit ?? {}"
@@ -1606,6 +1643,7 @@ onBeforeUnmount(() => {
           @project="navigate()"
           @start="start($event)"
           @merge="openMerge($event)"
+          @complete="requestCompletion"
           @topic="mobileTopic = $event"
           @add-topic="open('topic')"
           @add-task="open('task', $event)"
@@ -1625,6 +1663,11 @@ onBeforeUnmount(() => {
           :delivery="task ? state?.deliveries?.[task.id] : undefined"
           :project-name="project.name"
           :draft="draft"
+          :attachments="local.drafts[local.current]?.attachments??[]"
+          :uploading="uploading[local.current]"
+          @attach="attachFiles"
+          @remove-attachment="removeDraftAttachment(local,local.current,$event)"
+          @screenshot="screenshot"
           :pending="!!local.pending[local.current] || (task ? !!local.pending[state?.deliveries?.[task.id]?.id ?? ''] : false)"
           :online="online"
           :agent-available="
@@ -1644,7 +1687,6 @@ onBeforeUnmount(() => {
           @merge="task && openMerge(task)"
           :tasks="tasks"
           @files="openArtifacts"
-          @confirm-result="confirmResult"
           @preview-result="openResult"
           @model="openModels(conversation)"
           @accept-delivery="acceptDelivery"
@@ -1688,6 +1730,7 @@ onBeforeUnmount(() => {
       @close="deliverySettingsOpen = false"
       @save="saveDeliveryPolicy"
     />
+    <CompleteTaskDialog v-if="completionTarget" :intent="completionTarget" :busy="completionBusy" :eligible="completionEligible" :error="completionError" @close="completionTarget=undefined" @confirm="finishCompletion" />
     <TaskDialog
       v-if="dialog"
       :kind="dialog"

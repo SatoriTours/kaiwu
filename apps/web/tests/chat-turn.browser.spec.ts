@@ -1,4 +1,4 @@
-import { clickInView, fillInChat, openChat } from './view-navigation';
+import { clickInView, closeChat, fillInChat, openChat, markTaskComplete } from './view-navigation';
 import { test, expect } from "@playwright/test";
 import type { Page, Cookie } from "@playwright/test";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, realpathSync } from "node:fs";
@@ -466,7 +466,7 @@ test.describe("Chat turn and result actions", () => {
     await login(page);
     await newTask(page,"FocusChat","接口开发","实现 Hello");
     await clickInView(page, page.locator(".task-card").first().getByRole("button",{ includeHidden: true,name:"开始开发",exact:true}));
-    await expect(page.locator(".confirm-btn")).toBeVisible();
+    await expect(page.locator(".message.assistant").first().locator(".turn-result-actions")).toBeVisible();
     const originalID = await page.locator(".message.assistant").first().getAttribute("data-message-id");
     const artifacts = process.env.KAIWU_CHAT_FOCUS_ARTIFACTS;
     if(artifacts) await page.screenshot({path:join(artifacts,"desktop.png")});
@@ -478,29 +478,28 @@ test.describe("Chat turn and result actions", () => {
     await expect(answer.locator(".pending-line")).toContainText("正在回复");
     if(artifacts) await page.screenshot({path:join(artifacts,"answering.png")});
     await expect(answer).toContainText("最后一段解释同样保留。");
-    await expect(answer).toContainText("普通问答 · 不改变开发结果");
+    await expect(answer.locator(".message-status")).toHaveCount(0);
     await expect(answer.locator(".confirm-btn")).toHaveCount(0);
-    await expect(page.locator(".confirm-btn")).toHaveCount(1);
-    await expect(page.locator(".message.assistant").first().locator(".confirm-btn")).toBeVisible();
+    await expect(page.locator(".turn-result-actions")).toHaveCount(1);
+    await expect(page.locator(".message.assistant").first().locator(".turn-result-actions")).toBeVisible();
     expect(await page.locator(".message.assistant").first().getAttribute("data-message-id")).toBe(originalID);
     await expect(page.locator(".task-card").first()).toContainText("待验收");
     if(artifacts) await page.screenshot({path:join(artifacts,"qa.png")});
     // A reload must not lose the old result or promote the explanation to one.
     await page.reload();
-    await expect(page.locator(".confirm-btn")).toHaveCount(1);
+    await expect(page.locator(".turn-result-actions")).toHaveCount(1);
     await expect(page.locator(".message.assistant").last()).toContainText("最后一段解释同样保留。");
-    await clickInView(page, page.locator(".confirm-btn"));
+    await markTaskComplete(page);
     await expect(page.locator(".task-card").first()).toContainText("已完成");
     // New development supersedes the accepted result without deleting its history.
     await fillInChat(page, page.locator('#draft'), "结构化登录恢复 继续修改");
     await clickInView(page, page.locator("#send"));
-    await expect(page.locator(".confirm-btn")).toHaveCount(1);
+    await expect(page.locator(".turn-result-actions")).toHaveCount(1);
     await expect(page.locator(".message.assistant").last()).toContainText("登录恢复已实现");
     const history=page.locator(".assistant-turn-container.historical").first();
     expect(await history.getAttribute("open")).toBeNull();
     await expect(history.locator(".confirm-btn")).toHaveCount(0);
-    await history.locator("> summary").focus();
-    await page.keyboard.press("Enter");
+    await expect(history.locator(".assistant-summary-markdown")).toBeVisible();
     await expect(history.locator(".historical-result-actions button")).toBeVisible();
     await clickInView(page, history.locator(".historical-result-actions button"));
     await expect(history.locator(".historical-result")).toContainText("历史网页效果未存档");
@@ -546,20 +545,21 @@ test.describe("Chat turn and result actions", () => {
     // V5: clear message ownership and quiet footer, with content outside details.
     await expect(assistantMsg.locator(".assistant-summary-markdown")).toBeVisible();
     await expect(assistantMsg.locator(".message-stack")).toBeVisible();
-    await expect(assistantMsg.locator(".message-meta")).toContainText("任务 Agent");
+    await expect(assistantMsg.locator(".message-meta")).toHaveCount(0);
+    const info=assistantMsg.locator(".reply-info");await info.locator("summary").click();await expect(info).toContainText("任务 Agent");await info.locator("summary").click();
     await expect(assistantMsg.locator(".verification-brief")).toBeVisible();
     const user = page.locator(".message.user").last();
     const userBox = await user.locator(".text").boundingBox();
     const aiBox = await assistantMsg.locator(".message-bubble").boundingBox();
     expect(userBox!.x).toBeGreaterThan(aiBox!.x);
-    const confirmStyle = await assistantMsg.locator(".confirm-btn").evaluate(el => ({
+    const confirmStyle = await assistantMsg.locator(".turn-result-actions button").first().evaluate(el => ({
       background: getComputedStyle(el).backgroundColor,
       border: getComputedStyle(el).borderTopWidth,
       height: el.getBoundingClientRect().height,
     }));
     expect(confirmStyle.background).toBe("rgba(0, 0, 0, 0)");
     expect(confirmStyle.border).toBe("0px");
-    expect(confirmStyle.height).toBeLessThanOrEqual(28);
+    expect(confirmStyle.height).toBeLessThanOrEqual(32);
 
     const details = assistantMsg.locator("details.assistant-turn-details");
     const summary = assistantMsg.locator("summary.assistant-turn-summary");
@@ -647,11 +647,14 @@ test.describe("Chat turn and result actions", () => {
 
     // 8. Return through the real drawer control before keyboard confirmation.
     await openChat(page);
-    // Test Space on Result Actions button ("确认完成").
-    const confirmBtn = page.locator(".turn-result-actions button.confirm-btn");
-    await expect(confirmBtn).toBeVisible();
-    await confirmBtn.focus();
-    await page.keyboard.press("Space");
+    // Completion is optional and keyboard reachable from the card menu.
+    await closeChat(page);
+    const returnBoard=page.getByRole("button",{name:"← 返回看板",exact:true});if(await returnBoard.isVisible())await returnBoard.click();
+    const menuTrigger=page.locator('.task-card').filter({hasText:'BubbleTask1'}).getByRole('button',{name:'任务操作',exact:true});
+    await menuTrigger.focus();await page.keyboard.press('Space');
+    const completeItem=page.getByRole('menuitem',{name:'标记任务完成',exact:true});await completeItem.focus();await page.keyboard.press('Space');
+    const confirmBtn=page.getByRole('dialog',{name:'标记任务完成',exact:true}).getByRole('button',{name:'标记完成',exact:true});
+    await confirmBtn.focus();await page.keyboard.press('Space');
 
     // Return to board from preview surface to check task card
     const backBtn = page.getByRole("button", { name: "← 返回看板", exact: true });

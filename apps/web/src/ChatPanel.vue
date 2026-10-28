@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import AttachmentList from "./AttachmentList.vue";
 import { ref, watch, nextTick, computed, onMounted, onUnmounted } from "vue";
-import type { Conversation, Task, Execution, GitStatus, Message, DeliverySummary, TaskPreview } from "./types.ts";
+import type { Conversation, Task, Execution, GitStatus, Message, DeliverySummary, TaskPreview, Attachment } from "./types.ts";
 import { isStartRequest } from "./workbench.ts";
 import {taskState} from "./task-state.ts";
 import MergeIcon from "./MergeIcon.vue";
@@ -33,6 +34,8 @@ const props = defineProps<{
   delivery?: DeliverySummary;
   projectName: string;
   draft: string;
+  attachments?:Attachment[];
+  uploading?:boolean;
   pending: boolean;
   online: boolean;
   agentAvailable: boolean;
@@ -41,6 +44,9 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   draft: [string];
+  attach:[File[]];
+  removeAttachment:[string];
+  screenshot:[];
   send: [];
   project: [];
   create: [];
@@ -49,7 +55,6 @@ const emit = defineEmits<{
   start: [];
   merge: [];
   model: [];
-  confirmResult:[string];
   files:[string];
   previewResult:[string];
   acceptDelivery: [summary: DeliverySummary];
@@ -72,6 +77,10 @@ const emit = defineEmits<{
   cancelInteraction: [payload: { conversationId: string; requestId: string; requestVersion: number }];
   retryInteraction: [payload: { conversationId: string; requestId: string; requestVersion: number }];
 }>();
+const attachmentInput=ref<HTMLInputElement>();
+function acceptFiles(files:FileList|null){if(files?.length)emit("attach",Array.from(files))}
+function pasteFiles(e:ClipboardEvent){if(e.clipboardData?.files.length){e.preventDefault();acceptFiles(e.clipboardData.files)}}
+function dropFiles(e:DragEvent){if(e.dataTransfer?.files.length){e.preventDefault();acceptFiles(e.dataTransfer.files)}}
 const now = ref(Date.now());
 const taskStatus=computed(()=>props.task?taskState(props.task,props.conversation,props.execution,undefined,now.value).status:pendingInteractions.value.some(ix=>ix.blocking)?'waiting_user':'idle');
 // The notice is derived from the selected conversation only, so switching scope
@@ -294,19 +303,16 @@ const deliveryLabels: Record<string, string> = {
 };
 </script>
 <template>
-  <aside class="chat" id="chat" aria-label="项目或任务聊天">
+  <aside @paste="pasteFiles" @dragover.prevent @drop="dropFiles" class="chat" id="chat" aria-label="项目或任务聊天">
     <header class="chat-head" :title="'pi 会话：'+conversation.sessionId">
       <div class="row">
-        <span class="avatar">π</span>
         <div>
           <h2 id="chat-title" tabindex="-1">
             {{
               task ? "任务对话 · " + task.title : "项目对话 · " + projectName
             }}
           </h2>
-          <small id="chat-session"
-            >pi 独立会话 · {{ conversation.sessionId.slice(0, 18) }}</small
-          >
+
           <button v-if="interactionView" class="chat-interaction-status" @click="openInteraction()"><InteractionIcon :kind="interactionView.kind" />{{ interactionView.label }}<span v-if="pendingInteractions.length > 1"> · {{ pendingInteractions.length }}</span></button>
         </div>
       </div>
@@ -352,32 +358,6 @@ const deliveryLabels: Record<string, string> = {
           <TaskActionIcon :status="taskStatus" :pending="pending" />
         </button>
       </div>
-      <button class="chat-close" aria-label="收起聊天" title="收起聊天" autofocus @click="emit('close')">×</button>
-    </header>
-
-    <div v-if="!task" class="scope">
-      {{
-        task
-          ? "仅与当前任务沟通，其他会话独立运行。"
-          : "项目级沟通：讨论需求、创建卡片、协调工作。"
-      }}<span>
-        · {{ states[conversation.runState] ?? conversation.runState }}</span
-      >
-    </div>
-    <div class="progress-panel">
-      <DeliveryStatus
-        v-if="delivery"
-        :summary="delivery"
-        :task-title="task?.title"
-        :accepting="pending"
-        :controlling="pending"
-        @accept="s => emit('acceptDelivery', s)"
-        @pause="s => emit('pauseDelivery', s)"
-        @resume="s => emit('resumeDelivery', s)"
-        @cancel="s => emit('cancelDelivery', s)"
-        @extendBudget="s => emit('extendBudgetDelivery', s)"
-      />
-    </div>
     <div class="chat-filter-bar row between" role="toolbar" aria-label="聊天过滤">
       <div class="chat-filter-tabs">
         <button
@@ -399,7 +379,24 @@ const deliveryLabels: Record<string, string> = {
           只看我的问题
         </button>
       </div>
-      <span class="chat-filter-count">{{ chatFilter === 'questions' ? '共 ' + chatEntries.length + ' 个提问' : '' }}</span>
+
+    </div>
+      <button class="chat-close" aria-label="收起聊天" title="收起聊天" autofocus @click="emit('close')">×</button>
+    </header>
+
+    <div class="progress-panel">
+      <DeliveryStatus
+        v-if="delivery"
+        :summary="delivery"
+        :task-title="task?.title"
+        :accepting="pending"
+        :controlling="pending"
+        @accept="s => emit('acceptDelivery', s)"
+        @pause="s => emit('pauseDelivery', s)"
+        @resume="s => emit('resumeDelivery', s)"
+        @cancel="s => emit('cancelDelivery', s)"
+        @extendBudget="s => emit('extendBudgetDelivery', s)"
+      />
     </div>
     <div
       class="messages"
@@ -417,20 +414,14 @@ const deliveryLabels: Record<string, string> = {
         :data-delivery="entry.message.delivery"
         :tabindex="chatFilter === 'questions' ? 0 : undefined"
         :role="chatFilter === 'questions' ? 'button' : undefined"
-        :aria-label="chatFilter === 'questions' ? '点击定位此问题：' + entry.message.text.slice(0, 30) : undefined"
+        :aria-label="chatFilter === 'questions' ? '点击定位此问题：' + entry.message.text.slice(0, 30) : entry.role === 'user' ? '我的消息' : entry.role === 'assistant' ? 'pi 的回复' : '系统消息'"
         @click="chatFilter === 'questions' ? locateQuestion(entry.message.id) : undefined"
         @keydown="chatFilter === 'questions' ? onQuestionKeydown($event, entry.message.id) : undefined"
       >
-        <span class="message-avatar" aria-hidden="true">{{ entry.role === 'user' ? '我' : 'π' }}</span>
         <div class="message-stack">
-        <div class="message-meta">
-          <strong>{{
-            entry.role === 'user'
-              ? '你'
-              : entry.role === 'assistant' ? (task ? 'pi · 任务 Agent' : 'pi · 项目 Agent') : '系统'
-          }}</strong>
+        <div v-if="entry.role === 'system' || chatFilter === 'questions'" class="message-meta">
+          <strong v-if="entry.role === 'system'">系统</strong>
           <span v-if="chatFilter === 'questions'" class="jump-hint">点击定位至对话 ↗</span>
-          <span v-if="entry.round?.startedAt" class="message-round-time">{{ new Date(entry.round.startedAt).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}) }}</span>
         </div>
         <AssistantReply
           v-if="entry.role === 'assistant' && (!entry.isPlaceholder || !entryInteractions(entry, pendingInteractions).length)"
@@ -447,23 +438,14 @@ const deliveryLabels: Record<string, string> = {
           :pending="pending"
           :preview="preview"
           @files="id => emit('files', id)"
-          @confirm="id => emit('confirmResult', id)"
           @preview="id => emit('previewResult', id)"
           @merge="emit('merge')"
           @reply="showLatestReply"
         />
-        <MarkdownContent v-else-if="entry.role !== 'assistant'" class="text" :text="entry.message.text" />
+        <template v-else-if="entry.role !== 'assistant'"><MarkdownContent class="text" :text="entry.message.text" /><AttachmentList :items="entry.message.attachments??[]" :conversation-id="conversation.id" /></template>
         <button v-for="ix in entryInteractions(entry, pendingInteractions)" :key="ix.id" class="interaction-inline-prompt" @click="openInteraction(ix.id)"><InteractionIcon :kind="interactionPresentation(ix).kind" />{{ interactionPresentation(ix).heading }} · 打开处理</button>
         <InteractionHistory :requests="entryInteractions(entry, historyInteractions)" :now="now" :pending="pending" :online="online" @retry="retryInteraction" />
-        <div class="message-status">
-          <span v-if="entry.role !== 'assistant'">{{ deliveryLabel(entry.message) }}</span>
-          <span v-else-if="entryInteractions(entry, pendingInteractions).length">等待你处理 · 不是开发完成</span>
-          <span v-else-if="entry.loading">{{ entry.round?.tools?.length || entry.round?.report ? '正在开发' : '正在回复' }}</span>
-          <span v-else-if="entry.round?.phase === 'answered'">普通问答 · 不改变开发结果</span>
-          <span v-else-if="entry.round?.phase === 'confirmed'">结果已确认</span>
-          <span v-else-if="entry.round?.phase === 'finished' && task?.executionId">本轮执行已结束</span>
-          <span v-else> {{ deliveryLabel(entry.message) }}</span>
-        </div>
+        <div v-if="entry.role !== 'assistant'" class="message-status"><span>{{ deliveryLabel(entry.message) }}</span></div>
         </div>
       </article>
 
@@ -545,10 +527,35 @@ const deliveryLabels: Record<string, string> = {
     </div>
 
     <div v-else class="composer">
-      <div class="context-label row between">
-        <span
-          >发送至{{ task ? "任务 " + task.title : "项目 " + projectName }}</span
+      <AttachmentList :items="attachments??[]" :conversation-id="conversation.id" editable @remove="emit('removeAttachment',$event)" />
+      <p v-if="attachments?.length" class="attachment-draft-note">仅作为本次消息附件，不写入项目</p>
+      <p v-if="uploading" role="status">正在上传附件，完成后可发送…</p>
+      <input ref="attachmentInput" type="file" multiple hidden @change="acceptFiles(($event.target as HTMLInputElement).files);($event.target as HTMLInputElement).value=''" />
+      <div class="editor" @keydown="keydown">
+        <div
+          v-if="previewing"
+          class="draft-preview"
+          aria-label="当前草稿预览"
+          tabindex="0"
         >
+          <MarkdownContent v-if="draft.trim()" :text="draft" />
+          <span v-else class="draft-preview-empty">暂无内容可预览</span>
+        </div>
+        <textarea
+          v-show="!previewing"
+          id="draft"
+          ref="editor"
+          aria-label="当前会话草稿"
+          :value="draft"
+          maxlength="5000"
+          :placeholder="
+            task ? '补充这个任务的要求……' : '提出项目想法，或讨论接下来做什么……'
+          "
+          @input="emit('draft', ($event.target as HTMLTextAreaElement).value)"
+        />
+        <div class="row">
+          <button type="button" aria-label="添加附件" title="添加图片或文件，也可粘贴／拖入" :disabled="uploading||pending||!online" @click="attachmentInput?.click()">＋</button>
+          <button type="button" aria-label="截图" title="截图（需要浏览器安全上下文）" :disabled="uploading||pending||!online" @click="emit('screenshot')">▣</button>
         <button
           class="preview-toggle"
           :aria-label="previewing ? '返回编辑' : '预览 Markdown'"
@@ -580,30 +587,6 @@ const deliveryLabels: Record<string, string> = {
             <path d="m16 3 5 5-12 12-6 1 1-6Z M13 6l5 5" />
           </svg>
         </button>
-      </div>
-      <div class="editor" @keydown="keydown">
-        <div
-          v-if="previewing"
-          class="draft-preview"
-          aria-label="当前草稿预览"
-          tabindex="0"
-        >
-          <MarkdownContent v-if="draft.trim()" :text="draft" />
-          <span v-else class="draft-preview-empty">暂无内容可预览</span>
-        </div>
-        <textarea
-          v-show="!previewing"
-          id="draft"
-          ref="editor"
-          aria-label="当前会话草稿"
-          :value="draft"
-          maxlength="5000"
-          :placeholder="
-            task ? '补充这个任务的要求……' : '提出项目想法，或讨论接下来做什么……'
-          "
-          @input="emit('draft', ($event.target as HTMLTextAreaElement).value)"
-        />
-        <div class="row">
           <button type="button" class="model-picker" aria-label="选择会话模型" :title="conversation.profile.model ? `当前模型: ${conversation.profile.model}${conversation.pendingProfile ? ' (下一轮将变更为 ' + conversation.pendingProfile.model + ')' : ''}` : '选择当前会话的 pi 模型'" :disabled="pending || !online" @click="emit('model')">pi · {{ conversation.pendingProfile?.model ? `${conversation.pendingProfile.model} (待生效)` : (conversation.profile.model || '选择模型') }}</button
           ><button
             id="send"
@@ -613,12 +596,12 @@ const deliveryLabels: Record<string, string> = {
               (!agentAvailable &&
                 !isStartRequest(draft) &&
                 !isMergeRequest(draft)) ||
-              pending ||
+              pending || uploading ||
               (['starting', 'running'].includes(
                 conversation.runState,
               ) &&
                 !isMergeRequest(draft)) ||
-              !draft.trim()
+              (!draft.trim()&&!attachments?.length)
             "
             @click="emit('send')"
           >
@@ -626,11 +609,9 @@ const deliveryLabels: Record<string, string> = {
           </button>
         </div>
       </div>
-      <div class="composer-tip">
-        Enter 发送 · Shift + Enter 换行{{
-          task && !task.executionId ? " · 输入“开始开发”启动任务" : ""
-        }}
-      </div>
+
     </div>
   </aside>
 </template>
+
+<style scoped>.attachment-draft-note{font-size:10px;color:var(--muted);margin:4px 0}</style>

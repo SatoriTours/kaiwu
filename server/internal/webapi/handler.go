@@ -23,6 +23,7 @@ import (
 	"github.com/SatoriTours/kaiwu/server/internal/pimodel"
 	"github.com/SatoriTours/kaiwu/server/internal/pirpc"
 	"github.com/SatoriTours/kaiwu/server/internal/preview"
+	"github.com/SatoriTours/kaiwu/server/internal/projecttools"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
 	"github.com/coder/websocket"
 )
@@ -35,8 +36,10 @@ type Commander interface {
 	AnswerInteraction(conversationID, interactionID string) error
 }
 type Config struct {
-	Previews *preview.Manager
-	Models   interface {
+	DataDir          string
+	AcquireToolLease func(context.Context, string, string) (preview.Lease, error)
+	Previews         *preview.Manager
+	Models           interface {
 		List(context.Context) ([]pimodel.Model, error)
 	}
 	Git            GitCommander
@@ -53,6 +56,7 @@ type Config struct {
 	Status  func() buildinfo.DeploymentStatus
 }
 type handler struct {
+	terminals     *projecttools.Terminals
 	cfg           Config
 	store         *workbench.Store
 	agent         Commander
@@ -75,7 +79,7 @@ func New(cfg Config, store *workbench.Store, agent Commander) http.Handler {
 	if _, e := rand.Read(b); e != nil {
 		panic(e)
 	}
-	return &handler{cfg: cfg, store: store, agent: agent, cancel: cancel, streamID: hex.EncodeToString(b)}
+	return &handler{terminals: projecttools.NewTerminals(owned), cfg: cfg, store: store, agent: agent, cancel: cancel, streamID: hex.EncodeToString(b)}
 }
 func respond(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -184,6 +188,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/api/tools/") || strings.HasPrefix(r.URL.Path, "/api/attachments"):
+		h.projectTools(w, r)
 	case strings.HasPrefix(r.URL.Path, "/api/previews/"):
 		h.taskPreview(w, r)
 	case r.URL.Path == "/api/models" && r.Method == "GET":
@@ -297,6 +303,12 @@ func (h *handler) command(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, receipt)
 		return
 	}
+	if c.Type == "send_message" || c.Type == "resume" || c.Type == "start_task" {
+		if gate, ok := h.agent.(interface{ ToolWriteBlocked(string, string) bool }); ok && gate.ToolWriteBlocked(c.ProjectID, c.TaskID) {
+			h.failure(w, workbench.Conflict("人工终端或其他写入正在使用工作区，请先结束；草稿已保留"))
+			return
+		}
+	}
 	var prepare func() error
 	if c.Type == "set_default_profile" || c.Type == "set_conversation_profile" {
 		if h.cfg.Models == nil {
@@ -369,7 +381,7 @@ func (h *handler) command(w http.ResponseWriter, r *http.Request) {
 		c.RemoteURL = strings.TrimSpace(c.RemoteURL)
 		prepare = func() error { return prepareProject(r.Context(), c) }
 	}
-	if c.Type == "send_message" && workbench.IsStartRequest(c.Text) {
+	if c.Type == "send_message" && len(c.Attachments) == 0 && workbench.IsStartRequest(c.Text) {
 		c.Type = "start_task"
 		if c.TaskID == "" {
 			c.TaskID = h.store.Snapshot().Conversations[c.ConversationID].TaskID
@@ -404,6 +416,10 @@ func (h *handler) command(w http.ResponseWriter, r *http.Request) {
 			fail(w, 503, "profile_unavailable", "请先点击聊天输入框下方的“选择模型”；输入已保留")
 			return
 		}
+	}
+	if err := h.normalizeAttachments(&c); err != nil {
+		h.failure(w, err)
+		return
 	}
 	receipt, e := h.store.PreparedCommand(c, prepare)
 	if e != nil {

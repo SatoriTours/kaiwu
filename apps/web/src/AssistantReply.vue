@@ -33,7 +33,6 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-  confirm: [roundId: string];
   preview: [roundId: string];
   files: [roundId: string];
   merge: [];
@@ -162,8 +161,7 @@ function onPreviewClick() {
 </script>
 
 <template>
-  <component :is="historical ? 'details' : 'div'" class="assistant-turn-container" :class="{historical}">
-    <summary v-if="historical" class="history-disclosure">上一轮结果 · {{ summary }}</summary>
+  <div class="assistant-turn-container" :class="{historical}">
     <div class="message-bubble" :class="{'history-body':historical}">
       <MarkdownContent class="assistant-summary-markdown" :text="summary" />
       <div v-if="loading" class="pending-line" role="status">
@@ -174,9 +172,9 @@ function onPreviewClick() {
         {{ report.checks.length }} 项检查 · {{ evidencedChecks }} 项有执行依据
       </p>
       <p v-if="missingChecks" class="verification-warning">{{ missingChecks }} 项缺少本轮依据，待核实</p>
-      <div v-if="hasDetails || currentResult || historical" class="reply-footer">
+      <div v-if="hasDetails || currentResult || historical || round" class="reply-footer">
     <details v-if="hasDetails" class="assistant-turn-details">
-      <summary class="assistant-turn-summary" aria-label="执行详情">执行详情 <span aria-hidden="true">⌄</span></summary>
+      <summary class="assistant-turn-summary" aria-label="执行详情"><span>执行详情</span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m7 10 5 5 5-5"/></svg></summary>
       <div class="assistant-turn-body">
         <!-- 1. Report details (if round.report exists) -->
         <div v-if="report" class="round-report-section">
@@ -279,9 +277,7 @@ function onPreviewClick() {
             {{ previewButtonLabel }}
           </button>
           <button v-if="preview?.artifacts?.length" type="button" class="compact-btn" :disabled="!online || pending" @click.stop="emit('files', latestPresentation!.resultRoundId!)">文件产物（{{preview.artifacts.length}}）</button>
-          <button type="button" class="compact-btn confirm-btn" :disabled="!online || pending" @click.stop="emit('confirm', latestPresentation!.confirmRoundId!)">
-            确认完成
-          </button>
+
         </div>
       </template>
       <template v-else-if="completedConfirmed">
@@ -300,6 +296,10 @@ function onPreviewClick() {
         </div>
       </template>
     </div>
+    <details v-if="round" class="reply-info">
+      <summary aria-label="本轮信息" title="本轮信息"><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></summary>
+      <dl><dt>执行端</dt><dd>pi · {{task?'任务':'项目'}} Agent</dd><dt>时间</dt><dd>{{new Date(round.startedAt).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}}</dd><dt>轮次</dt><dd>{{round.id}}</dd><dt v-if="conversation">会话</dt><dd v-if="conversation">{{conversation.sessionId}}</dd></dl>
+    </details>
     <div v-if="historical" class="historical-result-actions">
       <button type="button" class="compact-btn" :aria-expanded="historicalResultVisible" @click="historicalResultVisible = !historicalResultVisible">查看结果</button>
     </div>
@@ -309,7 +309,7 @@ function onPreviewClick() {
         <p>保留的是当轮回复与执行依据，历史网页效果未存档，不代表当前工作区。</p>
         <MarkdownContent :text="round?.report?.summary || summary" />
       </div>
-      <p v-if="confirmable" class="result-note">待你验收 · 确认不会提交、合并或推送代码</p>
+
     </div>
-  </component>
+  </div>
 </template>

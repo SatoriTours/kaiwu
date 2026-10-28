@@ -1,4 +1,4 @@
-import type { Snapshot } from "./types.ts";
+import type { Snapshot, Attachment } from "./types.ts";
 export function isStartRequest(text: string): boolean {
   return text.trim().replace(/[。！!.]+$/, "") === "开始开发";
 }
@@ -12,7 +12,7 @@ export function createOperationID(
 }
 export interface LocalState {
   current: string;
-  drafts: Record<string, { text: string; revision: number }>;
+  drafts: Record<string, { text: string; revision: number; attachments?:Attachment[] }>;
   pending: Record<string, boolean>;
   snapshot: Snapshot | null;
 }
@@ -33,6 +33,7 @@ export function acceptSent(local: LocalState, id: string, revision: number) {
   const d = local.drafts[id];
   if (d?.revision === revision) {
     d.text = "";
+    if(d.attachments) d.attachments=[];
     d.revision++;
   }
 }

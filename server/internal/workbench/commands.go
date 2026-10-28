@@ -205,11 +205,11 @@ func apply(st *State, c Command) (Receipt, error) {
 			return r, Conflict("会话正在运行，草稿已保留")
 		}
 		if c.Type == "send_message" {
-			if !validText(c.Text, 5000) || len(conversation.Messages) >= 2000 {
+			if (strings.TrimSpace(c.Text) == "" && len(c.Attachments) == 0) || !utf8.ValidString(c.Text) || utf8.RuneCountInString(c.Text) > 5000 || len(c.Attachments) > 8 || len(conversation.Messages) >= 2000 {
 				return r, Invalid("消息为空／过长，或会话消息已达上限")
 			}
 			key := id()
-			conversation.Messages = append(conversation.Messages, Message{ID: key, Role: "user", Text: c.Text, Delivery: "pending"})
+			conversation.Messages = append(conversation.Messages, Message{ID: key, Role: "user", Text: c.Text, Attachments: c.Attachments, Delivery: "pending"})
 			r.CreatedID = key
 		}
 		conversation.RunState = "starting"

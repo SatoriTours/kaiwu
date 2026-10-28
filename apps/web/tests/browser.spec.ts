@@ -1,4 +1,4 @@
-import { clickInView, closeChat, fillInChat, openChat } from './view-navigation';
+import { clickInView, closeChat, fillInChat, openChat, markTaskComplete } from './view-navigation';
 import { test, expect } from "@playwright/test";
 import type { Page, BrowserContext, Cookie } from "@playwright/test";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -541,7 +541,7 @@ test("card starts original task in a worktree and preserves the draft", async ({
   const reply=page.locator('.message.assistant').last();
   await clickInView(page, reply.getByLabel('执行详情',{exact:true}));
   await expect(reply.locator('.tools-details')).toContainText('write · 已返回');
-  await expect(reply.locator('.confirm-btn')).toBeVisible();
+  await expect(reply.locator('.turn-result-actions')).toBeVisible();
   expect(probeFor(page).calls.filter(r=>r.method==='commands'&&r.body.type==='start_task')).toHaveLength(1);
   const st = (await (await page.request.get("/api/snapshot")).json()).state;
   const task = Object.values(st.tasks).find(
@@ -1004,7 +1004,7 @@ test('structured progress uses bidirectional socket and keeps verification evide
   const reply=page.locator('.message.assistant').last();
   await expect(reply.locator('.assistant-summary-markdown')).toContainText('登录恢复');
   await expect(reply.locator('.verification-brief')).toContainText('1 项有执行依据');
-  await expect(reply.locator('.confirm-btn')).toBeVisible();
+  await expect(reply.locator('.turn-result-actions')).toBeVisible();
   await clickInView(page, reply.getByLabel('执行详情',{exact:true}));
   const check=reply.locator('.check-row');
   await expect(check).toHaveCount(1);
@@ -1017,16 +1017,15 @@ test('structured progress uses bidirectional socket and keeps verification evide
   const task=Object.values(state.tasks).find((t:any)=>t.title==='结构化进展验收') as any;
   const firstRound=state.conversations[task.conversationId].rounds[0];
   const priorGit=state.taskGit[task.id].state;
-  await clickInView(page, reply.locator('.confirm-btn'));
+  await markTaskComplete(page);
   await expect(card).toContainText('已完成');
-  await expect(reply.locator('.message-status')).toHaveText('结果已确认');
+  await expect(reply.locator('.message-status')).toHaveCount(0);
   await fillInChat(page, page.locator('#draft'), '结构化登录恢复：补充边界检查');
   await clickInView(page, page.locator('#send'));
-  await expect(page.locator('.confirm-btn')).toHaveCount(1);
+  await expect(page.locator('.message.assistant').last().locator('.turn-result-actions')).toBeVisible();
   const history=page.locator('.assistant-turn-container.historical');
   await expect(history).toHaveCount(1);
-  await expect(history).not.toHaveAttribute('open','');
-  await clickInView(page, history.locator('> summary'));
+  await expect(history.locator('.assistant-summary-markdown')).toBeVisible();
   await expect(history.locator('.confirm-btn')).toHaveCount(0);
   await clickInView(page, history.getByRole('button',{ includeHidden: true,name:'查看结果',exact:true}));
   await expect(history.locator('.historical-result')).toContainText('历史网页效果未存档');
@@ -1137,14 +1136,15 @@ test('result review opens a result view and completion remains visible after ref
  await command({type:'start_task',operationId:'review-start',projectId,taskId});
  await page.goto('/projects/'+projectId+'/tasks/'+taskId);
  const reply=page.locator('.message.assistant').last();
- await expect(reply.locator('.confirm-btn')).toBeVisible();
+ await expect(reply.locator('.turn-result-actions')).toBeVisible();
  await clickInView(page, reply.getByRole('button',{ includeHidden: true,name:'查看结果',exact:true}));
  const pane=page.locator('.result-pane');
  await expect(pane).toBeVisible();
- await clickInView(page, reply.locator('.confirm-btn'));
+ await markTaskComplete(page);
  await expect(reply.locator('.completed-compact-bar')).toBeVisible();
  await expect(reply.locator('.completed-compact-bar')).not.toContainText('你已确认本轮结果');
  await expect(reply.locator('.completed-compact-bar').getByRole('button',{name:'查看结果',exact:true})).toBeVisible();
+ await clickInView(page,reply.getByRole('button',{includeHidden:true,name:'查看结果',exact:true}));
  await expect(pane).toBeVisible();
  await expect(reply.locator('.confirm-btn')).toHaveCount(0);
  const disconnected=(data:any)=>{const t=data.state?.tasks[taskId];if(t){const c=data.state.conversations[t.conversationId];c.runState='interrupted';c.error='pi 会话已中断，发送下一条消息时自动接回；历史已保留'}};
@@ -1234,7 +1234,7 @@ test('a real task HTTP preview is isolated, remains after acceptance, and stops 
  await fillInChat(page, page.locator('#draft'), '继续开发：保留已核对的原预览命令');
  await clickInView(page, page.locator('#send'));
  await expect(page.locator('.message.assistant')).toHaveCount(2);
- await expect(page.locator('.message.assistant').last().locator('.confirm-btn')).toBeVisible();
+ await expect(page.locator('.message.assistant').last().locator('.turn-result-actions')).toBeVisible();
  await clickInView(page, page.locator('.message.assistant').last().getByRole('button',{ includeHidden: true,name:'查看结果',exact:true}));
  await clickInView(page, pane.getByRole('button',{ includeHidden: true,name:'启动预览并在新标签页打开',exact:true}));
  const frame=page.frameLocator('iframe[title="任务效果"]');
@@ -1243,20 +1243,26 @@ test('a real task HTTP preview is isolated, remains after acceptance, and stops 
  expect(await frame.locator('body').getAttribute('data-parent-access')).toBe('blocked');
  await clickInView(page, frame.getByRole('button',{ includeHidden: true,name:'测试接口'}));
  await expect(frame.locator('#result')).toHaveText('API OK');
- await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'确认完成',exact:true}));
+ // Exercise the real Stop control before leaving the result view for the card menu.
+ await clickInView(page,pane.getByRole('button',{includeHidden:true,name:'停止预览',exact:true}));
+ await expect(pane).toContainText('服务已停止');await expect(page.locator('iframe[title="任务效果"]')).toHaveCount(0);
+ const nextTab=page.waitForEvent('popup');
+ await clickInView(page,pane.getByRole('button',{includeHidden:true,name:'启动预览并在新标签页打开',exact:true}));
+ const live=await nextTab;await expect(live.getByRole('heading',{name:'真实任务预览'})).toBeVisible();
+ await markTaskComplete(page);
  await expect(page.locator('.completed-compact-bar')).toBeVisible();
- await expect(frame.getByRole('heading',{name:'真实任务预览'})).toBeVisible();
+ // Completion now lives on the board, so leaving the old pane is intentional.
+ // Reload the actual opened capability URL: cached DOM must not masquerade as a live server.
+ await live.reload();await expect(live.getByRole('heading',{name:'真实任务预览'})).toBeVisible();
+ await live.getByRole('button',{name:'测试接口'}).click();await expect(live.locator('#result')).toHaveText('API OK');
  await page.screenshot({path:resolve('../../docs/design/web-service/task-result-desktop.png')});
- await page.setViewportSize({width:390,height:844});
- await expect(pane).toBeVisible();
- await clickInView(page, pane.getByRole('button',{ includeHidden: true,name:'返回任务对话'}));
- await expect(page.locator('#draft')).toBeVisible();
+ await page.setViewportSize({width:390,height:844});await expect(page.locator('#draft')).toBeVisible();
  await page.screenshot({path:resolve('../../docs/design/web-service/task-result-mobile.png')});
- await clickInView(page, page.locator('.mobile-switch button').first());
- await clickInView(page, pane.getByRole('button',{ includeHidden: true,name:'停止预览',exact:true}));
- await expect(pane).toContainText('服务已停止');
- await expect(page.locator('iframe[title="任务效果"]')).toHaveCount(0);
- expect(probeFor(page).calls.filter(r=>r.method==='previews/start')).toHaveLength(2);
+ const final=(await(await page.request.get('/api/snapshot')).json()).state;
+ const roundId=final.conversations[final.tasks[taskId].conversationId].rounds.at(-1).id;
+ const stopped=await page.request.post('/api/previews/stop',{headers:{Origin:'http://127.0.0.1:17331','X-Kaiwu-Client':'web'},data:{projectId,taskId,roundId,operationId:'stop-after-card-completion-'+Date.now()}});
+ expect(stopped.ok(),await stopped.text()).toBe(true);expect((await stopped.json()).state).toBe('stopped');await live.close();
+ expect(probeFor(page).calls.filter(r=>r.method==='previews/start')).toHaveLength(3);
 });
 
 test('late preview responses stay with their original task and absent previews do not start a model',async({page})=>{
@@ -1312,16 +1318,16 @@ test('result history UI: compact completed bar, history toggle, request summary,
  await expect(page.locator('#chat-title')).toContainText('历史UI测试任务');
  const card = page.locator('.task-card').filter({ has: page.getByRole('button', { includeHidden: true, name: '选择任务 历史UI测试任务', exact: true }) });
  await clickInView(page, card.getByRole('button', { includeHidden: true, name: '开始开发', exact: true }));
- await expect(page.getByRole('button', { name: '确认完成', exact: true })).toBeVisible();
+ await expect(page.locator('.message.assistant').last().locator('.turn-result-actions')).toBeVisible();
 
  // Confirmation changes task/result state, never Git or history ownership.
  const before=(await(await page.request.get('/api/snapshot')).json()).state;
  const task=Object.values(before.tasks).find((t:any)=>t.title==='历史UI测试任务') as any;
  const first=before.conversations[task.conversationId].rounds[0];
  const latest=page.locator('.message.assistant').last();
- await clickInView(page, latest.locator('.confirm-btn'));
+ await markTaskComplete(page);
  await expect(card).toContainText('已完成');
- await expect(latest.locator('.message-status')).toContainText('结果已确认');
+ await expect(latest.locator('.message-status')).toHaveCount(0);
  await expect(latest.locator('.completed-compact-bar')).toBeVisible();
  await expect(latest.locator('.confirm-btn')).toHaveCount(0);
  await clickInView(page, latest.getByRole('button',{ includeHidden: true,name:'查看结果',exact:true}));
@@ -1331,22 +1337,18 @@ test('result history UI: compact completed bar, history toggle, request summary,
  await clickInView(page, pane.getByRole('button',{ includeHidden: true,name:'← 返回看板',exact:true}));
  await fillInChat(page, page.locator('#draft'), '结构化登录恢复 第二轮改进请求内容');
  await clickInView(page, page.locator('#send'));
- await expect(page.locator('.confirm-btn')).toHaveCount(1);
+ await expect(page.locator('.message.assistant').last().locator('.turn-result-actions')).toBeVisible();
  const history=page.locator('.assistant-turn-container.historical');
  await expect(history).toHaveCount(1);
- await expect(history).not.toHaveAttribute('open','');
- const disclosure=history.locator('> summary');
- await expect(disclosure).toContainText('上一轮结果');
- expect(await disclosure.textContent()).not.toMatch(/第\s*\d+\s*轮/);
- await disclosure.focus();await page.keyboard.press('Enter');
- await expect(history).toHaveAttribute('open','');
+ await expect(history.locator('.assistant-summary-markdown')).toBeVisible();
+ await expect(history.locator('> summary')).toHaveCount(0);
  await expect(history.locator('.confirm-btn')).toHaveCount(0);
  const previewCalls=()=>probeFor(page).calls.filter(c=>c.method?.startsWith('previews/')).length;
  const calls=previewCalls();
  await clickInView(page, history.getByRole('button',{ includeHidden: true,name:'查看结果',exact:true}));
  await expect(history.locator('.historical-result')).toContainText('历史网页效果未存档');
  expect(previewCalls()).toBe(calls);
- await expect(page.locator('.message.assistant').last().locator('.confirm-btn')).toBeVisible();
+ await expect(page.locator('.message.assistant').last().locator('.turn-result-actions')).toBeVisible();
  const after=(await(await page.request.get('/api/snapshot')).json()).state;
  expect(after.conversations[task.conversationId].rounds[0].id).toBe(first.id);
  expect(after.conversations[task.conversationId].rounds[0].phase).toBe('confirmed');
@@ -1354,7 +1356,7 @@ test('result history UI: compact completed bar, history toggle, request summary,
  expect(after.taskGit[task.id].state).toBe(before.taskGit[task.id].state);
  await page.reload();
  await expect(page.locator('.assistant-turn-container.historical')).toHaveCount(1);
- await expect(page.locator('.confirm-btn')).toHaveCount(1);
+ await expect(page.locator('.message.assistant').last().locator('.turn-result-actions')).toBeVisible();
  for(const [width,height] of [[390,844],[360,800]]){
   await page.setViewportSize({width,height});
   await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'◌ 聊天',exact:true}));

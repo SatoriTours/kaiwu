@@ -59,13 +59,20 @@ type Execution struct {
 	Profile        Profile      `json:"profile"`
 	Tools          []ToolRecord `json:"tools"`
 }
+type Attachment struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	MIME string `json:"mime"`
+	Size int    `json:"size"`
+}
 type Message struct {
-	Kind        string  `json:"kind,omitempty"`
-	DisplayText *string `json:"displayText,omitempty"`
-	ID          string  `json:"id"`
-	Role        string  `json:"role"`
-	Text        string  `json:"text"`
-	Delivery    string  `json:"delivery"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+	Kind        string       `json:"kind,omitempty"`
+	DisplayText *string      `json:"displayText,omitempty"`
+	ID          string       `json:"id"`
+	Role        string       `json:"role"`
+	Text        string       `json:"text"`
+	Delivery    string       `json:"delivery"`
 }
 type Conversation struct {
 	Rounds      []Round   `json:"rounds,omitempty"`
@@ -101,6 +108,7 @@ type State struct {
 	Executions        map[string]Execution             `json:"executions"`
 }
 type Command struct {
+	Attachments        []Attachment      `json:"attachments,omitempty"`
 	RoundID            string            `json:"roundId,omitempty"`
 	Provider           string            `json:"provider,omitempty"`
 	Model              string            `json:"model,omitempty"`
