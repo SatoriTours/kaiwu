@@ -166,7 +166,8 @@ test.describe("real Go + fake pi interaction integration", () => {
     await login(page);
     await newTask(page, "交互六类项目", "交互功能", "六类字段任务");
     const conversationId = await currentConversation(page);
-    const sessionBefore = await page.locator("#chat-session").innerText();
+    const sessionBefore = (await snapshot(page)).state.conversations[conversationId].sessionId;
+    expect(sessionBefore).toBeTruthy();
     await send(page, "[ix-six] 请开始交互");
     const request = await waitPending(page, conversationId, "部署参数确认");
     expect(request.source).toBe("assistant_question");
@@ -216,7 +217,7 @@ test.describe("real Go + fake pi interaction integration", () => {
     await expect(page.locator(".message.assistant").last()).toContainText("已收到本轮交互答复");
     await expect(page.locator(".message.user").last()).toContainText("不允许");
     await expect(page.locator(".message.user").last()).toContainText("0 端口");
-    await expect(page.locator("#chat-session")).toHaveText(sessionBefore);
+    expect((await snapshot(page)).state.conversations[conversationId].sessionId).toBe(sessionBefore);
     await expect
       .poll(async () => (await interactionById(page, conversationId, request.id))?.response?.delivery, { timeout: 20000 })
       .toBe("accepted");
