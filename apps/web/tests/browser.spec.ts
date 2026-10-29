@@ -1131,9 +1131,14 @@ test('result review opens a result view and completion remains visible after ref
  const headers={Origin:'http://127.0.0.1:17331','X-Kaiwu-Client':'web'};
  await authenticateResultTest(page);
  const command=async(body:any)=>{const state=(await(await page.request.get('/api/snapshot')).json()).state;const response=await page.request.post('/api/commands',{headers,data:{...body,revision:state.revision}});expect(response.ok()).toBe(true);return response.json()};
- let state=(await(await page.request.get('/api/snapshot')).json()).state;
- let projectId=Object.keys(state.projects)[0];
- if(!projectId){projectId=(await command({type:'add_project',operationId:'review-project',name:'成果验收',path:readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'),'utf8')})).createdId}
+ // Use a dedicated, real Git project; unrelated earlier tests must not supply its history.
+ const projectPath=readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'),'utf8')+'-result-review';
+ mkdirSync(projectPath,{recursive:true});
+ const git=(cwd:string,...args:string[])=>execFileSync('git',['-C',cwd,...args],{encoding:'utf8',timeout:10000}).trim();
+ git(projectPath,'init','--initial-branch=main');
+ git(projectPath,'-c','user.name=Kaiwu Test','-c','user.email=fixture@example.invalid','commit','--allow-empty','-m','result review baseline');
+ const baseline=git(projectPath,'rev-parse','HEAD');
+ const projectId=(await command({type:'add_project',operationId:'review-project',name:'成果验收',path:projectPath})).createdId;
  const taskId=(await command({type:'add_task',operationId:'review-task',projectId,title:'成果预览验收',request:'结构化成果预览验收'})).createdId;
  await command({type:'start_task',operationId:'review-start',projectId,taskId});
  await page.goto('/projects/'+projectId+'/tasks/'+taskId);
@@ -1155,11 +1160,33 @@ test('result review opens a result view and completion remains visible after ref
  await page.reload();
  await expect(reply.locator('.completed-compact-bar')).toBeVisible();
  await expect(reply.locator('.confirm-btn')).toHaveCount(0);
- const mergedSnapshot=(data:any)=>{if(data.state?.taskGit?.[taskId])Object.assign(data.state.taskGit[taskId],{state:'merged',canMerge:false,mainBranch:'main'})};
- probeFor(page).transform=mergedSnapshot;
+ // Restore real snapshots before reviewing and explicitly merging the actual fixture work.
+ probeFor(page).transform=null;
  await page.unroute('**/api/snapshot');
- await page.route('**/api/snapshot',async route=>{const response=await route.fetch(),data=await response.json();mergedSnapshot(data);await route.fulfill({response,json:data})});
  await page.reload();
+ const card=page.locator('.task-card').filter({has:page.getByRole('button',{name:'选择任务 成果预览验收',exact:true})});
+ await clickInView(page,card.getByRole('button',{includeHidden:true,name:'合并到主分支',exact:true}));
+ const mergeDialog=page.locator('dialog:not(.chat-drawer)[open]');
+ await expect(mergeDialog).toContainText('kaiwu-fixture-result.txt');
+ expect(existsSync(resolve(projectPath,'kaiwu-fixture-result.txt'))).toBe(false);
+ await clickInView(page,mergeDialog.getByRole('button',{name:'提交并合并到主分支',exact:true}));
+ await expect(mergeDialog).toContainText('操作完成');
+ await clickInView(page,mergeDialog.getByRole('button',{name:'取消',exact:true}));
+ expect((await page.request.post('/api/git/refresh',{headers,data:{projectId}})).ok()).toBe(true);
+ await page.reload();
+ const mergedState=(await(await page.request.get('/api/snapshot')).json()).state;
+ // UI labels are not proof of integration: require the real backend and Git ancestry.
+ expect(mergedState.taskGit[taskId].state).toBe('merged');
+ const workspace=mergedState.executions[mergedState.tasks[taskId].executionId].workspace;
+ expect(git(workspace,'status','--porcelain=v1','--untracked-files=all')).toBe('');
+ const taskHead=git(workspace,'rev-parse','HEAD');
+ expect(taskHead).not.toBe(baseline);
+ expect(mergedState.taskGit[taskId].taskSHA).toBe(taskHead);
+ expect(mergedState.taskGit[taskId].mainSHA).toBe(git(projectPath,'rev-parse','refs/heads/main'));
+ expect(git(projectPath,'status','--porcelain=v1','--untracked-files=all')).toBe('');
+ expect(git(projectPath,'show','refs/heads/main:kaiwu-fixture-result.txt')).toContain('结构化成果预览验收');
+ expect(git(projectPath,'merge-base','--is-ancestor',taskHead,'refs/heads/main')).toBe('');
+ expect(readFileSync(resolve(projectPath,'kaiwu-fixture-result.txt'),'utf8')).toContain('结构化成果预览验收');
  await expect(reply.locator('.completed-compact-bar')).toContainText('已合并 · main');
  await expect(reply.getByRole('button',{name:'合并到主分支'})).toHaveCount(0);
  await expect(reply.locator('.completed-compact-bar')).not.toContainText('先审核具体改动再合并');
