@@ -1458,6 +1458,9 @@ async function loadTaskPreview(action:'status'|'start'|'stop'='status',forceOpen
     Object.assign(result,opened);
    }
   }
+  // Passive replies must not publish a frame ahead of a foreground Open or
+  // overwrite its newer capability: changing the keyed URL destroys the live document.
+  if(action==='status'&&!forceOpen&&(previewIntent.current||taskPreview.value!==previous))return;
   taskPreview.value=result;
  }catch(e){if(epoch===previewEpoch)previewError.value=e instanceof Error?e.message:'未能读取预览状态'}
  finally{

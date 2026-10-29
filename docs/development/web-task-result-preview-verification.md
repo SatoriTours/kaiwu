@@ -1,5 +1,7 @@
 # 任务成果预览与确认完成验证
 
+> 最新：基线 `4f36acc` 已通过完整门禁并部署。2026-10-29 的被动状态／前台Open并发修正另见[文末](#2026-10-29-被动状态回执与前台open并发)，不以历史通过替代新快照验收。
+
 日期：2026-10-17。状态：该历史批次实现、最终浏览器验证、独立验收与 7331 更新均已通过。
 
 > 后续 2026-10-24 扩展另见[文末](#2026-10-24-产物直达与双合并增量)；以下旧通过／部署结论不覆盖新批次。
@@ -116,3 +118,58 @@ npm run test:chat-turn
 最新集合 **`eb8e49020cbc1049be78575e31cb1dde7123d704143e70abeb5e218a14a8bc1e`**（16 文件），仅四测试相关文件变化，生产 TS／Go／dist 未变。569 实际独立窄验 **6＋1＋1 全过**（19.4／3.2／5.4 秒），核对全19日志与自动分片完整性，M1关闭，消费侧 **spec／quality分别通过**；报告 `chat-acceptance.md` §16 保留原失败。完整 Tab 循环未测；HTTP／WS长期相位采样／503变体等旧边界仍不作为通过依据。
 
 **独立视觉仍受阻**，已一次补问是否授权既有 UI 配置先核图像能力再只读验六图；未答不切模型、不重复催问。真实 UI 远端联调仍未验，不扩大本轮授权。整体仍阻塞／未完成；未部署、提交或推送。
+
+## 2026-10-29 被动状态回执与前台Open并发
+
+### 证据与因果边界
+
+- 先有界跑3次仅临时候选加观察仪表的单例，全部通过；独立只读复核确认其不足以证明间歇修复，随后停止同策略采样。
+- 按原顺序、同一worker／同一服务生命周期，未经DOM注入的原始 result-review + HTTP 两项再跑一次，2/2通过。原CI精确失败帧序仍未复现。
+- 静态可控窗口：前台Start回执先写入running但尚无URL，随后等Open1；此时visible事件可启动被动Status，捕获空previousURL并请求Open2。迟到Status把新cap URL赋给以URL为key的iframe，会重建文档、擦除已经API OK的结果；反序则会在前台Open完成前抢先创建文档。
+- 用现有WebSocket probe仅暂扣真实Go回执，模拟一次visible环境事件并按两种顺序释放；未注入预览DOM脚本、伪造HTTP／API响应或修改超时。真实API先返回API OK，再释放迟来的Status/Open回执，旧代码确定性变空p；新两项回归在旧App均红。
+
+### 最小修正
+
+`App.vue`仅增加3行：被动Status最终发布前，若仍有前台intent，或当前taskPreview引用已经不是该请求发出时的previous，则丢弃这一过时／抢先回执。现有finally仍释放busy并按原生命周期续读。显式Refresh（forceOpen）、Start、Stop及任务／轮次／epoch校验不变；不放宽认证、capability、CSP、sandbox或8驻留限制。
+
+新增两项真实Go／HTTP回归覆盖回执早／晚顺序：保留allow-scripts与父文档拒绝、真实API OK、live URL不变、只Start一次、显式Stop及iframe移除。旧HTTP／历史／离线／完成后预览断言未删改。
+
+### 实际验证
+
+- 两回归旧App 2红 → 修正后5项定向全绿；前端构建、73项单元通过。
+- 曾直接把49项放同一服务生命周期，新增末尾两项在会话未启动（容量／配置不可用）处失败，外层180秒终止；失败快照／trace保留，只结束已核实自有测试服务，未称全绿。
+- 将新两项纳入既有HISTORY_GREP及互补grep-invert，仍原7个门禁组、不删用例、不提高会话上限。部署路由断言先160通过／3失败，调整后163/163通过；自测样本预览6/6与互补业务43/43分别通过（总49，非直接raw49共享生命周期通过）。
+- 独立复验：4文件hash一致，构建／73单元／163路由与新两序回归通过；预览组仅5/6，原HTTP空结果断言仍失败（5秒），一次单跑通过不覆盖该失败。该失败仅error-context，无trace／网络记录，不臆测其请求或文档时序。修正自身目标通过，但关键旧HTTP回归未全过，不能作为整体验收成功。
+- 后续只做一次无DOM注入／无trace snapshots的被动网络与导航记录原始pair，2/2通过（HTTP 15.4秒）；原失败仍未抓到边界，停止采样。新7路径未提交／未部署；基线4f36acc及79项既有成功保持，不冒充新快照完整证据。
+
+证据复用 `~/.local/state/agent-artifacts/kaiwu/2026-10-27-cold-chat-implementation/`：`submission/http-diagnostic-summary.json`（最新阶段）、`http-original-pair.log`、`http-controlled-red*`、`http-regression-red*`、`http-fix-{build,unit,preview-six,business-complement}*`、`http-routing-{red,green}.log`、`http-fix-source-manifest.json`。所有测试使用隔离fixture／假pi，无真实业务模型或新增图像调用。本修正解决已证明的被动回执文档竞态，不宣称排除慢上游等其他未验证机制。
+
+
+### 原HTTP失败留证续查（2026-10-29，未完成）
+
+- 新增仅该HTTP用例使用的 `tests/preview-http-evidence.ts`：被动记录预览请求／响应／导航／detach和点击阶段，响应到达立即缓存 `API OK` 的6字节内容及SHA，其他正文仅SHA；cap掩码，不存Cookie／token／任意错误正文。记录源码、两侧构建及实际下发JS／CSS哈希、Node／浏览器／worker／trace状态。失败才有界后验，原异常重抛；原API成功、隔离、Stop／reopen与两序断言不变，无DOM注入／前置就绪等待。
+- 先在临时候选真实Go／HTTP成功后故意断言失败，证明确有failed记录、即时API缓存与后验处理器证据。最终helper版本的机制证明通过；人为失败不当作产品回归。4209独立只读审计确认留证与脱敏机制合格（无独立新测试／服务）。
+- 复制独立条件（full-SHA前端构建、单worker、原6项同服务、trace off）后抓到两次原HTTP **5/6** 失败：点击begin／returned均落盘，原5秒断言收到空结果，**没有 `/api/hello` 请求，点击后没有iframe导航／detach，也无pageerror**。真实下发资产与两侧dist哈希一致；因此不能再把本组失败归到资产混用、已发生的CORS失败或文档重挂。历史CI精确帧序仍未知。
+- 第二次失败的5秒后验是parent iframe hover／active、child无hover／focus；当时后验误用 `#api`，其handler:null不是缺处理器证据，已改 `#ping`。三个helper源码快照均按各run的完整SHA恢复留存，不以新版解释旧版差异。
+- 有界原生input取证两组均6绿；只过滤既有CDP日志的一组6绿；前台／后台显式焦点对照各3次真实API均过；点击返回后一次只读geometry组6绿。均不冲销两红，不据此加sleep／改超时／弱化断言或把bringToFront当修复。几何记录是期望中心而非实际输入坐标；原生仪表可能扰动时序，但其通过的因果未证明。
+- **仍未定位实际点击坐标、命中或输入投递故障；没有新的生产修正，不宣称原HTTP已修复。** 现8路径（原7＋helper）未提交／未部署，生产保持4f36acc。浏览器系统152与Playwright声明bundled156的兼容性未排除，未安装／换浏览器或依赖，未改权限／认证／sandbox／八驻留限制。
+
+最新证据仍统一在既有根索引及 `submission/http-diagnostic-summary.json`；关键增量：`http-capture-{sha-group,proof-final}*`、`http-click-postmortem-two*`、`http-helper-snapshots/`、`independent-http-capture-audit.md`、`http-native-{input,early}*`、`http-focus-control*`、`http-wire-input*`、`http-after-click*`。本轮无真实业务模型或图像请求。
+
+## 2026-10-30 原生输入几何与测试点击分阶段（本地关键路径通过，未部署）
+
+- 自包含真实HTTP／opaque OOPIF夹具里，原生暖机点击及API成功后，父滚动128px并同步读取新DOM布局。正确新点会送父文档，故意旧点却仍以旧child原点命中按钮；可信事件、实际Input与真实API计数交叉证明“DOM已新而native输入几何仍旧”的窗口。尚未区分Viz、widget visual properties或scroll offset，不称原Go／CI精确帧序已复现。
+- 用户批准后仅在私有cache安装SDK匹配Chrome156；未改系统152、依赖／锁、生产launcher。相同冻结夹具／参数的有界版本对照，两版本都出现同类失败，否定“只换匹配版本即可解决”；故意旧点成功是机制判别，不是功能通过。capture参考在156也有红，不把截图当修复。
+- `tests/view-navigation.ts`只改跨文档分支：先一次普通`target.hover()`，再原来的普通`target.click()`。无force、JS click、固定sleep、timeout增加、点击重放或新增DOM监听。悬停阶段与最终正常点击各自经过原生输入流程；最终仍以真实API／结果断言判断成功，ACK／CSS `:hover`均不当新事件送达证明。
+- 中途尝试过CSS `:hover`门禁，受控暖机后会残留旧hover状态，不能证明新Move送达，已撤除这一未经证实的门禁／重试。中间源码及日志仍存证，不拿其4绿当当前方案证据。第一次误用`npm test -- <file>`并未选择新测试，已标为wrong-command；使用现有Node原生test runner，无新增Vitest依赖。
+- 四项单元在原始helper确定性4红，当前4绿，验证分离原生悬停／单次点击及错误不重放；这只是driver边界单元，不冒充原生投递证明。已加入默认`npm test`，只改script，不改依赖／锁。
+- 当前helper在152／156受控新滚动窗口各2/2通过；真实API计数1→2，子文档新增一次可信click，父文档无新增按下／点击。单独hover会先落父IFRAME的情况仍真实留证，不能谎称第一hover就一定送到child。
+- 新永久浏览器回归`opaque preview pointer:`使用自有Node HTTP服务、同URL popup、`sandbox=allow-scripts`，校验父访问blocked、暖机后真实API增量及可信目标／父文档无按下；不是Go业务／capability验收替代。已纳入现有HISTORY_GREP及互补invert，仍7个生命周期组与8驻留上限。
+- 自测干净`4f36acc`归档仅叠11路径（原8＋helper／单元／npm script）：前端77单元、构建、163路由通过；系统152的预览／历史7/7和互补业务43/43分别通过，总50，不称raw50共用一个服务通过。保留之前原Go两次5/6及其他所有红；尚不能用这些绿承诺任何间歇绝对消失。
+- 独立干净候选关键4/4通过（原Go HTTP、两回执顺序、原生窗口）；并核源码／下发资产、77单元／163路由／7＋43原始证据，不机械重复全套。只代表限定关键路径通过，不宣称所有间歇消失；见`independent-browser-pointer-fix.md`。当前11路径未提交、未推送、未部署；7331实际发布入口未新复验（上次交付为`4f36acc`），无真实业务模型／图像调用或新最终SHA全量门禁。
+
+复用既有证据目录`submission/`：`browser-input-matched156-plan.json`、`browser-input-paired{152,156}-*`、`browser-input-fixed-pointer-{152,156}`、`browser-input-pointer-unit-{baseline-red,red,green}.log`、`browser-input-pointer-guard-*`（历史撤回尝试）、`browser-input-pointer-fix-{manifest.json,critical.log,complement.log,unit.log,build.log,deploy-test.log}`。最新状态仍看根`index.md`及`http-diagnostic-summary.json`，不以历史段落“未下载”代替本节已授权下载事实。
+
+### 本次交付指令
+
+2026-10-30 用户明确要求“提交代码”。以上未提交／未部署是指令前快照；本次进入既有最终SHA全量门禁、推送与7331实际入口核验流程，结果以外部证据索引及运行修订号为准，不预先宣称交付成功。保留间歇问题尚未证明完全消除的边界。

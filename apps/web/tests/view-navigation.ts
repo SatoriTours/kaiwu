@@ -23,7 +23,14 @@ export async function openChat(page: Page) {
   await expect(page.locator('.chat-drawer')).toBeVisible();
 }
 export async function clickInView(page: Page, target: Locator) {
-  if(await target.evaluate(el=>el.ownerDocument.defaultView!==el.ownerDocument.defaultView?.top)){await target.click();return;}
+  if (await target.evaluate(el => el.ownerDocument.defaultView !== el.ownerDocument.defaultView?.top)) {
+    // A parent's scroll can update DOM geometry before its OOPIF input mapping.
+    // Stage a separate native hover before the normal click; do not force/replay
+    // clicks or use stale CSS :hover as proof. Callers must still verify real effects.
+    await target.hover();
+    await target.click();
+    return;
+  }
   const location = await target.evaluate(el => ({ chat: !!el.closest('.chat-drawer'), modal: !!el.closest('dialog'), global: !!el.closest('.global-actions') }));
   if (location.chat) await openChat(page);
   else if (!location.modal) await closeChat(page);

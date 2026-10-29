@@ -824,7 +824,7 @@ if grep -q 'test:browser' "$FAKE_LOG_DIR/npm.calls"; then ok "浏览器套件实
 interaction_group='V2 native|V2 input'
 expect_contains "原有交互用例在独立服务执行" "$FAKE_LOG_DIR/npm.calls" "--config playwright.interaction.config.ts --grep-invert $interaction_group"
 expect_contains "V2交互用例在全新服务执行且无跳过" "$FAKE_LOG_DIR/npm.calls" "--config playwright.interaction.config.ts --grep $interaction_group"
-result_group='result history UI:|result review opens|a real task HTTP preview|late preview responses'
+result_group='result history UI:|result review opens|a real task HTTP preview|late preview responses|passive preview reply|opaque preview pointer:'
 expect_contains "预览与历史用例在独立生命周期执行" "$FAKE_LOG_DIR/npm.calls" "--project=existing --grep $result_group"
 expect_contains "其余用例使用互补分组而非跳过" "$FAKE_LOG_DIR/npm.calls" "--grep-invert $result_group"
 expect_contains "原主流程显式排除会污染初始空库的工具套件" "$FAKE_LOG_DIR/npm.calls" "--project=existing --project=delivery --project=ui-consistency --grep-invert $result_group"

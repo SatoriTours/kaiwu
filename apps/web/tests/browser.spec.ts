@@ -1,8 +1,10 @@
 import { clickInView, closeChat, fillInChat, openChat, markTaskComplete } from './view-navigation';
 import { test, expect } from "@playwright/test";
+import {previewHTTPEvidence} from './preview-http-evidence';
 import type { Page, BrowserContext, Cookie } from "@playwright/test";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { createServer } from "node:http";
 import { resolve } from "node:path";
 // Intercept real WebSocket frames; all business requests still reach the real Go server.
 const socketProbes = new WeakMap<Page, {calls:any[];received:any[];held:(()=>void)[];holdMethod:string;holdType:string;dropMethod:string;modelMode:string;missingReceipt?:boolean;transform?:(v:any)=>void;deliver?:(v:any)=>void}>();
@@ -1234,7 +1236,9 @@ HTTPServer(('127.0.0.1',a.port),Handler).serve_forever()
  return {projectId,taskId};
 }
 
-test('a real task HTTP preview is isolated, remains after acceptance, and stops explicitly',async({page})=>{
+test('a real task HTTP preview is isolated, remains after acceptance, and stops explicitly',async({page},testInfo)=>{
+ const evidence=previewHTTPEvidence(page,testInfo);
+ await evidence.run(async()=>{
  await authenticateResultTest(page);
  const {projectId,taskId}=await resultFixture(page,'http',true);
  await page.goto('/projects/'+projectId+'/tasks/'+taskId);
@@ -1270,8 +1274,11 @@ test('a real task HTTP preview is isolated, remains after acceptance, and stops 
  await expect(frame.getByRole('heading',{name:'真实任务预览'})).toBeVisible();
  await expect(page.locator('iframe[title="任务效果"]')).toHaveAttribute('sandbox','allow-scripts');
  expect(await frame.locator('body').getAttribute('data-parent-access')).toBe('blocked');
+ evidence.stage('iframe-api-click.begin');
  await clickInView(page, frame.getByRole('button',{ includeHidden: true,name:'测试接口'}));
+ evidence.stage('iframe-api-click.returned');
  await expect(frame.locator('#result')).toHaveText('API OK');
+ evidence.stage('iframe-api-result.confirmed');
  // Exercise the real Stop control before leaving the result view for the card menu.
  await clickInView(page,pane.getByRole('button',{includeHidden:true,name:'停止预览',exact:true}));
  await expect(pane).toContainText('服务已停止');await expect(page.locator('iframe[title="任务效果"]')).toHaveCount(0);
@@ -1292,6 +1299,7 @@ test('a real task HTTP preview is isolated, remains after acceptance, and stops 
  const stopped=await page.request.post('/api/previews/stop',{headers:{Origin:'http://127.0.0.1:17331','X-Kaiwu-Client':'web'},data:{projectId,taskId,roundId,operationId:'stop-after-card-completion-'+Date.now()}});
  expect(stopped.ok(),await stopped.text()).toBe(true);expect((await stopped.json()).state).toBe('stopped');await live.close();
  expect(probeFor(page).calls.filter(r=>r.method==='previews/start')).toHaveLength(3);
+ });
 });
 
 test('late preview responses stay with their original task and absent previews do not start a model',async({page})=>{
@@ -1548,3 +1556,97 @@ async function authenticateResultTest(page:Page){
   expect(login.ok(),await login.text()).toBe(true);
  }
 }
+
+// Real Go replies are held only to make the two legal delivery orders deterministic.
+// Neither the preview document nor its HTTP API is mocked or given extra readiness waits.
+for (const order of ['before', 'after'] as const) {
+ test(`passive preview reply ${order} foreground Open preserves the live document`,async({page})=>{
+  await authenticateResultTest(page);
+  const {projectId,taskId}=await resultFixture(page,'http-passive-'+order,true);
+  await page.goto('/projects/'+projectId+'/tasks/'+taskId);
+  await clickInView(page,page.locator('.message.assistant').last().getByRole('button',{includeHidden:true,name:'查看结果',exact:true}));
+  const pane=page.getByRole('region',{name:'任务成果与效果'});
+  const refresh=pane.getByRole('button',{name:'刷新状态',exact:true});
+  probeFor(page).holdMethod='previews/open';
+  await clickInView(page,pane.getByRole('button',{includeHidden:true,name:'启动预览并在新标签页打开',exact:true}));
+  await expect.poll(()=>probeFor(page).held.length).toBe(1);
+  // Returning to this visible tab may refresh status while foreground Open is pending.
+  await page.bringToFront();
+  await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+  await expect.poll(()=>probeFor(page).held.length).toBe(2);
+  if(order==='before'){
+   probeFor(page).held.splice(1,1)[0]();
+   await expect(refresh).toBeEnabled();
+   await expect(page.locator('iframe[title="任务效果"]')).toHaveCount(0);
+  }
+  probeFor(page).held.shift()!();
+  const frame=page.frameLocator('iframe[title="任务效果"]');
+  await expect(frame.getByRole('heading',{name:'真实任务预览'})).toBeVisible();
+  await expect(page.locator('iframe[title="任务效果"]')).toHaveAttribute('sandbox','allow-scripts');
+  expect(await frame.locator('body').getAttribute('data-parent-access')).toBe('blocked');
+  await frame.getByRole('button',{name:'测试接口'}).click();
+  await expect(frame.locator('#result')).toHaveText('API OK');
+  const liveURL=await page.locator('iframe[title="任务效果"]').getAttribute('src');
+  releaseFrames(page);
+  await expect(refresh).toBeEnabled();
+  await expect(page.locator('iframe[title="任务效果"]')).toHaveAttribute('src',liveURL!);
+  await expect(frame.locator('#result')).toHaveText('API OK');
+  expect(probeFor(page).calls.filter(r=>r.method==='previews/start')).toHaveLength(1);
+  await clickInView(page,pane.getByRole('button',{includeHidden:true,name:'停止预览',exact:true}));
+  await expect(pane).toContainText('服务已停止');
+  await expect(page.locator('iframe[title="任务效果"]')).toHaveCount(0);
+ });
+}
+
+// Browser-only regression for DOM/native OOPIF geometry publication. No Go/WS,
+// mocked API, forced click, JS click, screenshot barrier or arbitrary delay.
+test('opaque preview pointer: native click follows parent scroll without pressing the embedder', async ({ page }) => {
+  let apiCalls = 0;
+  const observe = `window.inputEvents=[];for(const type of ['pointermove','pointerdown','mousedown','pointerup','mouseup','click'])window.addEventListener(type,e=>inputEvents.push({type:e.type,target:e.target.id||e.target.tagName,trusted:e.isTrusted}),{capture:true,passive:true});`;
+  const child = `<!doctype html><meta charset=utf-8><h1>真实任务预览</h1><button id=ping>测试接口</button><p id=result></p><script>${observe}ping.onclick=async()=>{result.textContent=await(await fetch('api/hello')).text()};try{parent.document.body;document.body.dataset.parentAccess='allowed'}catch{document.body.dataset.parentAccess='blocked'}</script>`;
+  const main = `<!doctype html><meta charset=utf-8><style>*{box-sizing:border-box}body{margin:0;height:100dvh;overflow:hidden}.result-pane-scroll{position:absolute;left:20px;right:20px;top:188.9375px;bottom:16px;overflow:auto}.preview-surface{border:1px solid #888;overflow:hidden}.preview-status{height:40px}iframe{display:block;width:100%;height:55dvh;min-height:280px;border:0}</style><button id=start>启动预览</button><div class=result-pane-scroll><section class=preview-surface><div class=preview-status>服务运行中</div><div id=mount></div></section><div style=height:1000px>成果</div></div><script>${observe}start.onclick=async()=>{const popup=window.open('about:blank','_blank');await fetch('/open');popup.location.replace('/preview/doc');mount.innerHTML='<iframe title="任务效果" sandbox="allow-scripts" src="/preview/doc"></iframe>'};</script>`;
+  const server = createServer((request, response) => {
+    const pathname = new URL(request.url!, 'http://127.0.0.1').pathname;
+    response.setHeader('Cache-Control', 'no-store');
+    if (pathname === '/preview/api/hello') {
+      apiCalls++;
+      response.setHeader('Access-Control-Allow-Origin', 'null');
+      response.end('API OK');
+    } else if (pathname === '/open') response.end('ready');
+    else if (pathname === '/favicon.ico') { response.statusCode = 204; response.end(); }
+    else { response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end(pathname === '/preview/doc' ? child : main); }
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  let popup: Page | undefined;
+  try {
+    const address = server.address() as { port: number };
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto(`http://127.0.0.1:${address.port}/`);
+    const opened = page.waitForEvent('popup');
+    await page.getByRole('button', { name: '启动预览', exact: true }).click();
+    popup = await opened;
+    const frame = page.frameLocator('iframe[title="任务效果"]');
+    const button = frame.getByRole('button', { name: '测试接口', exact: true });
+    await expect(page.locator('iframe')).toHaveAttribute('sandbox', 'allow-scripts');
+    await expect(frame.locator('body')).toHaveAttribute('data-parent-access', 'blocked');
+    await button.click(); // Real native/API warmup: the child is not unpainted/unstarted.
+    await expect(frame.locator('#result')).toHaveText('API OK');
+    expect(apiCalls).toBe(1);
+    const parentBefore = await page.evaluate(() => (window as any).inputEvents.length);
+    const childBefore = await button.evaluate(() => (window as any).inputEvents.length);
+    await page.locator('.result-pane-scroll').evaluate(el => el.scrollTop = 128);
+    await clickInView(page, button);
+    await expect.poll(() => apiCalls, { timeout: 5000 }).toBe(2); // Not stale warmup text.
+    await expect(frame.locator('#result')).toHaveText('API OK');
+    const parentEvents = await page.evaluate(() => (window as any).inputEvents);
+    const childEvents = await button.evaluate(() => (window as any).inputEvents);
+    expect(parentEvents.slice(parentBefore).filter((e: any) => ['pointerdown', 'mousedown', 'click'].includes(e.type))).toEqual([]);
+    expect(childEvents.slice(childBefore).filter((e: any) => e.type === 'click')).toEqual([{ type: 'click', target: 'ping', trusted: true }]);
+  } finally {
+    try { await popup?.close(); }
+    finally {
+      server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  }
+});

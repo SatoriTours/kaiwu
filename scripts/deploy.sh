@@ -31,7 +31,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)
 # documented regression splits it into two independent fresh service
 # lifecycles: preview/history cases first, then the remaining scenarios. Each
 # process keeps the product's eight-resident-session limit; no test is skipped.
-HISTORY_GREP='result history UI:|result review opens|a real task HTTP preview|late preview responses'
+HISTORY_GREP='result history UI:|result review opens|a real task HTTP preview|late preview responses|passive preview reply|opaque preview pointer:'
 # New V2 requests need their own fresh eight-session budget too. Complementary
 # selectors retain every interaction test and all existing assertions.
 INTERACTION_V2_GREP='V2 native|V2 input'
