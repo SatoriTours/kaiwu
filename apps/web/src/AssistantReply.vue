@@ -166,6 +166,10 @@ function onPreviewClick() {
   <div class="assistant-turn-container" :class="{historical}">
     <div class="message-bubble" :class="{'history-body':historical}">
       <MarkdownContent v-if="summary" class="assistant-summary-markdown" :text="summary" />
+      <div v-if="links.length" class="reply-links" aria-label="结果链接">
+        <small>结果链接</small>
+        <a v-for="url in links" :key="url" :href="url" target="_blank" rel="noopener noreferrer">{{ url }}</a>
+      </div>
       <div v-if="loading" class="pending-line" role="status">
         <span class="turn-spinner" aria-hidden="true"></span>
         {{ roundTools.length || report ? '正在开发…' : '正在回复…' }}
@@ -263,11 +267,7 @@ function onPreviewClick() {
         <!-- 4. Report error if any -->
         <p v-if="round?.reportError" class="check-missing" role="status">{{ round.reportError }}</p>
 
-        <!-- 5. Links -->
-        <div v-if="links.length" class="reply-links">
-          <small>相关链接</small>
-          <a v-for="url in links" :key="url" :href="url" target="_blank" rel="noopener noreferrer">{{ url }}</a>
-        </div>
+
       </div>
     </details>
 

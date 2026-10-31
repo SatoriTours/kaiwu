@@ -212,7 +212,18 @@ export function replySummary(message: Message): string {
 }
 
 export function replyLinks(message: Message): string[] {
- const source = messageText(message) + '\n' + summarySource(message);
+ let source = messageText(message) + '\n' + summarySource(message);
+ // The compact summary is not the entire delivery. Keep URLs declared in the
+ // structured result visible too, without exposing tool logs or arbitrary JSON.
+ const report = message.text.match(/<kaiwu-report>([\s\S]*?)<\/kaiwu-report>/);
+ if (report) try {
+  const value = JSON.parse(report[1]!);
+  for (const field of [value.summary, ...(Array.isArray(value.results) ? value.results : []), ...(Array.isArray(value.next) ? value.next : [])]) {
+   if (typeof field === 'string') source += '\n' + field;
+  }
+ } catch {
+  /* An incomplete streamed report is not a delivery declaration. */
+ }
  const links = new Set<string>();
  for (const match of source.matchAll(/https?:\/\/[^\s<>"'`，。；！？、）】》]+/gi)) {
   const value = match[0].replace(/[)\]}>.,;，。；！？、）】》]+$/g, '');

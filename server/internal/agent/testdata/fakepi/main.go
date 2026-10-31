@@ -218,6 +218,9 @@ func main() {
 			if c["message"] == "__MARKDOWN_STREAM_FIXTURE__" {
 				chunks = []string{"## 流式格式\n\n```go\npackage main\n", "func main() { println(\"ready\") }\n", "```\n\n**完成**"}
 			}
+			if strings.Contains(promptText, "__WEB_DELIVERY_LINKS__") {
+				chunks = []string{`求和界面已完成。<kaiwu-report>{"summary":"求和界面已完成。","stage":"awaiting_review","plan":[],"results":["访问 [求和界面](https://example.com/sum?mode=web)"],"checks":[],"blockers":[],"next":[],"question":""}</kaiwu-report>`}
+			}
 			if strings.Contains(fmt.Sprint(c["message"]), "结构化登录恢复") {
 				_ = out.Encode(map[string]any{"type": "tool_execution_start", "toolCallId": "fixture-check", "toolName": "bash", "args": map[string]string{"command": "fixture check"}})
 				_ = out.Encode(map[string]any{"type": "tool_execution_end", "toolCallId": "fixture-check", "toolName": "bash", "result": map[string]string{"text": "PASS fixture"}, "isError": false})

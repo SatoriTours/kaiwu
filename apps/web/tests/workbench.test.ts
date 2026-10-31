@@ -424,6 +424,11 @@ test('reply links preserve complete HTTP targets outside the short summary and i
  assert.ok(replySummary(message).includes('\n- 接口已验证'));
 });
 
+test('reply links include structured result URLs when the short summary has none',()=>{
+ const message={id:'web-result',role:'assistant',delivery:'complete',displayText:'求和界面已完成。',text:'求和界面已完成。<kaiwu-report>'+JSON.stringify({summary:'求和界面已完成。',results:['访问 [求和界面](https://example.com/sum?mode=web)。','禁止 https://user:secret@example.com/private'],next:['打开 https://example.com/sum?mode=web']})+'</kaiwu-report>'};
+ assert.deepEqual(replyLinks(message),['https://example.com/sum?mode=web']);
+});
+
 test('deliveryView pure projection maps phases, repairs, block reasons, and safe action links', async () => {
  const { deliveryView, canAcceptDelivery } = await import('../src/delivery.ts');
  assert.equal(deliveryView(undefined).active, false);

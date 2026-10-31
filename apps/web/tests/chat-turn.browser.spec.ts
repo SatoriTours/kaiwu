@@ -444,6 +444,39 @@ async function routePreviewSocket(page: Page, mergeUI?: { pushOnly: boolean; pha
   };
 }
 
+for (const {width,scheme} of [{width:1440,scheme:"light"}, {width:390,scheme:"light"}, {width:390,scheme:"dark"}] as const) {
+  test(`Compact user bubbles and visible delivery URLs at ${width}px ${scheme}`, async ({page}) => {
+    await page.emulateMedia({colorScheme:scheme});
+    await page.setViewportSize({width,height:900});
+    await login(page);
+    await addProject(page,"DeliveryLinks"+width);
+    await fillInChat(page,page.locator('#draft'),"__WEB_DELIVERY_LINKS__ 做一个求和网页");
+    await clickInView(page,page.locator('#send'));
+    const user = page.locator('.message.user').last();
+    const bubble = user.locator('.text');
+    await expect(user).toContainText("做一个求和网页");
+    const geometry = await bubble.evaluate(el => {
+      const body = el.querySelector('.markdown-body')!;
+      const p = body.querySelector('p')!;
+      return {bubble:el.getBoundingClientRect().height,body:body.getBoundingClientRect().height,
+        top:parseFloat(getComputedStyle(p).marginTop),bottom:parseFloat(getComputedStyle(p).marginBottom)};
+    });
+    expect(geometry.bubble-geometry.body).toBeLessThanOrEqual(16);
+    expect(geometry.top).toBe(0);
+    expect(geometry.bottom).toBe(0);
+    const answer=page.locator('.message.assistant').last();
+    await expect(answer.locator('.assistant-summary-markdown')).toContainText("求和界面已完成");
+    await expect(answer.locator('.assistant-turn-details')).not.toHaveAttribute('open','');
+    const url=answer.locator('.reply-links a');
+    await expect(url).toBeVisible();
+    await expect(url).toHaveAttribute('href','https://example.com/sum?mode=web');
+    await expect(url).toHaveAttribute('rel','noopener noreferrer');
+    await expect(url).toHaveCount(1);
+    const artifacts=process.env.KAIWU_CHAT_FOCUS_ARTIFACTS;
+    if(artifacts) await page.screenshot({path:join(artifacts,`delivery-${width}${scheme === "dark" ? "-dark" : ""}.png`)});
+  });
+}
+
 test.describe("Chat turn and result actions", () => {
   test("V5 project conversation keeps ordinary answers visible, not collapsed development history", async ({page}) => {
     await page.setViewportSize({width:1440,height:900});

@@ -33,10 +33,13 @@ const replyTurnInstructions = `
 <kaiwu-reply-requirements>
 本轮所有面向用户的内容使用简体中文，包括过程更新、摘要、问题、最终回复和结构化报告的自然语言字段；不要沿用历史英文叙述。代码、命令、路径、标识符及必要原文引用保留原样。
 使用简短的 Markdown 段落；并列事项用列表，代码与命令用代码块，不把多个事项挤成一长行。真实可访问的 URL 单独一行，以 [查看效果](实际URL) 等明确文字提供可点击链接；保留完整协议、主机、端口和路径，不编造或改写地址，不把未验证的访问描述为已验证。
+网页或 HTTP 任务完成时，不能只说“已完成”或“通过实测”：最终回复及报告 results 必须交代访问方式。有实际 URL 时返回完整可点击链接，并区分服务器本机与用户设备能否访问；127.0.0.1/localhost 不代表用户手机可访问。只有临时测试地址、服务已停止或尚未部署时，明确说明状态，不能把它当作可用交付地址。使用开悟受控预览时说明“查看结果 → 启动预览／打开网页”；预览 URL 由开悟生成，不猜测端口、不自行启动常驻服务。不以本要求扩大联网、部署或启动授权。
 </kaiwu-reply-requirements>`
 
 const taskPreviewInstructions = `
 如果任务适合网页或 HTTP 效果验收，请在当前任务 worktree 根目录生成 kaiwu-preview.json：{"version":1,"command":["实际程序","参数","--host","127.0.0.1","--port","{port}"],"path":"/"}。command 是直接执行的 argv，不经 shell，至少一项使用 {port}，服务必须仅监听 127.0.0.1。使用项目实际可执行命令，不编造服务。此配置只声明预览，禁止自行启动常驻预览进程；用户点击“启动预览”后由开悟分配端口并启动。预览支持 GET/HEAD 和相对资源，不支持 WebSocket/HMR、应用登录或跨源资源。CLI/库等非网页任务不强造 manifest，请提供真实运行结果、使用说明和验证情况。
+
+纯静态网页优先声明 {"version":2,"kind":"static","root":".","entry":"index.html","path":"/"}（root/entry 按实际产物填写），由开悟提供受控访问入口，不需要另起常驻 HTTP 服务。完成回复必须说明该入口；未启动的动态预览不能声称已有可访问 URL。
 
 需要在结果面板提供可下载文件时，用 version 2 显式声明，只声明普通文件；不要指望系统扫描或猜测路径：{"version":2,"kind":"static","root":".","entry":"index.html","path":"/","artifacts":[{"path":"reports/summary.pdf","name":"总结报告.pdf","type":"application/pdf"}]}。仅文件产物（没有网页）用 {"version":2,"kind":"files","artifacts":[...]}，此时不能写 entry。artifacts 最多 16 项，path 是 worktree 内的相对路径，name 是单文件名（可中文和空格），type 只能取 .pdf/.zip/.gz/.txt/.csv/.md/.json/.png/.jpg/.jpeg/.html 对应的标准类型或省略。限 32MiB；隐藏目录、私密文件、符号链接和目录不会被下载。下载只能作为附件保存，不会被当作工作台页面打开。
 `
