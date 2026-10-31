@@ -71,9 +71,11 @@ export function groupChatMessages(messages: Message[], options?: GroupChatOption
 
  const lastEntry = entries.at(-1);
  if (lastEntry && lastEntry.role === 'user') {
-  if (options && (isBusy || isWaitingOrSettled || ['interrupted', 'failed'].includes(runState))) {
-   const uMsg = lastEntry.message;
-   const round = rounds.find(r => r.id === uMsg.id);
+  const uMsg = lastEntry.message;
+  const round = rounds.find(r => r.id === uMsg.id);
+  const failedTurn = round ? ['failed', 'interrupted'].includes(round.phase) :
+    ['pending', 'accepted', 'failed', 'uncertain', 'not_sent'].includes(uMsg.delivery);
+  if (options && (isBusy || isWaitingOrSettled || (['interrupted', 'failed'].includes(runState) && failedTurn))) {
    entries.push({
     id: 'placeholder-' + uMsg.id,
     role: 'assistant',
@@ -97,7 +99,19 @@ export function groupChatMessages(messages: Message[], options?: GroupChatOption
   lastEntry.runState = runState;
  }
 
- return entries;
+ // A failed request can have no assistant message at all. Preserve its slot
+ // when later turns arrive, so its persisted failure cannot migrate or vanish.
+ return entries.flatMap((entry, index) => {
+  if (entry.role !== 'user' || entries[index + 1]?.role === 'assistant') return [entry];
+  const round = rounds.find(r => r.id === entry.message.id);
+  if (!round || !['failed', 'interrupted'].includes(round.phase)) return [entry];
+  return [entry, {
+   id: 'placeholder-' + entry.message.id, role: 'assistant' as const,
+   isPlaceholder: true, loading: false, userMessage: entry.message, round,
+   runState: round.phase,
+   message: {id: 'placeholder-' + entry.message.id, role: 'assistant', text: '', delivery: round.phase === 'interrupted' ? 'uncertain' : 'failed'},
+  }];
+ });
 }
 
 export function filterChatEntries(entries: ChatEntry[], filter: 'all' | 'questions'): ChatEntry[] {

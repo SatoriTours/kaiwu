@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/SatoriTours/kaiwu/server/internal/workbench"
 )
 
 const (
@@ -16,6 +18,21 @@ const (
 	// maxFailureDetailRunes bounds one stored provider message.
 	maxFailureDetailRunes = 240
 )
+
+// roundFailure stores bounded, sanitized facts on the affected round. The
+// conversation-level error remains for compatibility, not as UI placement.
+func roundFailure(message string, uncertain bool) *workbench.RoundFailure {
+	kind := "unknown"
+	switch {
+	case strings.Contains(message, "消息未能确认完成"), strings.Contains(message, "未能发送"), strings.Contains(message, "本轮请求未发送"):
+		kind = "send"
+	case strings.Contains(message, "模型调用失败"):
+		kind = "execution"
+	case uncertain:
+		kind = "session"
+	}
+	return &workbench.RoundFailure{Kind: kind, Detail: safeFailureDetail(message)}
+}
 
 // failureMessage tells the person a round failed and, when pi reported a
 // usable reason, why. It never changes the failure classification itself.

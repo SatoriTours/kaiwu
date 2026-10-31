@@ -13,6 +13,7 @@ import type { TaskPreview } from './types.ts';
 const props = withDefaults(
   defineProps<{
     entry?: ChatEntry;
+    quietPlaceholder?: boolean;
     message?: Message;
     updates?: Message[];
     isLatest?: boolean;
@@ -51,6 +52,7 @@ const effectiveEntry = computed<ChatEntry>(() => {
 });
 
 const summary = computed(() => {
+  if (props.quietPlaceholder && props.entry?.isPlaceholder) return "";
   if (props.entry) {
     return turnSummary(props.entry);
   }
@@ -163,7 +165,7 @@ function onPreviewClick() {
 <template>
   <div class="assistant-turn-container" :class="{historical}">
     <div class="message-bubble" :class="{'history-body':historical}">
-      <MarkdownContent class="assistant-summary-markdown" :text="summary" />
+      <MarkdownContent v-if="summary" class="assistant-summary-markdown" :text="summary" />
       <div v-if="loading" class="pending-line" role="status">
         <span class="turn-spinner" aria-hidden="true"></span>
         {{ roundTools.length || report ? '正在开发…' : '正在回复…' }}

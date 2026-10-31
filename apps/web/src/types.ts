@@ -196,6 +196,7 @@ export interface ToolRecord {id:string;name:string;input?:string;result?:string;
 export interface ReportCheck {title:string;claim:string;toolId?:string}
 export interface Report {summary:string;stage:string;plan:string[];results:string[];checks:ReportCheck[];blockers:string[];next:string[];question:string}
 export interface Round {
+  failure?: { kind: 'execution' | 'session' | 'send' | 'unknown'; detail?: string };
   id: string;
   phase: string;
   startedAt: string;

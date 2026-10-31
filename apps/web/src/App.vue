@@ -869,6 +869,20 @@ async function screenshot(){
   if(blob&&epoch===authEpoch)await attachFiles([new File([blob],'截图.png',{type:'image/png'})],target);
  }catch(e){report(e)}finally{stream?.getTracks().forEach(track=>track.stop())}
 }
+// Explicit retry is available only for definitely unsent messages. Unknown
+// delivery is never replayed; keep any in-progress draft untouched.
+async function retryMessage(messageId: string) {
+ const c = conversation.value;
+ if (!c || !online.value || !agentAvailable.value || local.pending[c.id] || uploading[c.id] ||
+   ['starting', 'running'].includes(c.runState)) return;
+ const d = local.drafts[c.id];
+ if (d?.text.trim() || d?.attachments?.length) return;
+ const message = c.messages.find(m => m.id === messageId && m.role === 'user' && m.delivery === 'not_sent');
+ if (!message) return;
+ setDraft(local, message.text);
+ if (message.attachments?.length) addDraftAttachments(local, c.id, message.attachments);
+ await send();
+}
 async function send() {
   const epoch = authEpoch;
   const id = local.current,
@@ -1683,6 +1697,7 @@ onBeforeUnmount(() => {
           :preview="taskPreview"
           @draft="setDraft(local, $event)"
           @send="send"
+          @retry-message="retryMessage"
           @project="navigate()"
           @create="open('task')"
           @resume="resume"

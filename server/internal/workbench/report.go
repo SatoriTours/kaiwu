@@ -23,13 +23,20 @@ type Report struct {
 	Next     []string      `json:"next"`
 	Question string        `json:"question"`
 }
+
+// RoundFailure belongs to an affected request, never to idle CLI connectivity.
+type RoundFailure struct {
+	Kind   string `json:"kind"`
+	Detail string `json:"detail,omitempty"`
+}
 type Round struct {
-	ID          string  `json:"id"`
-	Phase       string  `json:"phase"`
-	StartedAt   string  `json:"startedAt"`
-	FinishedAt  string  `json:"finishedAt,omitempty"`
-	Report      *Report `json:"report,omitempty"`
-	ReportError string  `json:"reportError,omitempty"`
+	Failure     *RoundFailure `json:"failure,omitempty"`
+	ID          string        `json:"id"`
+	Phase       string        `json:"phase"`
+	StartedAt   string        `json:"startedAt"`
+	FinishedAt  string        `json:"finishedAt,omitempty"`
+	Report      *Report       `json:"report,omitempty"`
+	ReportError string        `json:"reportError,omitempty"`
 	// InteractionError records a malformed structured interaction block of the
 	// round: automation fails closed instead of guessing options.
 	InteractionError string `json:"interactionError,omitempty"`

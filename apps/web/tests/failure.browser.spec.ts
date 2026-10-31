@@ -1,10 +1,12 @@
 import { test, expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import type { Page, BrowserContext } from "@playwright/test";
+import { readFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 const TOKEN = "kaiwu-browser-test-token-00000000";
 const ORIGIN = "http://127.0.0.1:17331";
+const ARTIFACTS=process.env.KAIWU_QUIET_SHOTS || "/tmp/kaiwu-quiet-shots";
+mkdirSync(ARTIFACTS,{recursive:true});
 // The exact stored text the Go backend produces for a provider failure.
 const PROVIDER_ERROR =
   "模型调用失败；已有内容保留：429 已达到 Token Plan 速率限制：请升级 Token Plan 套餐或切换为按量付费 API 使用。 (2062)";
@@ -12,11 +14,12 @@ const NO_REASON_ERROR = "模型调用失败或被中断；已有内容保留";
 const SEND_ERROR = "消息未能确认完成；请检查后明确恢复，不会自动重发";
 const SESSION_ERROR = "pi 会话已中断，发送下一条消息时自动接回；历史已保留";
 
-type Fixture = { apply?: (body: any) => void };
+type Fixture = { apply?: (body: any) => void; onCommand?: (frame:any)=>void; publish?:()=>void };
 
 const fixtures = new WeakMap<Page, Fixture>();
 
 test.beforeEach(async ({ page }) => {
+  await page.emulateMedia({colorScheme:"dark",reducedMotion:"reduce"});
   const fixture: Fixture = {};
   fixtures.set(page, fixture);
   // The same snapshot shape arrives over HTTP (first load) and over the socket
@@ -31,10 +34,13 @@ test.beforeEach(async ({ page }) => {
     const server = client.connectToServer();
     server.onMessage((raw) => {
       const frame = JSON.parse(String(raw));
-      if (frame?.type === "snapshot") fixture.apply?.(frame);
+      if (frame?.type === "snapshot") {
+        fixture.apply?.(frame);
+        fixture.publish=()=>{const next=structuredClone(frame);fixture.apply?.(next);client.send(JSON.stringify(next));};
+      }
       client.send(JSON.stringify(frame));
     });
-    client.onMessage((raw) => server.send(String(raw)));
+    client.onMessage((raw) => {fixture.onCommand?.(JSON.parse(String(raw)));server.send(String(raw));});
   });
 });
 
@@ -42,12 +48,15 @@ function transform(page: Page, apply: (body: any) => void) {
   fixtures.get(page)!.apply = apply;
 }
 
+let authCookies: Awaited<ReturnType<BrowserContext["cookies"]>> | undefined;
 async function login(page: Page) {
+  if (authCookies) { await page.context().addCookies(authCookies); return; }
   const response = await page.request.post("/api/login", {
     data: { token: TOKEN },
     headers: { Origin: ORIGIN, "X-Kaiwu-Client": "web" },
   });
   expect(response.ok(), await response.text()).toBe(true);
+  authCookies = await page.context().cookies();
 }
 
 async function command(page: Page, body: Record<string, unknown>) {
@@ -132,10 +141,12 @@ function preserveResult(body: any, taskId: string) {
 }
 
 async function showChat(page: Page) {
-  if (!(await page.locator(".chat").isVisible())) {
-    await page.getByRole("button", { name: "◌ 聊天" }).click();
-    await expect(page.locator(".chat")).toBeVisible();
+  // Task deep links open the drawer themselves; do not race its async mount
+  // by clicking a background project button under an already-open modal.
+  if (!new URL(page.url()).pathname.includes("/tasks/") && !(await page.locator(".chat").isVisible())) {
+    await page.getByRole("button", { name: "项目对话", exact:true }).click();
   }
+  await expect(page.locator(".chat")).toBeVisible();
 }
 
 async function openTask(page: Page, projectId: string, taskId: string, title: string) {
@@ -145,125 +156,173 @@ async function openTask(page: Page, projectId: string, taskId: string, title: st
 }
 
 async function selectTask(page: Page, taskId: string, title: string) {
+  await page.getByRole("button",{name:"收起聊天",exact:true}).click();
   const card = page.locator('.task-card[data-taskid="' + taskId + '"]');
   await card.getByRole("button", { name: "选择任务 " + title, exact: true }).click();
   await expect(page.locator("#chat-title")).toContainText(title);
 }
 
-test("a task failure shows the provider reason inline and keeps the existing result", async ({ page }) => {
-  const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
+test("provider failure is a compact turn note and details dialog; old result survives", async ({ page }) => {
   const { projectId, taskA } = await setup(page, "inline");
-  transform(page, (body) => {
-    failConversation(body, taskA, "failed", PROVIDER_ERROR);
-    preserveResult(body, taskA);
-  });
+  transform(page, body => { failConversation(body, taskA, "failed", PROVIDER_ERROR); preserveResult(body, taskA); });
   await openTask(page, projectId, taskA, "执行失败任务");
-
-  const card = page.locator(".chat-failure");
-  await expect(card).toBeVisible();
-  await expect(card).toContainText("执行失败");
-  await expect(card).not.toContainText("会话接回失败");
-  const reason = card.locator(".chat-failure-reason");
-  await expect(reason).toBeVisible();
-  await expect(reason).toContainText("429");
-  await expect(reason).toContainText("已达到 Token Plan 速率限制：请升级 Token Plan 套餐或切换为按量付费 API 使用。 (2062)");
-  await expect(reason).not.toContainText("已有内容保留");
-  // The boilerplate prefix stays available, but only behind the expander.
-  await expect(card.locator(".chat-failure-full p")).toBeHidden();
-  await card.locator(".chat-failure-full summary").click();
-  await expect(card.locator(".chat-failure-full p")).toBeVisible();
-  await expect(card.locator(".chat-failure-full p")).toContainText("模型调用失败；已有内容保留：");
-  // A failure that did not destroy the result must keep the result actions.
-  await expect(card).toContainText("此前的结果仍然保留");
-  await expect(page.locator(".result-review")).toBeVisible();
-  await expect(page.locator('.message.assistant').last().locator('.turn-result-actions')).toBeVisible();
-  await page.screenshot({ path: "/tmp/kaiwu-failure-desktop.png" });
-  expect(errors).toEqual([]);
-});
-
-test("missing reasons, send failures and interruptions are labeled accurately", async ({ page }) => {
-  const { projectId, taskA } = await setup(page, "labels");
-  transform(page, (body) => failConversation(body, taskA, "failed", NO_REASON_ERROR));
-  await openTask(page, projectId, taskA, "执行失败任务");
-  const card = page.locator(".chat-failure");
-  await expect(card).toContainText("执行失败");
-  await expect(card).toContainText("pi 未提供具体原因");
-  await expect(card).not.toContainText("429");
-
-  transform(page, (body) => failConversation(body, taskA, "failed", SEND_ERROR));
-  await page.reload();
-  await showChat(page);
-  await expect(card).toContainText("消息发送失败");
-  await expect(card).not.toContainText("执行失败");
-  await expect(card).toContainText("再次发送");
-
-  transform(page, (body) => failConversation(body, taskA, "interrupted", SESSION_ERROR));
-  await page.reload();
-  await showChat(page);
-  await expect(card).toContainText("会话已中断");
-  await expect(card).not.toContainText("会话接回失败");
-  // The reconnect explanation stays, the duplicated reason inside the progress
-  // panel is gone: the chat notice is the single place showing the cause.
-  await expect(page.locator(".auto-recovery")).toContainText("尝试接回原会话");
-  await expect(page.locator(".recovery-reason")).toHaveCount(0);
-  await page.setViewportSize({ width: 360, height: 780 });
-  await showChat(page);
-  await expect(card).toBeVisible();
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(overflow, "360px page overflow").toBeLessThanOrEqual(1);
-  await page.screenshot({ path: "/tmp/kaiwu-failure-card-360.png" });
-});
-
-test("switching tasks never carries a reason and a new round hides the old one", async ({ page }) => {
-  const { projectId, taskA, taskB } = await setup(page, "isolation");
-  transform(page, (body) => {
-    failConversation(body, taskA, "failed", PROVIDER_ERROR);
-    failConversation(body, taskB, "interrupted", SESSION_ERROR, "开始开发");
-  });
-  await openTask(page, projectId, taskA, "执行失败任务");
-  const card = page.locator(".chat-failure");
-  await expect(card).toContainText("执行失败");
-  await expect(card).toContainText("Token Plan 速率限制");
-
-  await selectTask(page, taskB, "会话中断任务");
-  await expect(card).toContainText("会话已中断");
-  await expect(card).not.toContainText("Token Plan");
-
-  await selectTask(page, taskA, "执行失败任务");
-  await expect(card).toContainText("Token Plan");
-
-  // A new round clears the stored error (backend) and the notice must vanish.
-  transform(page, (body) => {
-    const conversation = conversationOf(body, taskA);
-    conversation.runState = "running";
-    conversation.error = "";
-  });
-  await page.reload();
-  await showChat(page);
+  const note = page.locator(".turn-notice");
+  await expect(note).toHaveCount(1);
+  await expect(note).toContainText("本次请求受到限流，请稍后再试。");
+  await expect(note.locator(".notice-text")).not.toContainText("Token Plan");
   await expect(page.locator(".chat-failure")).toHaveCount(0);
-  await expect(page.locator("#messages")).not.toContainText("Token Plan");
-
-  // Project scope is independent as well: a healthy project chat shows nothing.
-  await page.getByRole("button", { name: "← 返回项目对话" }).click();
-  await expect(page.locator(".chat-failure")).toHaveCount(0);
+  expect(await note.evaluate(el => getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+  await note.getByRole("button", {name:"详情",exact:true}).click();
+  const dialog=page.getByRole("dialog",{name:"本轮详情"});
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Token Plan");
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(page.locator(".turn-result-actions")).toBeVisible();
+  await page.screenshot({path:ARTIFACTS + "/actual-failed-desktop.png"});
 });
 
-test("a project conversation failure shows its reason as well", async ({ page }) => {
-  const { projectId } = await setup(page, "project");
-  transform(page, (body) => {
-    const project = body.state.projects[projectId];
-    const conversation = body.state.conversations[project.conversationId];
-    conversation.runState = "failed";
-    conversation.error = PROVIDER_ERROR;
-    conversation.messages = [{ id: "p1", role: "user", text: "讨论下一步", delivery: "failed" }];
+test("idle disconnection after a finished result is completely silent", async ({page}) => {
+  const {projectId,taskA}=await setup(page,"idle");
+  transform(page,body=>{
+    const c=conversationOf(body,taskA);c.runState="interrupted";c.error=SESSION_ERROR;
+    c.messages=[{id:"u",role:"user",text:"完善聊天体验",delivery:"complete"},{id:"a",role:"assistant",text:"已经完成，可以查看结果。",delivery:"complete"}];
+    c.rounds=[{id:"u",phase:"finished",startedAt:"2026-10-31T10:00:00Z",finishedAt:"2026-10-31T10:01:00Z",tools:[]}];
+    preserveResult(body,taskA);
   });
-  await page.goto("/projects/" + projectId);
-  await showChat(page);
-  const card = page.locator(".chat-failure");
-  await expect(card).toBeVisible();
-  await expect(card).toContainText("执行失败");
-  await expect(card).toContainText("Token Plan 速率限制");
+  await openTask(page,projectId,taskA,"执行失败任务");
+  await expect(page.locator(".turn-notice,.chat-failure")).toHaveCount(0);
+  await expect(page.locator(".turn-result-actions")).toBeVisible();
+  await expect(page.locator("#send")).toBeDisabled();
+  await page.locator("textarea").last().fill("再优化一点");
+  await expect(page.locator("#send")).toBeEnabled();
+  await expect(page.locator("#messages")).not.toContainText("pi 未提供");
+  await page.screenshot({path:ARTIFACTS + "/actual-idle-desktop.png"});
+});
+
+test("interrupted reply is one neutral line, without generic details at 390 and 360px",async({page})=>{
+  const {projectId,taskA}=await setup(page,"interrupt");
+  transform(page,body=>{
+    failConversation(body,taskA,"interrupted",SESSION_ERROR);
+    const c=conversationOf(body,taskA);
+    c.rounds=[{id:"user-"+taskA,phase:"interrupted",startedAt:"2026-10-31T10:00:00Z",finishedAt:"2026-10-31T10:01:00Z",tools:[]}];
+    c.messages.push({id:"reply",role:"assistant",text:"我会先收敛连接状态提示，让真正的内容保持清晰。",delivery:"uncertain"});
+  });
+  await openTask(page,projectId,taskA,"执行失败任务");
+  const note=page.locator(".turn-notice");
+  await expect(note).toHaveCount(1);await expect(note).toContainText("回复已中断");
+  await expect(note.getByRole("button",{name:"详情"})).toHaveCount(0);
+  for(const width of [390,360]){
+    await page.setViewportSize({width,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
+    await expect(note).toBeVisible();
+    await page.screenshot({path:ARTIFACTS + "/actual-interrupted-"+width+".png"});
+  }
+});
+
+test("send uncertainty has no retry; definitely unsent retry preserves user control",async({page})=>{
+  const {projectId,taskA}=await setup(page,"send");
+  let mode="uncertain";
+  transform(page,body=>{
+    failConversation(body,taskA,"interrupted",SEND_ERROR,"请继续完善");
+    const c=conversationOf(body,taskA);c.messages[0].delivery=mode;
+  });
+  await openTask(page,projectId,taskA,"执行失败任务");
+  const note=page.locator(".turn-notice");
+  await expect(note).toHaveCount(1);
+  await expect(note).toContainText("发送状态待确认");
+  await expect(note.getByRole("button",{name:"重试",exact:true})).toHaveCount(0);
+  await expect(page.locator(".message.assistant .assistant-summary-markdown")).toHaveCount(0);
+  mode="not_sent";await page.reload();await showChat(page);
+  await expect(note).toContainText("未发送");
+  await expect(note.getByRole("button",{name:"重试",exact:true})).toBeVisible();
+  await page.locator("textarea").last().fill("保留我的新草稿");
+  await expect(note.getByRole("button",{name:"重试",exact:true})).toHaveCount(0);
+  await expect(page.locator("textarea").last()).toHaveValue("保留我的新草稿");
+});
+
+test("task switching and new running round do not inherit global failure",async({page})=>{
+ const {projectId,taskA,taskB}=await setup(page,"isolation");
+ transform(page,body=>{failConversation(body,taskA,"failed",PROVIDER_ERROR);});
+ await openTask(page,projectId,taskA,"执行失败任务");
+ await expect(page.locator(".turn-notice")).toContainText("限流");
+ await selectTask(page,taskB,"会话中断任务");
+ await expect(page.locator(".turn-notice")).toHaveCount(0);
+ await selectTask(page,taskA,"执行失败任务");
+ await expect(page.locator(".turn-notice")).toContainText("限流");
+ transform(page,body=>{const c=conversationOf(body,taskA);c.runState="running";c.error="";c.messages=[{id:"new",role:"user",text:"新一轮",delivery:"accepted"}];c.rounds=[{id:"new",phase:"running",tools:[],startedAt:"2026-10-31T10:00:00Z"}];});
+ await page.reload();await showChat(page);
+ await expect(page.locator(".turn-notice")).toHaveCount(0);
+ await page.getByRole("button",{name:"← 返回项目对话"}).click();
+ await expect(page.locator(".turn-notice")).toHaveCount(0);
+});
+
+test("historical failure stays at the old turn when new work runs",async({page})=>{
+ const {projectId,taskA}=await setup(page,"history");
+ transform(page,body=>{
+  const c=conversationOf(body,taskA);c.runState="running";c.error="";
+  c.messages=[{id:"old",role:"user",text:"旧问题",delivery:"complete"},{id:"answer",role:"assistant",text:"已生成的部分内容",delivery:"complete"},{id:"next",role:"user",text:"新问题",delivery:"accepted"}];
+  c.rounds=[{id:"old",phase:"failed",startedAt:"2026-10-31T10:00:00Z",finishedAt:"2026-10-31T10:01:00Z",tools:[],failure:{kind:"execution",detail:PROVIDER_ERROR}},{id:"next",phase:"running",startedAt:"2026-10-31T10:02:00Z",tools:[]}];
+ });
+ await openTask(page,projectId,taskA,"执行失败任务");
+ await expect(page.locator(".turn-notice")).toHaveCount(1);
+ await expect(page.locator(".message.assistant").first().locator(".turn-notice")).toContainText("限流");
+ await expect(page.locator(".message.assistant").last().locator(".turn-notice")).toHaveCount(0);
+ await page.getByRole("button",{name:"只看我的问题",exact:true}).click();
+ await expect(page.locator(".turn-notice")).toHaveCount(0);
+});
+
+test("project conversation gets the same compact note",async({page})=>{
+ const {projectId}=await setup(page,"project");
+ transform(page,body=>{const c=body.state.conversations[body.state.projects[projectId].conversationId];c.runState="failed";c.error=PROVIDER_ERROR;c.messages=[{id:"p1",role:"user",text:"讨论下一步",delivery:"failed"}];});
+ await page.goto("/projects/"+projectId);await showChat(page);
+ await expect(page.locator(".turn-notice")).toHaveCount(1);
+ await expect(page.locator(".turn-notice")).toContainText("限流");
+});
+
+test("only an explicit definitely-unsent retry sends one new command",async({page})=>{
+ const {projectId,taskA}=await setup(page,"real-retry");
+ const sent:any[]=[];
+ fixtures.get(page)!.onCommand=frame=>{if(frame.method==="commands")sent.push(frame.body)};
+ transform(page,body=>{failConversation(body,taskA,"failed",SESSION_ERROR,"请继续完善");conversationOf(body,taskA).messages[0].delivery="not_sent";});
+ await openTask(page,projectId,taskA,"执行失败任务");
+ await expect(page.locator(".turn-notice").getByRole("button",{name:"重试",exact:true})).toBeVisible();
+ expect(sent.filter(c=>c.type==="send_message")).toHaveLength(0);
+ await page.locator(".turn-notice").getByRole("button",{name:"重试",exact:true}).click();
+ await expect.poll(()=>sent.filter(c=>c.type==="send_message").length).toBe(1);
+ expect(sent.find(c=>c.type==="send_message").text).toBe("请继续完善");
+ await expect(page.locator("#send")).toBeDisabled();
+ expect(sent.filter(c=>c.type==="send_message")).toHaveLength(1);
+});
+
+test("details stay open through unrelated snapshot updates",async({page})=>{
+ const {projectId,taskA}=await setup(page,"dialog-snapshot");
+ let snapshots=0;
+ transform(page,body=>{snapshots++;failConversation(body,taskA,"failed",PROVIDER_ERROR)});
+ await openTask(page,projectId,taskA,"执行失败任务");
+ await page.locator(".turn-notice").getByRole("button",{name:"详情",exact:true}).click();
+ const dialog=page.getByRole("dialog",{name:"本轮详情"});await expect(dialog).toBeVisible();
+ const before=snapshots;
+ fixtures.get(page)!.publish!();
+ await expect.poll(()=>snapshots).toBeGreaterThan(before);
+ await expect(dialog).toBeVisible();
+ await page.keyboard.press("Escape");await expect(dialog).not.toBeVisible();
+ await expect(page.getByRole("dialog",{name:"聊天面板",exact:true})).toBeVisible();
+});
+
+test("light theme and narrow details remain readable",async({page})=>{
+ await page.emulateMedia({colorScheme:"light",reducedMotion:"reduce"});
+ const {projectId,taskA}=await setup(page,"light");
+ transform(page,body=>failConversation(body,taskA,"failed",PROVIDER_ERROR));
+ await openTask(page,projectId,taskA,"执行失败任务");
+ await page.setViewportSize({width:390,height:844});
+ await page.locator(".turn-notice").getByRole("button",{name:"详情",exact:true}).click();
+ const dialog=page.getByRole("dialog",{name:"本轮详情"});await expect(dialog).toBeVisible();
+ const box=await dialog.boundingBox();expect(box!.x).toBeGreaterThanOrEqual(0);expect(box!.x+box!.width).toBeLessThanOrEqual(391);
+ await page.screenshot({path:ARTIFACTS+"/actual-detail-light-390.png"});
+ await dialog.getByRole("button",{name:"关闭详情",exact:true}).click();await expect(dialog).not.toBeVisible();
+ await expect(page.getByRole("dialog",{name:"聊天面板",exact:true})).toBeVisible();
+ await page.screenshot({path:ARTIFACTS+"/actual-failed-light-390.png"});
 });
 
 test("short messages hug their content and long content stays inside 1440/390/360", async ({ page }) => {

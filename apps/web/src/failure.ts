@@ -1,94 +1,68 @@
 import type { Conversation, Execution } from "./types.ts";
-
-// One reading of a stored failure for the chat surface. The backend keeps the
-// full text in conversation.error (and mirrors it to execution.error); pi's own
-// provider reason sits at the END of a long fixed prefix, so the reader must
-// never be left with only the prefix or a collapsed generic sentence.
-export type FailureKind = "send" | "execution" | "session" | "unknown";
+import type { ChatEntry } from "./chat-messages.ts";
 
 export interface FailureView {
-  kind: FailureKind;
-  title: string;
-  /** Bounded inline reason; empty when pi reported none. */
-  reason: string;
-  hasReason: boolean;
-  /** Full stored text, only when it adds something to the inline reason. */
+  kind: "send" | "execution" | "session" | "unknown";
+  text: string;
   detail: string;
-  hint: string;
-  /** True when an earlier development result survives this failure. */
-  resultPreserved: boolean;
+  at?: string;
+  placement: "user" | "assistant";
+  retry: boolean;
+}
+type ConversationLike = Pick<Conversation, "runState" | "error"> & Partial<Pick<Conversation, "messages" | "rounds">>;
+type ExecutionLike = Pick<Execution, "phase" | "error">;
+const FAILED = ["failed", "interrupted"];
+const CLOSED = ["answered", "finished", "confirmed", "awaiting_user"];
+
+function reason(text: string): string {
+  if (!text || /^(pi 会话已中断|服务已重启|消息未能确认完成|模型调用失败或被中断；已有内容保留$)/.test(text)) return "";
+  return text.replace(/^模型调用失败；已有内容保留：/, "").replace(/^模型切换失败，本轮请求未发送：/, "").trim();
 }
 
-const EXECUTION_PREFIX = "模型调用失败；已有内容保留：";
-const EXECUTION_FALLBACK = "模型调用失败或被中断；已有内容保留";
-const MODEL_SWITCH_PREFIX = "模型切换失败，本轮请求未发送：";
-// Long page-sized reasons must stay readable inline: keep the head AND the tail
-// so the actionable sentence at the end is never hidden behind an ellipsis.
-const INLINE_REASON_LIMIT = 200;
-
-const SEND_HINT = "消息未确认送达；再次发送会尝试接回原会话，历史已保留。";
-const RECONNECT_HINT = "发送下一条消息会尝试自动接回原会话；已有记录和结果保留。";
-
-type ConversationLike = Pick<Conversation, "runState" | "error">;
-type ExecutionLike = Pick<Execution, "phase" | "error">;
-
-/** Chat failure notice, or undefined while a round is running or healthy. */
+/** A notice requires evidence about THIS turn; a disconnected CLI is not one. */
 export function failureView(
   conversation: ConversationLike,
   execution?: ExecutionLike,
+  entry?: ChatEntry,
 ): FailureView | undefined {
-  // Only a settled failure may speak: a running or idle round must never show
-  // the previous round's reason (switching tasks inherits nothing either).
-  if (!["failed", "interrupted"].includes(conversation.runState)) return undefined;
-  const stored = (conversation.error ?? "").trim();
-  const fromExecution = (execution?.error ?? "").trim();
-  const text = stored || fromExecution;
-  const kind = failureKind(text, execution);
-  const reason = inlineReason(text, kind);
+  if (!entry) return undefined;
+  const user = entry.role === "user" ? entry.message : entry.userMessage;
+  if (!user) return undefined;
+  const round = entry.round ?? conversation.rounds?.find(r => r.id === user.id);
+  if (round && CLOSED.includes(round.phase)) return undefined;
+  const latestUser = conversation.messages?.filter(m => m.role === "user").at(-1);
+  const isLatest = latestUser?.id === user.id;
+  const persisted = round?.failure;
+  const failedRound = !!round && FAILED.includes(round.phase);
+  // A new running round must not inherit a previous conversation-level error.
+  if (!persisted && round && !failedRound) return undefined;
+  const legacyFailure = !round && isLatest && FAILED.includes(conversation.runState) &&
+    (["pending", "accepted", "failed", "uncertain", "not_sent"].includes(user.delivery) ||
+      (entry.role === "assistant" && ["failed", "uncertain"].includes(entry.message.delivery)));
+  if (!persisted && !failedRound && !legacyFailure) return undefined;
+  const text = persisted?.detail ?? (isLatest ? conversation.error || execution?.error || "" : "");
+  let kind: FailureView["kind"] = persisted?.kind ??
+    (/消息未能确认完成|未能发送|本轮请求未发送/.test(text) ? "send" :
+      /模型调用失败/.test(text) ? "execution" :
+      (round?.phase === "interrupted" || conversation.runState === "interrupted") ? "session" : "unknown");
+  const definitelyUnsent = user.delivery === "not_sent";
+  if (definitelyUnsent) kind = "send";
+  const send = kind === "send";
+  const detail = reason(text);
+  let label = kind === "session" ? "回复已中断" : "本轮未完成";
+  if (send) label = definitelyUnsent ? "未发送" : "发送状态待确认";
+  else if (detail) {
+    if (/(?:\b429\b|速率限制|rate.?limit)/i.test(detail)) label = "本次请求受到限流，请稍后再试。";
+    else if (/(?:\b401\b|登录.*失效|凭据.*过期)/i.test(detail)) label = "模型登录已失效，请检查服务器登录。";
+    else {
+      const points = Array.from(detail);
+      label = points.length > 90 ? points.slice(0, 89).join("") + "…" : detail;
+    }
+  }
   return {
-    kind,
-    title: TITLES[kind],
-    reason,
-    hasReason: reason !== "",
-    detail: text !== reason ? text : "",
-    hint: kind === "send" ? SEND_HINT : RECONNECT_HINT,
-    resultPreserved: ["awaiting_review", "confirmed"].includes(execution?.phase ?? ""),
+    kind, text: label,
+    // No expander for a generic connection/status sentence.
+    detail: send && !detail ? (definitelyUnsent ? "" : "尚未确认消息是否送达。不会自动重发，请核对本轮记录后再决定下一步。") : detail,
+    at: round?.finishedAt, placement: send ? "user" : "assistant", retry: definitelyUnsent,
   };
-}
-
-const TITLES: Record<FailureKind, string> = {
-  send: "消息发送失败",
-  execution: "执行失败",
-  session: "会话已中断",
-  unknown: "本轮未完成",
-};
-
-function failureKind(text: string, execution?: ExecutionLike): FailureKind {
-  // Shape first, then the stored text: a send failure must never be reported as
-  // an execution failure just because the task already had an execution.
-  if (text.includes("消息未能确认完成") || text.includes("未能发送")) return "send";
-  if (text.includes("模型调用失败") || execution?.phase === "failed") return "execution";
-  if (text.includes("会话已中断") || text.includes("接回原会话")) return "session";
-  return "unknown";
-}
-
-function inlineReason(text: string, kind: FailureKind): string {
-  if (!text) return "";
-  // Status sentences already say what the title and hint say; keep them in the
-  // expandable detail instead of repeating them as a "cause".
-  if (kind === "send" || kind === "session") return "";
-  if (text === EXECUTION_FALLBACK) return "";
-  let reason = text;
-  if (reason.startsWith(EXECUTION_PREFIX)) reason = reason.slice(EXECUTION_PREFIX.length);
-  else if (reason.startsWith(EXECUTION_FALLBACK))
-    reason = reason.slice(EXECUTION_FALLBACK.length).replace(/^[；;：:\s]+/, "");
-  else if (reason.startsWith(MODEL_SWITCH_PREFIX))
-    reason = reason.slice(MODEL_SWITCH_PREFIX.length);
-  reason = reason.trim();
-  if (!reason) return "";
-  const points = Array.from(reason);
-  if (points.length <= INLINE_REASON_LIMIT) return reason;
-  const head = points.slice(0, Math.ceil((INLINE_REASON_LIMIT - 1) / 2));
-  const tail = points.slice(points.length - (INLINE_REASON_LIMIT - 1 - head.length));
-  return head.join("") + "…" + tail.join("");
 }

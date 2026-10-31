@@ -421,6 +421,7 @@ func (m *Manager) failed(id, message string, uncertain bool) {
 		}
 		for i := range c.Rounds {
 			if c.Rounds[i].Phase == "running" {
+				c.Rounds[i].Failure = roundFailure(message, uncertain)
 				c.Rounds[i].Phase = phase
 				c.Rounds[i].FinishedAt = time.Now().UTC().Format(time.RFC3339)
 			}

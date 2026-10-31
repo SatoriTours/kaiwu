@@ -10,6 +10,7 @@ import TaskActionIcon from "./TaskActionIcon.vue";
 import AssistantReply from "./AssistantReply.vue";
 import {groupChatMessages, filterChatEntries, type ChatEntry} from './chat-messages.ts';
 import {failureView} from './failure.ts';
+import ChatFailure from "./ChatFailure.vue";
 import MarkdownContent from "./MarkdownContent.vue";
 import DeliveryStatus from "./DeliveryStatus.vue";
 import { isDeliveryActive } from "./delivery.ts";
@@ -48,6 +49,7 @@ const emit = defineEmits<{
   removeAttachment:[string];
   screenshot:[];
   send: [];
+  retryMessage: [messageId: string];
   project: [];
   create: [];
   close: [];
@@ -83,9 +85,12 @@ function pasteFiles(e:ClipboardEvent){if(e.clipboardData?.files.length){e.preven
 function dropFiles(e:DragEvent){if(e.dataTransfer?.files.length){e.preventDefault();acceptFiles(e.dataTransfer.files)}}
 const now = ref(Date.now());
 const taskStatus=computed(()=>props.task?taskState(props.task,props.conversation,props.execution,undefined,now.value).status:pendingInteractions.value.some(ix=>ix.blocking)?'waiting_user':'idle');
-// The notice is derived from the selected conversation only, so switching scope
-// can never carry another conversation's reason.
-const failure=computed(()=>failureView(props.conversation,props.execution));
+// Notices belong to a turn, never to idle connection state.
+const notices = computed(() => new Map(rawChatEntries.value.map(entry =>
+  [entry.id, failureView(props.conversation, props.execution, entry)])));
+const canRetry = computed(() => props.online && props.agentAvailable && !props.pending &&
+ !props.draft.trim() && !props.attachments?.length && !props.uploading &&
+ !['starting', 'running'].includes(props.conversation.runState));
 const deliveryActive=computed(()=>props.delivery?isDeliveryActive(props.delivery.phase):false);
 const chatFilter = ref<'all' | 'questions'>('all');
 
@@ -425,6 +430,7 @@ const deliveryLabels: Record<string, string> = {
         </div>
         <AssistantReply
           v-if="entry.role === 'assistant' && (!entry.isPlaceholder || !entryInteractions(entry, pendingInteractions).length)"
+          :quiet-placeholder="!!notices.get(entry.id)"
           :entry="entry"
           :message="entry.message"
           :updates="entry.updates"
@@ -445,21 +451,11 @@ const deliveryLabels: Record<string, string> = {
         <template v-else-if="entry.role !== 'assistant'"><MarkdownContent class="text" :text="entry.message.text" /><AttachmentList :items="entry.message.attachments??[]" :conversation-id="conversation.id" /></template>
         <button v-for="ix in entryInteractions(entry, pendingInteractions)" :key="ix.id" class="interaction-inline-prompt" @click="openInteraction(ix.id)"><InteractionIcon :kind="interactionPresentation(ix).kind" />{{ interactionPresentation(ix).heading }} · 打开处理</button>
         <InteractionHistory :requests="entryInteractions(entry, historyInteractions)" :now="now" :pending="pending" :online="online" @retry="retryInteraction" />
-        <div v-if="entry.role !== 'assistant'" class="message-status"><span>{{ deliveryLabel(entry.message) }}</span></div>
+        <ChatFailure v-if="notices.get(entry.id)?.placement === entry.role" :key="conversation.id + ':' + entry.id" :failure="notices.get(entry.id)!" :can-retry="canRetry" @retry="emit('retryMessage', entry.message.id)" />
+        <div v-if="entry.role !== 'assistant' && !notices.get(entry.id)" class="message-status"><span>{{ deliveryLabel(entry.message) }}</span></div>
         </div>
       </article>
 
-      <!-- A settled failure belongs where it happened: in the conversation,
-           with its cause readable without opening the progress details. -->
-      <div v-if="failure" class="chat-failure" :data-kind="failure.kind" role="alert" aria-label="本轮失败原因">
-        <strong class="chat-failure-title">{{failure.title}}</strong>
-        <p class="chat-failure-reason">{{failure.hasReason?failure.reason:'pi 未提供具体原因。'}}</p>
-        <details v-if="failure.detail" class="chat-failure-full">
-          <summary>展开完整原因</summary><p>{{failure.detail}}</p>
-        </details>
-        <small v-if="failure.resultPreserved" class="chat-failure-preserved">此前的结果仍然保留，可在上方查看或确认。</small>
-        <small class="chat-failure-hint">{{failure.hint}}</small>
-      </div>
       <div v-if="!conversation.messages.length" class="context-card">
         <strong>{{ task ? "开始这个任务的沟通" : "从一个想法开始" }}</strong>
         <p>
