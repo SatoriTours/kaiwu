@@ -1072,7 +1072,7 @@ test('new messages and continue icon restore interrupted task automatically with
  expect(probeFor(page).calls.filter(r=>r.method==='commands'&&r.body.type==='resume')).toHaveLength(0);
 });
 
-test('legacy interrupted tasks explain automatic recovery and preserve useful mobile facts',async({page,context})=>{
+test('legacy interrupted tasks use a quiet note and preserve useful mobile facts',async({page,context})=>{
  const fixturePath=readFileSync(resolve('../../.superpowers/sdd/2026-10-11-web-service/browser-project.txt'),'utf8');
  const cookieFile=resolve(fixturePath,'..','browser-session.json');
  if(existsSync(cookieFile))await context.addCookies(JSON.parse(readFileSync(cookieFile,'utf8')));
@@ -1107,7 +1107,10 @@ test('legacy interrupted tasks explain automatic recovery and preserve useful mo
  const card=page.locator('.task-card[data-taskid="'+id+'"]');await expect(card).toContainText('已中断');
  await clickInView(page, card.getByRole('button',{ includeHidden: true,name:'选择任务 中断任务核对',exact:true}));
  await expect(page.getByRole('button',{name:'恢复原会话',exact:true})).toHaveCount(0);
- await expect(page.locator('.chat-failure')).toContainText('自动接回原会话');
+ await expect(page.locator('.chat-failure')).toHaveCount(0);
+ await expect(page.getByRole('status', {name:'本轮状态'})).toHaveCount(1);
+ await expect(page.locator('.turn-notice .notice-text')).toHaveText('回复已中断');
+ await expect(page.locator('.turn-notice button')).toHaveCount(0);
  await expect(page.getByRole('button',{name:'确认完成',exact:true})).toHaveCount(0);
  await expect(page.locator('.chat-head').getByRole('button',{name:'继续开发',exact:true})).toBeVisible();
  await expect(page.locator('.message.assistant .assistant-summary-markdown')).toContainText('已创建 /hello 接口');
@@ -1119,7 +1122,7 @@ test('legacy interrupted tasks explain automatic recovery and preserve useful mo
  await expect(tools).toContainText('bash · 未收到结束回执');
  // The legacy execution has no verifiable workspace: never invent Git completion.
  await expect(card).not.toContainText('已合并');
- await expect(page.locator('.chat-failure')).not.toContainText('需要确认');
+ await expect(page.locator('.turn-notice')).not.toContainText('需要确认');
  expect(await page.locator('#messages').evaluate(el=>el.clientHeight)).toBeGreaterThanOrEqual(140);
  await fillInChat(page, page.locator('#draft'), '继续处理新的要求');await expect(page.locator('#send')).toBeEnabled();
  await page.screenshot({path:resolve('../../docs/design/web-service/task-recovery-mobile.png')});
