@@ -2,6 +2,7 @@
 import {ref,computed,watch,onBeforeUnmount,nextTick} from 'vue';
 import {copyText} from './clipboard.ts';
 import CustomSelect from './CustomSelect.vue';
+import TerminalSurface from './TerminalSurface.vue';
 import {api,httpAPI} from './api.ts';
 import type {Project,Task,Execution,Attachment} from './types.ts';
 const props=defineProps<{view:'files'|'terminal';project:Project;tasks:Task[];executions:Record<string,Execution>;conversationId:string;online:boolean}>();
@@ -9,7 +10,8 @@ const emit=defineEmits<{attach:[{conversationId:string;attachment:Attachment}]}>
 const taskId=ref(''),folder=ref('.'),filter=ref(''),entries=ref<{name:string;directory:boolean;size:number;modifiedAt:string}[]>([]),error=ref(''),busy=ref(false),fileInput=ref<HTMLInputElement>(),selected=ref(''),preview=ref(''),previewImage=ref(''),root=ref('');
 const viewer=ref<HTMLDialogElement>(),copied=ref(false),imageKind=ref(''),imageDimensions=ref('');
 const selectedEntry=computed(()=>entries.value.find(e=>e.name===selected.value));
-const terminals=ref<{id:string;running:boolean;output:string}[]>([]),terminalId=ref(''),output=ref(''),running=ref(false),connected=ref(false),command=ref(''),log=ref<HTMLElement>();
+const terminals=ref<{id:string;running:boolean;output:string}[]>([]),terminalId=ref(''),running=ref(false),connected=ref(false),truncated=ref(false),terminal=ref<InstanceType<typeof TerminalSurface>>();
+const terminalGeneration=ref(0),screenReader=ref(false);
 let epoch=0,socket:WebSocket|undefined,disposed=false;
 const availableTasks=computed(()=>props.tasks.filter(t=>t.executionId&&props.executions[t.executionId]?.workspace));
 const scope=computed(()=>({projectId:props.project.id,taskId:taskId.value}));
@@ -21,7 +23,7 @@ function query(extra:Record<string,string>={}){
 function disconnect(){socket?.close();socket=undefined;connected.value=false}
 function cleanPreview(){viewer.value?.close();copied.value=false;preview.value='';previewImage.value='';imageKind.value='';imageDimensions.value=''}
 async function load(){
- const token=++epoch;disconnect();error.value='';selected.value='';cleanPreview();
+ const token=++epoch;terminalGeneration.value++;disconnect();error.value='';selected.value='';cleanPreview();
  try{
   if(props.view==='files'){
    const result=await httpAPI<{entries:typeof entries.value;root:string}>('tools/files?'+query({path:folder.value}));
@@ -31,18 +33,30 @@ async function load(){
    if(token!==epoch)return;
    terminals.value=result;
    const active=result.find(t=>t.id===terminalId.value)??result.find(t=>t.running)??result[0];
-   terminalId.value=active?.id??'';output.value='';running.value=!!active?.running;
+   terminalId.value=active?.id??'';running.value=!!active?.running;truncated.value=false;
+   await nextTick();if(token!==epoch)return;terminal.value?.reset();
    if(active)connect(active.id,token);
   }
  }catch(e){if(token===epoch)error.value=(e as Error).message}
 }
 function connect(id:string,token:number){
  disconnect();
- const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/api/tools/terminal/socket?'+query({id}));socket=ws;
- ws.onopen=()=>{if(token===epoch)connected.value=true};
- ws.onmessage=async e=>{
+ const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/api/tools/terminal/socket?'+query({id,v:'2'}));socket=ws;
+ ws.onmessage=e=>{
   if(token!==epoch||socket!==ws)return;
-  try{const data=JSON.parse(e.data);output.value=(data.reset?String(data.output):output.value+String(data.output)).slice(-262144).replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g,'').replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g,'');running.value=!!data.running;await nextTick();if(log.value)log.value.scrollTop=log.value.scrollHeight}catch{error.value='终端响应格式无效'}
+  try{
+   const data=JSON.parse(e.data);
+   if(typeof data.data!=='string'||!Number.isSafeInteger(data.sequence)||typeof data.reset!=='boolean'||typeof data.running!=='boolean'||!Number.isInteger(data.cols)||!Number.isInteger(data.rows))throw new Error('invalid frame');
+   running.value=data.running;if(data.reset)truncated.value=!!data.truncated;
+   const bytes=Uint8Array.from(atob(data.data),c=>c.charCodeAt(0));
+   terminal.value?.write(bytes,data.reset,data.cols,data.rows,()=>{
+    if(token!==epoch||socket!==ws||ws.readyState!==WebSocket.OPEN)return;
+    // Only advertise input readiness after the initial screen has been restored.
+    connected.value=true;
+    ws.send(JSON.stringify({ack:data.sequence}));
+    if(data.reset)terminal.value?.resize();
+   });
+  }catch{error.value='终端响应格式无效，请接回';disconnect()}
  };
  ws.onclose=()=>{if(token===epoch&&socket===ws)connected.value=false};
  ws.onerror=()=>{if(token===epoch)error.value='终端连接中断；Shell 仍由服务器保留，可点击接回'}
@@ -99,8 +113,13 @@ async function stop(){
  const payload={...scope.value,id:terminalId.value},token=epoch;
  await guarded(async()=>{await api('tools/terminal/stop',payload);if(token===epoch)await load()})
 }
-function input(value:string){if(!connected.value||!running.value||!socket)return false;if(new TextEncoder().encode(value).length>4096){error.value='终端单次输入不能超过 4096 字节，内容已保留';return false}error.value='';socket.send(JSON.stringify({input:value}));return true}
-function submit(){if(!connected.value||!running.value)return;if(input(command.value+'\n'))command.value=''}
+function input(value:string){
+ if(!connected.value||!running.value||socket?.readyState!==WebSocket.OPEN)return;
+ if(new TextEncoder().encode(value).length>4096){error.value='本次输入超过 4096 字节，未发送，请分段粘贴';return}
+ if(socket.bufferedAmount>65536){error.value='终端发送拥堵，本次输入未发送';return}
+ error.value='';socket.send(JSON.stringify({input:value}));
+}
+function resize(size:{cols:number;rows:number}){if(connected.value&&running.value&&socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({resize:size}))}
 async function copyPath(path=selectedPath()){const token=epoch;try{await copyText('./'+path);if(token===epoch)copied.value=true}catch{if(token===epoch)error.value='无法复制，请手动复制相对路径：./'+path}}
 function filePath(name:string){return folder.value==='.'?name:folder.value+'/'+name}
 function date(value?:string){return value?new Date(value).toLocaleString():'—'}
@@ -122,6 +141,7 @@ onBeforeUnmount(()=>{disposed=true;++epoch;disconnect();cleanPreview()});
   </template>
   <template v-else>
    <span class="terminal-tab">bash<span v-if="terminalId"> · {{terminalId.slice(0,6)}}</span></span><span class="tools-spacer"></span>
+   <button aria-label="终端读屏模式" :aria-pressed="screenReader" title="供屏幕阅读器朗读；部分软键盘输入需关闭" @click="screenReader=!screenReader">读屏</button>
    <button :disabled="busy||!online" @click="load">{{connected?'刷新':'接回'}}</button>
    <button v-if="running" :disabled="busy||!online" @click="stop">结束终端</button>
    <button v-else :disabled="busy||!online" @click="start">＋ 新建终端</button>
@@ -139,10 +159,12 @@ onBeforeUnmount(()=>{disposed=true;++epoch;disconnect();cleanPreview()});
   <aside v-if="selected" class="file-detail"><button class="file-detail-close" aria-label="关闭文件预览" @click="selected='';cleanPreview()">×</button><strong>{{selected}}</strong><button v-if="previewImage" class="file-preview-button" aria-label="放大文件图片" @click="viewer?.showModal()"><img :src="previewImage" :alt="selected" @load="imageLoaded" @error="imageFailed" /><span>放大图片 ↗</span></button><p v-else>{{preview||'正在读取…'}}</p><dl class="file-metadata"><dt>类型</dt><dd>{{previewImage?imageKind+' 图片'+(imageDimensions?' · '+imageDimensions:''):'文件'}}</dd><dt>大小</dt><dd>{{selectedEntry?.size??0}} 字节</dd><dt>位置</dt><dd>./{{selectedPath()}}</dd><dt>修改时间</dt><dd>{{date(selectedEntry?.modifiedAt)}}</dd></dl><div class="file-detail-actions"><a :href="'/api/tools/file?'+query({path:selectedPath()})">下载文件 ↓</a><button class="file-to-chat" :disabled="busy||!online" @click="attach()">添加到当前聊天</button><button @click="copyPath()">复制路径</button></div><p v-if="copied" class="copy-status" role="status">已复制相对路径</p><p>作为待发送附件添加，不会自动发送或启动 AI。</p></aside>
  </div>
  <div v-else class="terminal-content">
-  <p class="terminal-notice">服务器账号权限 · 不是沙箱 · 关闭页面不会结束终端。人工终端与同工作区 AI／合并互斥。仅提供命令行交互，不支持全屏编辑器。</p>
-  <pre ref="log" class="terminal-log" aria-label="终端输出">{{output||'点击“新建终端”显式启动服务器 Shell。'}}</pre>
-  <form class="terminal-input" @submit.prevent="submit"><span>$</span><input v-model="command" aria-label="终端命令" autocomplete="off" spellcheck="false" :disabled="!connected||!running" @keydown.ctrl.c.prevent="input('\x03')" /><button :disabled="!connected||!running">执行 ↵</button><button type="button" :disabled="!connected||!running" @click="input('\x03')">Ctrl+C</button></form>
-  <div class="terminal-status">{{running?(connected?'● 已连接':'○ 已断开，可接回原终端'):'○ 未运行'}}<span>输出保留最近 256 KiB · 服务重启后需新建</span></div>
+  <p class="terminal-notice">服务器账号权限 · 关闭页面不会结束终端 · 同工作区 AI／合并互斥</p>
+  <div class="terminal-viewport">
+   <TerminalSurface :key="terminalGeneration" ref="terminal" :enabled="connected&&running" :screen-reader="screenReader" @input="input" @resize="resize" />
+   <p v-if="!terminalId" class="terminal-empty">点击“新建终端”开始，在光标处直接输入。</p>
+  </div>
+  <div class="terminal-status" title="保留最近 256 KiB 输出；服务重启后需新建终端"><span>{{running?(connected?'● 已连接':'○ 已断开，可接回原终端'):'○ 未运行'}}{{truncated?' · 较早输出已截断':''}}</span><span class="terminal-help">Tab 补全 · ↑↓ 历史 · Ctrl+C 中断</span></div>
  </div>
 <dialog ref="viewer" class="file-image-viewer" aria-label="项目图片预览" @click="($event.target===viewer)&&viewer?.close()"><header><strong>{{selected}}</strong><button aria-label="关闭项目图片预览" @click="viewer?.close()">×</button></header><img v-if="previewImage" :src="previewImage" :alt="selected" /></dialog></main></template>
 <style scoped>
@@ -159,9 +181,11 @@ onBeforeUnmount(()=>{disposed=true;++epoch;disconnect();cleanPreview()});
 .file-detail{position:relative;flex:0 0 290px;max-width:45%;padding:24px 16px;border-left:1px solid var(--border);overflow-wrap:anywhere}.file-detail img{display:block;width:100%;max-height:330px;object-fit:contain;margin:24px 0}.file-detail-close{float:right;border:0}.file-detail strong{font-size:12px}.file-detail p{color:var(--muted);font-size:11px;margin:24px 0}.file-detail-actions{display:flex;gap:8px;flex-wrap:wrap;font-size:11px}.file-detail-actions a{color:var(--blue);padding:5px 0}
 .tools-error{color:var(--theme-danger,#9b4b44);font-size:12px}.terminal{background:#213129;color:#d6e1d3;border-color:#3d4e41}.terminal select,.terminal button{color:inherit}.terminal option{background:#213129}
 .terminal-content{display:flex;flex-direction:column;flex:1;background:#1c2922;color:#cfdbca;border-radius:0 0 10px 10px;overflow:hidden;min-height:380px}
-.terminal-notice{font-size:10px;color:#96aa97;padding:9px 16px;margin:0;border-bottom:1px solid #344438}.terminal-log{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-all;flex:1;overflow:auto;margin:0;padding:18px;font:12px/1.8 ui-monospace,monospace;min-height:150px}
-.terminal-input{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid #344438}.terminal-input input{border:0;background:transparent;color:inherit;padding:4px;min-width:0;flex:1}.terminal-input button{background:transparent;color:inherit;border-color:#3d4e41;font-size:10px}.terminal-status{display:flex;justify-content:space-between;gap:8px;font-size:9px;color:#96aa97;padding:6px 14px}
-@media(max-width:650px){.project-tools{padding:13px}.tools-bar{padding:6px;gap:3px}.tool-scope select{max-width:103px;font-size:10px}.file-filter{width:75px;min-width:50px}.file-breadcrumb{max-width:90px;font-size:10px}.tool-action-label{display:none}.files-content{position:relative}.file-detail{position:absolute;inset:0;max-width:none;background:var(--theme-surface,#fff);border:0;z-index:2}.terminal-status span{display:none}.terminal-notice{font-size:9px}}
+.terminal-notice{font-size:10px;color:#a5b6a5;padding:8px 14px;margin:0;border-bottom:1px solid #344438}
+.terminal-viewport{position:relative;flex:1;min-height:280px;min-width:0;overflow:hidden}
+.terminal-empty{position:absolute;top:12px;left:14px;margin:0;font-size:12px;color:#a5b6a5;pointer-events:none}
+.terminal-status{display:flex;justify-content:space-between;gap:8px;font-size:10px;color:#a5b6a5;padding:6px 14px;border-top:1px solid #344438}
+@media(max-width:650px){.project-tools{padding:13px}.tools-bar{padding:6px;gap:3px}.tool-scope select{max-width:103px;font-size:10px}.file-filter{width:75px;min-width:50px}.file-breadcrumb{max-width:90px;font-size:10px}.tool-action-label{display:none}.files-content{position:relative}.file-detail{position:absolute;inset:0;max-width:none;background:var(--theme-surface,#fff);border:0;z-index:2}.terminal-status .terminal-help{display:none}.terminal-notice{font-size:9px}}
 </style>
 
 <style scoped>

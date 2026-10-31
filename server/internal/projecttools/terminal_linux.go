@@ -42,7 +42,7 @@ func startPTY(dir string, lease preview.Lease) (*exec.Cmd, *os.File, error) {
 	cmd.Stdout = slave
 	cmd.Stderr = slave
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
-	cmd.Env = []string{"TERM=dumb", "PS1=工作区 $ ", "HISTFILE=/dev/null"}
+	cmd.Env = []string{"TERM=xterm-256color", "PS1=工作区 $ ", "HISTFILE=/dev/null"}
 	for _, key := range []string{"PATH", "HOME", "USER", "LANG", "LC_ALL", "TMPDIR"} {
 		if value, ok := os.LookupEnv(key); ok {
 			cmd.Env = append(cmd.Env, key+"="+value)
@@ -70,6 +70,9 @@ func startPTY(dir string, lease preview.Lease) (*exec.Cmd, *os.File, error) {
 		return fail(e)
 	}
 	return cmd, master, nil
+}
+func resizePTY(f *os.File, cols, rows int) error {
+	return unix.IoctlSetWinsize(int(f.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: uint16(rows), Col: uint16(cols)})
 }
 func signalGroup(pid int) error { return syscall.Kill(-pid, syscall.SIGKILL) }
 func stopGroup(pid int) bool {

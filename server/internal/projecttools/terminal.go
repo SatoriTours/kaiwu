@@ -18,6 +18,8 @@ type TerminalSnapshot struct {
 	Scope   string `json:"scope"`
 	Output  string `json:"output"`
 	Running bool   `json:"running"`
+	Cols    int    `json:"cols"`
+	Rows    int    `json:"rows"`
 }
 type terminal struct {
 	TerminalSnapshot
@@ -26,6 +28,7 @@ type terminal struct {
 	done    chan struct{}
 	changed chan struct{}
 	lease   preview.Lease
+	inputMu sync.Mutex
 }
 type Terminals struct {
 	mu      sync.Mutex
@@ -74,7 +77,7 @@ func (m *Terminals) Start(scope, dir string, lease preview.Lease) (TerminalSnaps
 	if _, e := rand.Read(id); e != nil {
 		return refuse(e)
 	}
-	t := &terminal{TerminalSnapshot: TerminalSnapshot{ID: hex.EncodeToString(id), Scope: scope, Running: true}, done: make(chan struct{}), changed: make(chan struct{}), lease: lease}
+	t := &terminal{TerminalSnapshot: TerminalSnapshot{ID: hex.EncodeToString(id), Scope: scope, Running: true, Cols: 100, Rows: 30}, done: make(chan struct{}), changed: make(chan struct{}), lease: lease}
 	cmd, pty, e := startPTY(dir, lease)
 	if e != nil {
 		return refuse(e)
@@ -163,9 +166,33 @@ func (m *Terminals) Input(id, input string) error {
 	}
 	f := t.pty
 	m.mu.Unlock()
+	t.inputMu.Lock()
+	defer t.inputMu.Unlock()
 	_ = f.SetWriteDeadline(time.Now().Add(time.Second))
 	_, e := f.WriteString(input)
 	return e
+}
+
+// Resize changes the actual PTY, so readline and foreground applications see
+// the same geometry as the browser. Bound dimensions before uint16 conversion.
+func (m *Terminals) Resize(id string, cols, rows int) error {
+	if cols < 2 || cols > 1000 || rows < 1 || rows > 500 {
+		return errors.New("终端尺寸无效")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := m.entries[id]
+	if t == nil || !t.Running {
+		return errors.New("终端已结束")
+	}
+	if cols == t.Cols && rows == t.Rows {
+		return nil
+	}
+	if err := resizePTY(t.pty, cols, rows); err != nil {
+		return err
+	}
+	t.Cols, t.Rows = cols, rows
+	return nil
 }
 func (m *Terminals) Stop(id string) error {
 	m.mu.Lock()

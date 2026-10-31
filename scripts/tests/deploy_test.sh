@@ -829,7 +829,7 @@ expect_contains "预览与历史用例在独立生命周期执行" "$FAKE_LOG_DI
 expect_contains "其余用例使用互补分组而非跳过" "$FAKE_LOG_DIR/npm.calls" "--grep-invert $result_group"
 expect_contains "原主流程显式排除会污染初始空库的工具套件" "$FAKE_LOG_DIR/npm.calls" "--project=existing --project=delivery --project=ui-consistency --grep-invert $result_group"
 expect_contains "主题与抽屉独立生命周期不继承业务登录与驻留会话" "$FAKE_LOG_DIR/npm.calls" "test:browser -- --project=theme --project=drawer"
-expect_contains "工具套件在独立新服务生命周期执行" "$FAKE_LOG_DIR/npm.calls" "test:browser -- --project=project-tools"
+expect_contains "工具及终端套件在独立新服务生命周期执行" "$FAKE_LOG_DIR/npm.calls" "test:browser -- --project=project-tools --project=terminal"
 expect_eq "浏览器门禁成功后激活候选" "$(activation_revision)" "$shaB"
 
 CFG_BUSY=$REPO/.kaiwu/busy.conf

@@ -310,6 +310,8 @@ func (h *handler) terminalSocket(w http.ResponseWriter, r *http.Request, id stri
 	conn.SetReadLimit(8192)
 	ctx, cancel := context.WithCancel(h.cfg.Context)
 	defer cancel()
+	stream := r.URL.Query().Get("v") == "2"
+	acks := make(chan uint64, 1)
 
 	// Neither WebSocket closure nor changing project owns the shell.
 	go func() {
@@ -320,7 +322,12 @@ func (h *handler) terminalSocket(w http.ResponseWriter, r *http.Request, id stri
 				return
 			}
 			var input struct {
-				Input string `json:"input"`
+				Input  string `json:"input"`
+				Resize *struct {
+					Cols int `json:"cols"`
+					Rows int `json:"rows"`
+				} `json:"resize"`
+				Ack *uint64 `json:"ack"`
 			}
 			if json.Unmarshal(raw, &input) != nil || len(input.Input) > 4096 {
 				return
@@ -328,15 +335,33 @@ func (h *handler) terminalSocket(w http.ResponseWriter, r *http.Request, id stri
 			if !h.authenticated(r) {
 				return
 			}
-			if e = h.terminals.Input(id, input.Input); e != nil {
-				return
+			if input.Ack != nil && stream {
+				select {
+				case acks <- *input.Ack:
+				default:
+					return
+				}
+			}
+			if input.Resize != nil {
+				if e = h.terminals.Resize(id, input.Resize.Cols, input.Resize.Rows); e != nil {
+					return
+				}
+			}
+			if input.Input != "" {
+				if e = h.terminals.Input(id, input.Input); e != nil {
+					return
+				}
 			}
 		}
 	}()
 	cursor := int64(-1)
+	sequence := uint64(0)
 	tick := time.NewTicker(20 * time.Second)
 	defer tick.Stop()
 	for {
+		if !h.authenticated(r) {
+			return
+		}
 		changed, e := h.terminals.Changed(id)
 		if e != nil {
 			return
@@ -345,13 +370,44 @@ func (h *handler) terminalSocket(w http.ResponseWriter, r *http.Request, id stri
 		if e != nil {
 			return
 		}
-		data, _ := json.Marshal(t)
+		var data []byte
+		if stream {
+			sequence++
+			// Base64 preserves UTF-8 split across PTY reads, unlike JSON strings.
+			data, _ = json.Marshal(struct {
+				Data      []byte `json:"data"`
+				Sequence  uint64 `json:"sequence"`
+				Reset     bool   `json:"reset"`
+				Running   bool   `json:"running"`
+				Cols      int    `json:"cols"`
+				Rows      int    `json:"rows"`
+				Truncated bool   `json:"truncated"`
+			}{[]byte(t.Output), sequence, t.Reset, t.Running, t.Cols, t.Rows, t.Reset && t.Offset > int64(len(t.Output))})
+		} else {
+			data, _ = json.Marshal(t)
+		}
 		cursor = t.Offset
 		write, done := context.WithTimeout(ctx, 5*time.Second)
 		e = conn.Write(write, websocket.MessageText, data)
 		done()
 		if e != nil {
 			return
+		}
+		if stream {
+			// Keep at most one bounded frame in the browser's write queue.
+			// A slow/hidden client cannot accumulate unlimited output. The shell
+			// remains alive and its bounded history can be reattached explicitly.
+			wait, stop := context.WithTimeout(ctx, 15*time.Second)
+			select {
+			case ack := <-acks:
+				stop()
+				if ack != sequence {
+					return
+				}
+			case <-wait.Done():
+				stop()
+				return
+			}
 		}
 		select {
 		case <-ctx.Done():

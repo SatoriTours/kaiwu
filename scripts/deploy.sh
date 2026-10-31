@@ -444,7 +444,7 @@ deploy_sha() {
 			pipeline_fail "浏览器主题与抽屉套件"
 		# Project tools create persistent projects and sessions. Run them in a
 		# fresh service, preserving the legacy suite's empty-database premise.
-		run_step "$work/src" "浏览器项目工具（独立生命周期）" npm --prefix apps/web run test:browser -- --project=project-tools ||
+		run_step "$work/src" "浏览器项目工具（独立生命周期）" npm --prefix apps/web run test:browser -- --project=project-tools --project=terminal ||
 			pipeline_fail "浏览器项目工具套件"
 		run_step "$work/src" "浏览器版本套件" env KAIWU_VERSION_TEST_PORT="$DEPLOY_VERSION_BROWSER_PORT" KAIWU_VERSION_TEST_REVISION="$sha" npm --prefix apps/web run test:browser -- --config playwright.version.config.ts ||
 			pipeline_fail "浏览器版本套件"
