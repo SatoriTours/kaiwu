@@ -124,7 +124,7 @@ func TestGitHubCredentialScopes(t *testing.T) {
 		if command == "" {
 			t.Fatalf("no ssh command in %v", cred.Env)
 		}
-		for _, want := range []string{"-i " + keyPath, "BatchMode=yes", "IdentitiesOnly=yes", "StrictHostKeyChecking=yes"} {
+		for _, want := range []string{"BatchMode=yes", "IdentitiesOnly=yes", "StrictHostKeyChecking=yes"} {
 			if !strings.Contains(command, want) {
 				t.Fatalf("ssh command %q missing %q", command, want)
 			}
@@ -136,7 +136,7 @@ func TestGitHubCredentialScopes(t *testing.T) {
 		if _, e := r.Git(context.Background(), "server_github_ssh", "git@github.com:owner/repo.git"); e == nil {
 			t.Fatal("ssh agent without key or explicit allowance must fail")
 		}
-		agentEnv := map[string]string{"KAIWU_GITHUB_SSH_AGENT": "allowed"}
+		agentEnv := map[string]string{"KAIWU_GITHUB_SSH_AGENT": "allowed", "SSH_AUTH_SOCK": "/tmp/agent.sock"}
 		agentResolver, e := New(testConfig(envLookup(agentEnv)))
 		if e != nil {
 			t.Fatalf("New agent: %v", e)

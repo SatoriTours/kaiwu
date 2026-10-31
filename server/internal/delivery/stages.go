@@ -47,6 +47,14 @@ func (m *Manager) stageQueued(d workbench.Delivery) (workbench.Delivery, bool) {
 	if err != nil {
 		return m.block(d, "main_branch_unavailable", "本地主分支不可读："+err.Error())
 	}
+	frozen, err := protectedDefinitionsFingerprint(m.ctx, p.Path, localMain, d.Policy.Checks)
+	if err != nil {
+		return m.block(d, "protected_definitions_unavailable", err.Error())
+	}
+	if d.ProtectedFingerprint != "" && d.ProtectedFingerprint != frozen {
+		return m.block(d, "protected_definitions_changed", "派发前主分支检查定义已变化，请人工审核")
+	}
+	d.ProtectedFingerprint = frozen
 	var dispatch *workbench.DeliveryStep
 	if !m.dispatchedBefore(d.ID) {
 		dispatch = &workbench.DeliveryStep{
@@ -139,9 +147,17 @@ func (m *Manager) stageLocalChecking(d workbench.Delivery) (workbench.Delivery, 
 	if err != nil {
 		return m.block(d, "candidate_unavailable", "任务候选无法冻结："+err.Error())
 	}
+	if code, reason := m.verifyWorkflowTree(d, x.Workspace, cand.Tree); code != "" {
+		return m.block(d, code, reason)
+	}
 	ev, err := RunChecks(m.ctx, x, d.Policy.Checks, lease)
 	if leaseRefused(err) {
 		return m.block(d, "writer_busy", "写入租约拒绝运行检查")
+	}
+	// Even failed checks may alter their definitions or produce special files.
+	// Never repair automatically before the final protected tree is verified.
+	if code, reason := m.verifyDefinitionsAfterChecks(d, x.Workspace, ev.Tree); code != "" {
+		return m.block(d, code, reason)
 	}
 	if err != nil || !ev.Passed {
 		// A failed local gate enters the same bounded repair loop as CI; the
@@ -252,7 +268,7 @@ func (m *Manager) stagePushingTask(d workbench.Delivery) (workbench.Delivery, bo
 	}
 	next := d
 	next.Phase = "task_ci"
-	next.CIDeadline = m.now().Add(dms(d.Policy.CISeconds))
+	next.CIDeadline = intent.StartedAt.Add(dms(d.Policy.CISeconds))
 	if d.Policy.RequireAcceptance {
 		// Every push mints a fresh token: a changed candidate invalidates the
 		// previous acceptance instead of reusing a stale one.

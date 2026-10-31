@@ -451,6 +451,8 @@ func TestDeliveryAppLifecycle(t *testing.T) {
 		t.Setenv("KAIWU_GITHUB_API_TOKEN", "")
 		t.Setenv("KAIWU_GITHUB_GIT_TOKEN", "")
 		t.Setenv("KAIWU_GITHUB_SSH_KEY", "")
+		t.Setenv("KAIWU_GITHUB_SSH_AGENT", "")
+		t.Setenv("SSH_AUTH_SOCK", "")
 		dir := t.TempDir()
 		addr := freeAddr(t)
 		token := strings.Repeat("m", 32)

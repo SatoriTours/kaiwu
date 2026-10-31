@@ -667,6 +667,17 @@ onMounted(() => {
                     />
                   </div>
 
+                  <div class="form-group">
+                    <label :for="'checkDefinitions_' + idx">保护检查定义文件（每行一个）</label>
+                    <textarea
+                      :id="'checkDefinitions_' + idx"
+                      v-model="check.definitionPathsText"
+                      rows="3"
+                      placeholder="scripts/check.sh&#10;apps/web/package.json"
+                    ></textarea>
+                    <span class="hint">相对项目根目录，不是命令工作目录。请列出脚本及间接配置依赖；仅支持主分支已跟踪的普通文件，内容或权限变化会停止交付。.github 始终保护；留空不额外保护本地定义，也不会自动分析命令依赖。</span>
+                  </div>
+
                   <!-- 逐项编辑参数 -->
                   <div class="args-section">
                     <div class="args-header">
@@ -1286,6 +1297,7 @@ details.advanced-box summary:hover {
   font-size: 11px;
 }
 .form-group input[type="text"],
+.form-group textarea,
 .form-group select {
   padding: 7px 10px;
   border: 1px solid var(--theme-border, #d4ded8);
@@ -1294,7 +1306,12 @@ details.advanced-box summary:hover {
   background: var(--theme-surface, #ffffff);
   color: var(--theme-text, #1a2420);
 }
+.form-group textarea {
+  resize: vertical;
+  min-width: 0;
+}
 .form-group input[type="text"]:focus,
+.form-group textarea:focus,
 .form-group select:focus {
   outline: none;
   border-color: var(--theme-border, #2d453b);

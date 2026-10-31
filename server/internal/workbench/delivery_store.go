@@ -214,6 +214,9 @@ func (s *Store) AdvanceDelivery(key string, expectedVersion uint64, next Deliver
 	if next.ID != old.ID || next.TaskID != old.TaskID || next.ProjectID != old.ProjectID || next.IntentID != old.IntentID || next.Cycle != old.Cycle || deliveryFingerprint(next.Policy) != deliveryFingerprint(old.Policy) || (old.CommonDir != "" && next.CommonDir != old.CommonDir) {
 		return Delivery{}, Conflict("交付身份或配置快照不可改写")
 	}
+	if (old.ProtectedFingerprint != "" || old.Phase != "queued") && next.ProtectedFingerprint != old.ProtectedFingerprint {
+		return Delivery{}, Conflict("实际 workflow 保护基线不可在周期内改写")
+	}
 	if !DeliveryActive(next.Phase) && next.Phase != "succeeded" && next.Phase != "cancelled" {
 		return Delivery{}, Invalid("交付阶段无效")
 	}

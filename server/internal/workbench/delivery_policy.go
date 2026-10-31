@@ -113,6 +113,9 @@ func ValidateDeliveryPolicy(p ProjectDeliveryPolicy) error {
 			return err
 		}
 	}
+	if _, err := DeliveryDefinitionPaths(p.Checks); err != nil {
+		return err
+	}
 	if !p.Enabled {
 		return nil
 	}

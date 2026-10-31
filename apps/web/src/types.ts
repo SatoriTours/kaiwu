@@ -226,6 +226,7 @@ export interface TaskPreview {
 }
 
 export interface DeliveryCheck {
+  definitionPaths?: string[];
   id: string;
   argv: string[];
   dir: string;

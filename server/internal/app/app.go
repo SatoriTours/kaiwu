@@ -33,7 +33,8 @@ import (
 // production.
 func buildDelivery(ctx context.Context, dataDir string, store *workbench.Store, agentPort delivery.AgentPort) (*delivery.Manager, error) {
 	gh := config.LoadGitHub(os.LookupEnv)
-	if gh.APIToken == "" || (gh.GitToken == "" && gh.SSHKey == "") {
+	sshAgent := gh.SSHAgentAllowed && os.Getenv("SSH_AUTH_SOCK") != ""
+	if gh.APIToken == "" || (gh.GitToken == "" && gh.SSHKey == "" && !sshAgent) {
 		return nil, nil
 	}
 	resolver, err := githubauth.New(githubauth.Config{Lookup: os.LookupEnv})

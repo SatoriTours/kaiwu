@@ -3,6 +3,7 @@ export interface CheckItemUI {
   program: string;
   args: string[];
   argsError?: string;
+  definitionPathsText?: string;
   dir: string;
   timeoutSeconds: number;
 }
@@ -131,6 +132,7 @@ export function checksToUI(checks?: any[]): CheckItemUI[] {
       id,
       program,
       args: rawArgs,
+      definitionPathsText: Array.isArray(c?.definitionPaths) ? c.definitionPaths.join('\n') : '',
       dir: c?.dir || '.',
       timeoutSeconds: Number(c?.timeoutSeconds) > 0 ? Number(c.timeoutSeconds) : 300,
     };
@@ -161,8 +163,10 @@ export function uiToChecks(items: CheckItemUI[]): any[] {
     .filter((item) => item.program.trim() !== '')
     .map((item) => {
       const argv = [item.program.trim(), ...item.args];
+      const definitionPaths = (item.definitionPathsText || '').split(/\r?\n/).map(p => p.trim()).filter(Boolean);
       return {
         id: item.id.trim() || 'check',
+        ...(definitionPaths.length ? { definitionPaths } : {}),
         argv,
         dir: item.dir.trim() || '.',
         timeoutSeconds: Number(item.timeoutSeconds) > 0 ? Number(item.timeoutSeconds) : 300,

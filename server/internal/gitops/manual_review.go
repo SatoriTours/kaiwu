@@ -56,11 +56,8 @@ func ResolveManualRemote(ctx context.Context, p workbench.Project) (ManualRemote
 	if len(values) != 1 {
 		return target, errors.New("远程地址必须唯一，当前存在多个 fetch 地址")
 	}
-	url := values[0]
-	if !remoteURLAllowed.MatchString(url) && !sshURLAllowed.MatchString(url) {
-		return target, fmt.Errorf("远程地址 %q 不是受支持的 github.com 地址", url)
-	}
-	if _, e := parsed(url); e != nil {
+	url, e := workbench.CanonicalGitHubURL(values[0])
+	if e != nil {
 		return target, e
 	}
 	if e := verifyManualRemote(ctx, p.Path, name, url); e != nil {
@@ -76,7 +73,7 @@ func ResolveManualRemote(ctx context.Context, p workbench.Project) (ManualRemote
 	target.Name = name
 	target.URL = url
 	target.MainRef = "refs/heads/" + branch
-	if sshURLAllowed.MatchString(url) {
+	if strings.HasPrefix(url, "ssh://") {
 		target.CredentialRef = "server_github_ssh"
 	} else {
 		target.CredentialRef = "server_github_https"
@@ -109,7 +106,8 @@ func verifyManualRemote(ctx context.Context, path, name, url string) error {
 	pushURLs, e := output(ctx, path, "config", "--get-all", "remote."+name+".pushurl")
 	if e == nil {
 		for _, u := range nonEmpty(pushURLs) {
-			if u != url {
+			canonical, err := workbench.CanonicalGitHubURL(u)
+			if err != nil || canonical != url {
 				return errors.New("远程存在不一致的 pushurl")
 			}
 		}
@@ -122,6 +120,9 @@ func verifyManualRemote(ctx context.Context, path, name, url string) error {
 	helper, e := output(ctx, path, "config", "--get-regexp", `^remote\..*\.vcs$`)
 	if e == nil && len(nonEmpty(helper)) > 0 {
 		return errors.New("存在 remote helper 配置")
+	}
+	if e := rejectHTTPTransportOverrides(ctx, path); e != nil {
+		return e
 	}
 	return rejectCredentialHelper(ctx, path)
 }

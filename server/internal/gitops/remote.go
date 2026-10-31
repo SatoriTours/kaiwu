@@ -23,8 +23,6 @@ type RemoteTarget struct {
 	TaskRef      string
 }
 
-var remoteURLAllowed = regexp.MustCompile(`^https://github\.com/[A-Za-z0-9.-]+/[A-Za-z0-9_.-]+\.git$`)
-var sshURLAllowed = regexp.MustCompile(`^git@github\.com:[A-Za-z0-9.-]+/[A-Za-z0-9_.-]+\.git$`)
 var branchNameAllowed = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 var taskIDAllowed = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
@@ -36,11 +34,8 @@ func ResolveRemote(ctx context.Context, project workbench.Project, policy workbe
 	if repo.ID == 0 {
 		return target, errors.New("交付授权缺少仓库标识")
 	}
-	url := repo.URL
-	if !remoteURLAllowed.MatchString(url) && !sshURLAllowed.MatchString(url) {
-		return target, fmt.Errorf("远程地址 %q 不是受支持的 github.com 地址", url)
-	}
-	if _, e := parsed(url); e != nil {
+	url, e := workbench.CanonicalGitHubURL(repo.URL)
+	if e != nil {
 		return target, e
 	}
 	if !branchNameAllowed.MatchString(repo.MainBranch) || strings.Contains(repo.MainBranch, "..") {
@@ -60,31 +55,38 @@ func ResolveRemote(ctx context.Context, project workbench.Project, policy workbe
 }
 
 func parsed(raw string) (*url.URL, error) {
-	u, e := url.Parse(raw)
-	if e != nil || u.User != nil {
-		return nil, errors.New("远程地址不得携带凭据")
+	canonical, err := workbench.CanonicalGitHubURL(raw)
+	if err != nil {
+		return nil, err
 	}
-	return u, nil
+	return url.Parse(canonical)
 }
 
 // verifyRemoteConfig checks the project remote still matches the frozen URL:
 // a single fetch URL, no extra push URLs, and no insteadOf rewrites.
 func verifyRemoteConfig(ctx context.Context, path, frozen string) error {
-	names, e := output(ctx, path, "config", "--get-regexp", `^remote\..*\.url$`)
-	if e != nil && !strings.Contains(e.Error(), "no such section") {
-		// no remotes configured is fine for fetch-by-URL flows, but the
-		// frozen remote must exist.
+	canonical, err := workbench.CanonicalGitHubURL(frozen)
+	if err != nil {
+		return err
+	}
+	frozen = canonical
+	names, e := output(ctx, path, "config", "--null", "--get-regexp", `^remote\..*\.url$`)
+	if e != nil {
 		return errors.New("项目远程配置不可读")
 	}
 	match := ""
-	for _, line := range strings.Split(names, "\n") {
-		line = strings.TrimSpace(line)
-		key, value, ok := strings.Cut(line, " ")
+	urls := make(map[string][]string)
+	// Git's NUL format separates key and value with a newline, and records
+	// with NUL. A newline inside a URL must never forge another remote record.
+	for _, record := range strings.Split(strings.TrimSuffix(names, "\x00"), "\x00") {
+		key, value, ok := strings.Cut(record, "\n")
 		if !ok {
 			continue
 		}
 		name := strings.TrimSuffix(strings.TrimPrefix(key, "remote."), ".url")
-		if value == frozen {
+		urls[name] = append(urls[name], value)
+		canonical, err := workbench.CanonicalGitHubURL(value)
+		if err == nil && canonical == frozen {
 			if match != "" && match != name {
 				return errors.New("同一冻结地址配置在多个远程上")
 			}
@@ -94,23 +96,66 @@ func verifyRemoteConfig(ctx context.Context, path, frozen string) error {
 	if match == "" {
 		return errors.New("项目未配置与授权一致的远程")
 	}
-	pushURLs, e := output(ctx, path, "config", "--get-all", "remote."+match+".pushurl")
-	if e == nil && strings.TrimSpace(pushURLs) != "" {
-		for _, u := range strings.Split(pushURLs, "\n") {
-			if strings.TrimSpace(u) != frozen {
-				return errors.New("远程存在额定的 pushurl")
+	if len(urls[match]) != 1 {
+		return errors.New("授权远程必须只有一个 URL")
+	}
+	pushURLs, e := optionalRemoteConfig(ctx, path, "--null", "--get-all", "remote."+match+".pushurl")
+	if e != nil {
+		return e
+	}
+	if pushURLs != "" {
+		for _, u := range strings.Split(strings.TrimSuffix(pushURLs, "\x00"), "\x00") {
+			canonical, err := workbench.CanonicalGitHubURL(u)
+			if err != nil || canonical != frozen {
+				return errors.New("远程存在与授权不一致的 pushurl")
 			}
 		}
 	}
-	rewrites, e := output(ctx, path, "config", "--get-regexp", `^url\..*\.insteadof$`)
-	if e == nil && strings.TrimSpace(rewrites) != "" {
+	rewrites, e := optionalRemoteConfig(ctx, path, "--get-regexp", `^url\..*\.(insteadof|pushinsteadof)$`)
+	if e != nil {
+		return e
+	}
+	if strings.TrimSpace(rewrites) != "" {
 		return errors.New("存在 URL rewrite 配置，远程地址不可信")
 	}
-	helper, e := output(ctx, path, "config", "--get-regexp", `^remote\..*\.vcs$`)
-	if e == nil && strings.TrimSpace(helper) != "" {
+	helper, e := optionalRemoteConfig(ctx, path, "--get-regexp", `^remote\..*\.vcs$`)
+	if e != nil {
+		return e
+	}
+	if strings.TrimSpace(helper) != "" {
 		return errors.New("存在 remote helper 配置")
 	}
+	if e := rejectHTTPTransportOverrides(ctx, path); e != nil {
+		return e
+	}
 	return rejectCredentialHelper(ctx, path)
+}
+
+// Repository-controlled HTTP settings can redirect credentials despite a
+// frozen GitHub URL (proxy, TLS trust, redirects or URL-specific overrides).
+// OS/service trust settings remain outside the untrusted repository config.
+func rejectHTTPTransportOverrides(ctx context.Context, path string) error {
+	for _, includes := range []string{"--includes", "--no-includes"} {
+		v, err := optionalRemoteConfig(ctx, path, includes, "--get-regexp", `^[hH][tT][tT][pP]\.`)
+		if err != nil {
+			return err
+		}
+		if v != "" {
+			return errors.New("仓库包含 HTTP 传输覆盖，须移除并审核服务端传输设置后再推送")
+		}
+	}
+	return nil
+}
+
+func optionalRemoteConfig(ctx context.Context, path string, args ...string) (string, error) {
+	v, err := output(ctx, path, append([]string{"config"}, args...)...)
+	if code, ok := exitCode(err); ok && code == 1 {
+		return "", nil // no matching key
+	}
+	if err != nil {
+		return "", errors.New("项目远程配置不可读")
+	}
+	return v, nil
 }
 
 // RemoteTransport executes one remote git command. Production uses the
@@ -160,8 +205,9 @@ func NewRemoteRunner(cfg RemoteConfig) *RemoteRunner {
 const networkTimeout = 120 * time.Second
 
 func (r *RemoteRunner) run(ctx context.Context, dir string, target RemoteTarget, args []string, credentialRef string, lease ProcessLease) (string, error) {
-	if u, e := urlParse(target.URL); e != nil || (u.User != nil) {
-		return "", errors.New("远程地址不得携带凭据")
+	if _, e := parsed(target.URL); e != nil {
+		finishNoProcess(lease)
+		return "", e
 	}
 	if r.transport != nil {
 		out, e := r.transport.Run(ctx, dir, target, args, credentialRef, lease)
@@ -174,14 +220,30 @@ func (r *RemoteRunner) run(ctx context.Context, dir string, target RemoteTarget,
 	return r.productionRun(ctx, dir, target, args, credentialRef, lease)
 }
 
-func urlParse(raw string) (*url.URL, error) { return url.Parse(raw) }
-
 // productionRun executes git with the frozen env, controlled credentials
 // and the inherited lease file, tracking the process group.
 func (r *RemoteRunner) productionRun(ctx context.Context, dir string, target RemoteTarget, args []string, credentialRef string, lease ProcessLease) (string, error) {
+	// Delivery targets carry an authorized repository identity. Revalidate at
+	// every real remote command; callers may construct targets directly and the
+	// repository config can change after policy authorization. Manual operations
+	// use their separately reviewed targets (RepositoryID == 0).
+	if target.RepositoryID != 0 {
+		_, err := workbench.CanonicalGitHubURL(target.URL)
+		if target.RepositoryID < 1 || err != nil {
+			finishNoProcess(lease)
+			return "", errors.New("交付远程不是授权的 github.com 地址")
+		}
+		if err := verifyRemoteConfig(ctx, dir, target.URL); err != nil {
+			finishNoProcess(lease)
+			return "", err
+		}
+	} else if err := rejectHTTPTransportOverrides(ctx, dir); err != nil {
+		finishNoProcess(lease)
+		return "", err
+	}
 	var extra []*os.File
 	var config []string
-	env := Env()
+	env := remoteEnv()
 	if r.resolver != nil && credentialRef != "" {
 		cred, e := r.resolver.Git(ctx, credentialRef, target.URL)
 		if e != nil {
@@ -272,7 +334,7 @@ func finishLease(lease ProcessLease, pid int, gone bool) {
 // Observe returns the current remote SHA of a ref, or "" when the ref does
 // not exist. It proves results after an unknown push outcome.
 func (r *RemoteRunner) Observe(ctx context.Context, dir string, target RemoteTarget, ref, credentialRef string, lease ProcessLease) (string, error) {
-	if !branchRefAllowed(ref) {
+	if !targetRefAllowed(target, ref) {
 		return "", fmt.Errorf("观察 ref %q 不在受支持的分支范围", ref)
 	}
 	if lease != nil {
@@ -307,7 +369,7 @@ func exitCode(e error) (int, bool) {
 // Fetch fetches exactly one remote branch into a service-owned observation
 // ref, without tags.
 func (r *RemoteRunner) Fetch(ctx context.Context, dir string, target RemoteTarget, ref, credentialRef string, lease ProcessLease) (string, error) {
-	if !branchRefAllowed(ref) {
+	if !targetRefAllowed(target, ref) {
 		return "", fmt.Errorf("抓取 ref %q 不在受支持的分支范围", ref)
 	}
 	localRef := observeRef(ref)
@@ -331,7 +393,7 @@ func observeRef(ref string) string {
 // Push pushes one exact SHA to one exact branch ref (no force) and verifies
 // the remote actually holds the SHA. It never implies CI success.
 func (r *RemoteRunner) Push(ctx context.Context, dir string, target RemoteTarget, sha, ref, credentialRef string, lease ProcessLease) (string, error) {
-	if !branchRefAllowed(ref) {
+	if !targetRefAllowed(target, ref) {
 		return "", fmt.Errorf("推送 ref %q 不在受支持的分支范围", ref)
 	}
 	if len(sha) != 40 || !isHex(sha) {
@@ -366,6 +428,20 @@ func branchRefAllowed(ref string) bool {
 		return false
 	}
 	return true
+}
+
+func targetRefAllowed(target RemoteTarget, ref string) bool {
+	if !branchRefAllowed(ref) {
+		return false
+	}
+	if target.RepositoryID == 0 {
+		return true // explicit manual review determines the allowed branch
+	}
+	main := target.MainRef
+	if !strings.HasPrefix(main, "refs/heads/") {
+		main = "refs/heads/" + main
+	}
+	return ref == main || ref == target.TaskRef
 }
 
 func isHex(s string) bool {

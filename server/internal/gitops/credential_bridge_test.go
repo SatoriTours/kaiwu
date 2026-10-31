@@ -228,18 +228,21 @@ func TestExplicitSSHAgentStaysAuthorized(t *testing.T) {
 		if k == "KAIWU_GITHUB_SSH_AGENT" {
 			return "allowed", true
 		}
+		if k == "SSH_AUTH_SOCK" {
+			return sock, true
+		}
 		return "", false
 	}})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e := r.Git(context.Background(), githubauth.RefSSH, "git@github.com:owner/repo.git"); e == nil {
-		// The allowed-flag path requires the socket to be visible to the service
-		// process itself; it must not be reachable only through the git env.
-		if !strings.Contains(strings.Join(Env(), "\n"), "SSH_AUTH_SOCK=") {
-			return
-		}
-		t.Fatal("agent socket leaked into the generic git env")
+	cred, e := r.Git(context.Background(), githubauth.RefSSH, "git@github.com:owner/repo.git")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer cred.Close()
+	if !strings.Contains(strings.Join(cred.Env, "\n"), "SSH_AUTH_SOCK="+sock) {
+		t.Fatal("explicitly authorized agent not supplied")
 	}
 	if strings.Contains(strings.Join(Env(), "\n"), "SSH_AUTH_SOCK=") {
 		t.Fatal("agent socket leaked into the generic git env")

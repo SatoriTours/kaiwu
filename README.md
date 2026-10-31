@@ -80,6 +80,8 @@ Web 深色模式已在本地实现：默认跟随系统并实时切换，可手�
 
 2026-10-24 的成果流程增量已在本地实现：静态网页新标签页、显式文件下载、双合并审核与每问题一条可展开回复。下载 Go 后端的 manifest 绑定修复已通过独立复验；前端 68 项单测与构建通过；登录同步及夹具容量问题修正后，正式 `cd apps/web && npm run test:chat-turn` 自动串行分片的全部 19 项 Chromium 自测通过，独立功能／质量窄复验通过，独立视觉验收仍受模型能力限制，待补授权。**用户已要求提交，收尾交付进行中；独立视觉与真实 UI 远端联调尚未完成，不将本地测试称为整体交付通过。线上生效以实际入口完整修订号为准。** [当前台账](TODO.md) · [验证范围](docs/development/web-task-result-preview-verification.md#2026-10-24-产物直达与双合并增量)。
 
+自动交付的 C2 远程执行边界已完成一批安全修复并通过限定独立复验，含配置重验、凭据环境隔离、HTTP 传输覆盖及仓库 askpass 防护；Git／交付／凭据回归与手动调用层检查通过。I1 SSH 接线及本轮 `%` 密钥路径／最终远程 URL 收尾已独立通过，三包回归与相关 race／vet 通过。C3 实际 workflow 冻结首片已独立通过：按实际 Git 对象冻结 `.github` 定义，原 `refs/replace` 绕过已用独立机器级红绿对照关闭；定向 race／vet 通过。显式检查脚本／配置文件声明保护亦经独立验收通过，含相关 Go／Web 回归、设置保存重开及桌面／手机视觉核查；只保护已声明文件，不推断传递依赖；恢复调度屏障、push 核查与 CI 计时起点已补确定性修复；独立初验发现的多 pending push 提前放行亦已修复，相关 Go 回归／race 与独立聚焦复验通过（仅 I11 子片）；非 push 写权／意图、暂停撤销及其余 CI 门禁仍开放，worker 继续禁用；本批进入提交交付，部署状态以实际入口修订号为准。[安全裁决与范围](docs/development/web-automated-delivery-review-resolution.md)。
+
 项目仍在开发中，当前优先打磨 **Web + pi** 的任务流程。桌面端（Windows / macOS / Linux，Nim + Leaf）与 Android（Kotlin / KMP / Compose）仍是目标，目前尚未提供原生客户端；Codex、自动多 Agent 编排和真实自动交付尚未开放。
 
 欢迎通过 [Issues](https://github.com/SatoriTours/kaiwu/issues) 交流问题与建议。**许可证尚未确定**，公开仓库不代表已授予使用、修改或分发许可。

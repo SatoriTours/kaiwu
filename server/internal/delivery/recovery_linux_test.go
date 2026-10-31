@@ -221,10 +221,24 @@ func crashChildWorld(t *testing.T, root, point string) {
 	defer func() { _ = w.store.Close() }()
 	agent := &fakeAgentPort{lease: &stubLease{accept: true}, claimStore: w.store}
 	ci := &ciState{}
+	transport := recoveryTransport(w)
+	crashTransport := gitops.RemoteTransportFunc(func(ctx context.Context, dir string, target gitops.RemoteTarget, args []string, ref string, lease gitops.ProcessLease) (string, error) {
+		mainPush := len(args) > 0 && args[0] == "push" && strings.HasSuffix(args[len(args)-1], ":refs/heads/main")
+		if mainPush && point == "after-main-intent" {
+			_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+			select {}
+		}
+		out, err := transport(ctx, dir, target, args, ref, lease)
+		if err == nil && mainPush && point == "after-main-push" {
+			_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+			select {}
+		}
+		return out, err
+	})
 	cfg := Config{
 		Agent:   agent,
 		Actions: ci.client(t, w.store, w.delivery, w.task, "token"),
-		Remote:  gitops.NewRemoteRunner(gitops.RemoteConfig{Transport: recoveryTransport(w)}),
+		Remote:  gitops.NewRemoteRunner(gitops.RemoteConfig{Transport: crashTransport}),
 		Clock:   wallClock{},
 		DataDir: root,
 	}
@@ -232,7 +246,12 @@ func crashChildWorld(t *testing.T, root, point string) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	setCrashPoint(point)
+	if point == "after-main-receipt" {
+		setCrashPoint(point)
+	}
+	if err := mgr.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	settleWorldRound(t, w)
 	// The human gate: accept the candidate so the cycle may integrate.
 	acceptBy := time.Now().Add(90 * time.Second)
@@ -242,6 +261,7 @@ func crashChildWorld(t *testing.T, root, point string) {
 			t.Fatal(e)
 		}
 		if d.Phase == "awaiting_acceptance" {
+			ci.setOpen(false, false, true, false)
 			if _, e := mgr.Accept(context.Background(), "accept-child", w.delivery, d.AcceptanceToken, d.Version); e != nil {
 				t.Fatal(e)
 			}
@@ -249,7 +269,16 @@ func crashChildWorld(t *testing.T, root, point string) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	// Wait until the requested window is durably persisted, then die.
+	if point != "after-main-receipt" {
+		// Only the transport may kill this process at intent/push edges.
+		// Seeing a running step is not evidence that its Git push completed.
+		select {
+		case <-time.After(30 * time.Second):
+			t.Fatal("transport never reached exact main push crash edge")
+		}
+		return
+	}
+	// A written receipt plus a held in-progress main CI is a stable edge.
 	window := func() bool {
 		d, e := w.store.Delivery(w.delivery)
 		if e != nil {
@@ -301,7 +330,9 @@ func TestDeliveryRecoveryCrashAndRestart(t *testing.T) {
 	for _, point := range []string{"after-main-intent", "after-main-push", "after-main-receipt"} {
 		t.Run(point, func(t *testing.T) {
 			root := t.TempDir()
-			cmd := exec.Command(os.Args[0], "-test.run=TestDeliveryRecoveryCrashChild", "-test.v")
+			childCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(childCtx, os.Args[0], "-test.run=TestDeliveryRecoveryCrashChild", "-test.v")
 			cmd.Env = append(os.Environ(), crashRootEnv+"="+root, crashPointEnv+"="+point)
 			out, err := cmd.CombinedOutput()
 			if err == nil {
@@ -328,6 +359,18 @@ func TestDeliveryRecoveryCrashAndRestart(t *testing.T) {
 			defer func() { _ = m.Close() }()
 
 			before := recoveryPushes(t, w)
+			persisted, err := w.store.Delivery(w.delivery)
+			if err != nil {
+				t.Fatal(err)
+			}
+			remoteBefore := gitRun(t, w.remote, "rev-parse", "refs/heads/main")
+			wantBefore := persisted.LocalMainSHA
+			if point == "after-main-intent" {
+				wantBefore = w.base
+			}
+			if remoteBefore != wantBefore {
+				t.Fatalf("child did not die at actual %s edge: remote=%s want=%s", point, remoteBefore, wantBefore)
+			}
 			if e := m.Recover(context.Background()); e != nil {
 				t.Fatal(e)
 			}

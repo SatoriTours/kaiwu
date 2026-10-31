@@ -105,6 +105,7 @@ func gitRef(ref string) bool { return ref == RefHTTPS || ref == RefSSH }
 func EnvAllowlist() []string {
 	return []string{
 		"GIT_SSH_COMMAND",
+		"GIT_SSH_VARIANT",
 		"SSH_AUTH_SOCK",
 		"KAIWU_GITHUB_HELPER",
 		"KAIWU_GITHUB_CREDENTIAL_FD",

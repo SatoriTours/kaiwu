@@ -38,12 +38,17 @@ type Manager struct {
 	store *workbench.Store
 	cfg   Config
 
-	wake  chan struct{}
-	revs  <-chan uint64
-	unsub func()
+	// ready opens only after the first successful recovery. runGate serializes
+	// recovery, periodic/event passes and explicit Tick calls.
+	ready     chan struct{}
+	readyOnce sync.Once
+	runGate   chan struct{}
+	wake      chan struct{}
+	revs      <-chan uint64
+	unsub     func()
 
-	// leases/lastCI belong to the worker goroutine; Guarded by mu only so
-	// Close can run concurrently with a blocked stage handler.
+	// Stage execution/caches are serialized by runGate. mu additionally guards
+	// leases, dispatch records and user timestamps shared with control/hooks.
 	mu         sync.Mutex
 	leases     map[string]agent.DeliveryLease
 	lastCI     map[string]string
@@ -53,7 +58,8 @@ type Manager struct {
 	userTurnAt map[string]time.Time
 }
 
-// New subscribes to store revisions and starts the delivery worker.
+// New subscribes to store revisions but leaves scheduling dormant. Recover
+// must complete successfully before any queued notification may start work.
 func New(ctx context.Context, store *workbench.Store, cfg Config) (*Manager, error) {
 	if store == nil {
 		return nil, fmt.Errorf("缺少状态库")
@@ -66,6 +72,7 @@ func New(ctx context.Context, store *workbench.Store, cfg Config) (*Manager, err
 	m := &Manager{
 		ctx: owned, cancel: cancel, done: make(chan struct{}),
 		store: store, cfg: cfg,
+		ready: make(chan struct{}), runGate: make(chan struct{}, 1),
 		wake:       make(chan struct{}, 1),
 		revs:       revs,
 		unsub:      unsub,
@@ -96,6 +103,9 @@ func (m *Manager) Wake() {
 func (m *Manager) Close() error {
 	m.cancel()
 	<-m.done
+	// The loop may be dormant while a public Recover/Tick is still unwinding.
+	m.runGate <- struct{}{}
+	defer m.releasePass()
 	m.unsub()
 	m.mu.Lock()
 	held := m.leases
@@ -155,6 +165,15 @@ func missingWorkflow(info []githubactions.WorkflowRef, id int64) bool {
 // Tick advances one delivery cycle by a full side-effect chain. Recovery and
 // callers that cannot wait for the scanning loop use it deliberately.
 func (m *Manager) Tick(ctx context.Context, id string) error {
+	if err := m.acquirePass(ctx); err != nil {
+		return err
+	}
+	defer m.releasePass()
+	select {
+	case <-m.ready:
+	default:
+		return fmt.Errorf("交付恢复核查尚未完成")
+	}
 	d, err := m.store.Delivery(id)
 	if err != nil {
 		return err
@@ -171,6 +190,11 @@ func (m *Manager) Tick(ctx context.Context, id string) error {
 // Drives wake/revision/periodic-armed scan passes on the worker goroutine.
 func (m *Manager) loop() {
 	defer close(m.done)
+	select {
+	case <-m.ctx.Done():
+		return
+	case <-m.ready:
+	}
 	arm := m.cfg.Clock.After(rescanInterval)
 	for {
 		select {
@@ -187,6 +211,10 @@ func (m *Manager) loop() {
 }
 
 func (m *Manager) scanPass() {
+	if err := m.acquirePass(m.ctx); err != nil {
+		return
+	}
+	defer m.releasePass()
 	list, err := m.store.ActiveDeliveries()
 	if err != nil {
 		return
@@ -198,6 +226,34 @@ func (m *Manager) scanPass() {
 		m.drive(d)
 	}
 }
+
+// acquirePass is context-aware so a caller waiting behind a long check or
+// reconciliation can cancel without launching a second pass.
+func (m *Manager) acquirePass(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := m.ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-m.ctx.Done():
+		return m.ctx.Err()
+	case m.runGate <- struct{}{}:
+	}
+	if err := ctx.Err(); err != nil {
+		m.releasePass()
+		return err
+	}
+	if err := m.ctx.Err(); err != nil {
+		m.releasePass()
+		return err
+	}
+	return nil
+}
+func (m *Manager) releasePass() { <-m.runGate }
 
 // step runs the next side-effect chain of one delivery. cont=true means a
 // stage was persisted and the chain should continue (paced).

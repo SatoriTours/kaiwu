@@ -36,7 +36,7 @@ func Args(dir string, args ...string) []string {
 		// An empty value resets git's credential helper list, so a repository
 		// or included config can never run its own helper. The service supplies
 		// credentials through its own controlled bridge instead.
-		"-c", "credential.helper="}, args...)
+		"-c", "credential.helper=", "-c", "core.askPass="}, args...)
 }
 
 // withheldEnv are variables that must never reach a git child implicitly: raw
@@ -67,6 +67,23 @@ func Env() []string {
 		env = append(env, v)
 	}
 	return append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_TERMINAL_PROMPT=0", "GIT_EDITOR=true", "GIT_MERGE_AUTOEDIT=no", "GIT_LITERAL_PATHSPECS=1", "LC_ALL=C")
+}
+
+// remoteEnv inherits only the OS context required by Git/SSH. Unknown service
+// variables (including credentials for other providers) must not reach a remote
+// child. Resolver-authorized credentials are appended separately at launch.
+func remoteEnv() []string {
+	var env []string
+	for _, v := range Env() {
+		name, _, _ := strings.Cut(v, "=")
+		switch name {
+		case "PATH", "HOME", "USERPROFILE", "SystemRoot", "SYSTEMROOT", "WINDIR", "TMPDIR", "TMP", "TEMP",
+			"SSL_CERT_FILE", "SSL_CERT_DIR",
+			"GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_TERMINAL_PROMPT", "GIT_EDITOR", "GIT_MERGE_AUTOEDIT", "GIT_LITERAL_PATHSPECS", "LC_ALL":
+			env = append(env, v)
+		}
+	}
+	return env
 }
 
 type limitedBuffer struct{ bytes.Buffer }

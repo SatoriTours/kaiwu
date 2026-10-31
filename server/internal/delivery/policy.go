@@ -25,7 +25,7 @@ func (m *Manager) gateCode(d workbench.Delivery) (code, reason string) {
 	if workbench.ProtectedDeliveryFingerprint(current) != workbench.ProtectedDeliveryFingerprint(d.Policy) {
 		return "policy_changed", "项目交付配置已变化，请重新确认授权"
 	}
-	return "", ""
+	return m.gateWorkflowCommits(d)
 }
 
 // executionOf resolves the task/project/execution triple of one delivery.

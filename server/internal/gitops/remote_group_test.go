@@ -3,6 +3,7 @@
 package gitops
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,7 +51,21 @@ func TestProductionRemoteRunnerReportsGroupFate(t *testing.T) {
 	sha := workspaceHead(t, work)
 	runner := NewRemoteRunner(RemoteConfig{})
 	rec := &groupRecorder{}
-	target := RemoteTarget{URL: "file://" + bare, MainRef: "refs/heads/main"}
+	// Keep the production Git/lease/process-group path real, but map the
+	// approved URL to a temporary bare repository at the executable boundary.
+	// The remote URL validator must not be weakened to allow file:// in tests.
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	url := "https://github.com/owner/repo.git"
+	script := fmt.Sprintf("#!/bin/bash\nargs=()\nfor arg in \"$@\"; do\n if [[ \"$arg\" == %q ]]; then arg=%q; fi\n args+=(\"$arg\")\ndone\nexec %q \"\u0024{args[@]}\"\n", url, bare, realGit)
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	target := RemoteTarget{URL: url, MainRef: "refs/heads/main"}
 	if _, e := runner.Push(t.Context(), work, target, sha, "refs/heads/main", "", rec); e != nil {
 		t.Fatalf("push: %v", e)
 	}

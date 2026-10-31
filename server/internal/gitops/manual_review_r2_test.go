@@ -113,8 +113,11 @@ func TestRemoteExecutionIgnoresRepoCredentialHelper(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer server.Close()
-	runner := NewRemoteRunner(RemoteConfig{})
-	_, e := runner.Observe(context.Background(), f.x.Workspace, RemoteTarget{URL: server.URL + "/o/r.git", MainRef: "refs/heads/main"}, "refs/heads/main", "", nil)
+	// This low-level credential isolation test deliberately uses a loopback
+	// 401. Production remote entry rejects non-GitHub URLs before spawning Git.
+	cmd := exec.Command("git", Args(f.x.Workspace, "ls-remote", server.URL+"/o/r.git", "refs/heads/main")...)
+	cmd.Env = remoteEnv()
+	_, e := cmd.CombinedOutput()
 	if e == nil {
 		t.Fatal("401 was not reported as a failure")
 	}

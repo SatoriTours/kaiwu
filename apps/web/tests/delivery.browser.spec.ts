@@ -36,7 +36,7 @@ async function cleanup(page:Page){
 test.describe('真实 Go 服务的自动交付界面',()=>{
  test.beforeEach(async({page})=>{await login(page);await cleanup(page)});
 
- test('交付设置概览与向导、禁用启用、保存真实草稿重开核验及只读预检',async({page})=>{
+ test('交付设置概览与向导、禁用启用、保存真实草稿重开核验及只读预检',async({page},testInfo)=>{
   await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'当前项目',exact:true}));await clickInView(page, page.getByRole('menuitem',{ includeHidden: true,name:/交付设置/}));
   const dialog=page.getByRole('dialog',{name:/自动交付/});await expect(dialog).toBeVisible();
 
@@ -72,6 +72,16 @@ test.describe('真实 Go 服务的自动交付界面',()=>{
     await clickInView(page, dialog.getByRole('button',{name:'+ 添加本地检查'}));
   }
   await dialog.locator('#checkProgram_0').fill('true');
+  const definitions = dialog.getByLabel('保护检查定义文件（每行一个）');
+  await definitions.fill('scripts/check.sh\napps/web/package.json');
+  for (const width of [1440,360]) {
+   await page.setViewportSize({width,height:900});
+   await definitions.scrollIntoViewIfNeeded();
+   await expect(definitions).toBeVisible();
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+   await page.screenshot({path:testInfo.outputPath('check-definitions-'+width+'.png'),fullPage:true});
+  }
+  await page.setViewportSize({width:1440,height:900});
   // 如果有多余参数，清空或不添加参数
   const removeArgBtns = dialog.locator('.arg-row button');
   while (await removeArgBtns.count() > 0) {
@@ -108,6 +118,7 @@ test.describe('真实 Go 服务的自动交付界面',()=>{
   expect(savedPolicy.authorizedAt).toBe('0001-01-01T00:00:00Z');
   expect(savedPolicy.checks.length).toBe(1);
   expect(savedPolicy.checks[0].argv).toEqual(['true']);
+  expect(savedPolicy.checks[0].definitionPaths).toEqual(['scripts/check.sh','apps/web/package.json']);
 
   await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'当前项目',exact:true}));
   await clickInView(page, page.getByRole('menuitem',{ includeHidden: true,name:/交付设置/}));
@@ -119,6 +130,7 @@ test.describe('真实 Go 服务的自动交付界面',()=>{
   await clickInView(page, reopened.getByTestId('configure-repository'));
   await reopened.getByLabel('GitHub 仓库规范地址').fill('');
   await clickInView(page, reopened.getByTestId('wizard-next')); // 进入 Step 2
+  await expect(reopened.getByLabel('保护检查定义文件（每行一个）')).toHaveValue('scripts/check.sh\napps/web/package.json');
   await clickInView(page, reopened.getByRole('button', { includeHidden: true, name: '返回概览' })); // 返回概览，触发同步
   await expect(reopened.locator('#summaryRepoDetail')).toContainText('尚未配置 GitHub 仓库');
 

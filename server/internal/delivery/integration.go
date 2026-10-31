@@ -188,9 +188,19 @@ func (m *Manager) stageIntegrationChecking(d workbench.Delivery) (workbench.Deli
 	}
 	lease := m.leaseFor(d.ID)
 	x := workbench.Execution{Workspace: p.Path, Branch: d.Policy.Repository.MainBranch}
+	before, err := gitops.CaptureWorkspaceSnapshot(m.ctx, x.Workspace, nil)
+	if err != nil {
+		return m.block(d, "protected_definitions_unavailable", "集成工作区无法核查："+err.Error())
+	}
+	if code, reason := m.verifyWorkflowTree(d, x.Workspace, before.Tree); code != "" {
+		return m.block(d, code, reason)
+	}
 	ev, err := RunChecks(m.ctx, x, d.Policy.Checks, lease)
 	if leaseRefused(err) {
 		return m.block(d, "writer_busy", "写入租约拒绝运行集成检查")
+	}
+	if code, reason := m.verifyDefinitionsAfterChecks(d, x.Workspace, ev.Tree); code != "" {
+		return m.block(d, code, reason)
 	}
 	if err != nil || !ev.Passed {
 		if err != nil {
@@ -268,7 +278,7 @@ func (m *Manager) stagePushingMain(d workbench.Delivery) (workbench.Delivery, bo
 	}
 	next := d
 	next.Phase = "main_ci"
-	next.CIDeadline = m.now().Add(dms(d.Policy.CISeconds))
+	next.CIDeadline = intent.StartedAt.Add(dms(d.Policy.CISeconds))
 	intent.Phase = "observed"
 	intent.AfterSHA = sha
 	intent.ExitKnown = true

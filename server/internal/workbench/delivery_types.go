@@ -8,6 +8,9 @@ type DeliveryCheck struct {
 	Argv           []string `json:"argv"`
 	Dir            string   `json:"dir"`
 	TimeoutSeconds int64    `json:"timeoutSeconds"`
+	// DefinitionPaths explicitly declares trusted check scripts/configuration,
+	// relative to the project root (not Dir). Only tracked regular files qualify.
+	DefinitionPaths []string `json:"definitionPaths,omitempty"`
 }
 type DeliveryWorkflow struct {
 	ID   int64    `json:"id"`

@@ -217,7 +217,7 @@ func TestDeliveryPushUnknownReceipt(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		roTarget := RemoteTarget{RepositoryID: 123, URL: "https://github.com/owner/repo.git", MainRef: "main"}
+		roTarget := RemoteTarget{RepositoryID: 123, URL: "https://github.com/owner/repo.git", MainRef: "main", TaskRef: target.TaskRef}
 		pushBlocked := false
 		readOnly := RemoteTransportFunc(func(ctx context.Context, dir string, target RemoteTarget, args []string, credentialRef string, lease ProcessLease) (string, error) {
 			mapped := make([]string, 0, len(args))

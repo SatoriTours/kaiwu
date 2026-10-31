@@ -42,39 +42,103 @@ type Reconciliation struct {
 // stage repeats an irreversible write. handled=true means the stage must not
 // perform the write again; cont is the paced-chain continuation flag.
 func (m *Manager) resolvePendingIntent(d workbench.Delivery, kind string) (out workbench.Delivery, handled, cont bool) {
-	page, err := m.store.DeliverySteps(d.ID, 0, 100)
+	steps, err := m.pendingSteps(d.ID)
 	if err != nil {
-		return d, false, false
+		return d, true, false
 	}
-	for _, s := range page.Items {
-		if s.Kind != kind || s.Phase != "running" {
+	type observation struct {
+		step workbench.DeliveryStep
+		rec  Reconciliation
+	}
+	var batch []observation
+	anchor, uncertain := -1, -1
+	// Classify the entire matching set before advancing the cycle. An earlier
+	// absent/observed effect never grants permission to skip a later unknown.
+	for _, s := range steps {
+		if s.Kind != kind {
 			continue
 		}
 		rec, err := m.ReconcileStep(m.ctx, d, s)
 		if err != nil {
-			return d, false, false
+			return d, true, false
 		}
+		i := len(batch)
+		batch = append(batch, observation{s, rec})
 		switch rec.State {
 		case "observed":
-			restored, err := m.backfillObserved(d, s, rec)
-			if err != nil {
-				return d, false, false
+			if anchor < 0 || s.StartedAt.Before(batch[anchor].step.StartedAt) {
+				anchor = i
 			}
-			return restored, true, true
 		case "not_started":
-			// Provably no write happened; the stage may proceed.
-			return d, false, false
 		default:
-			blocked, _ := m.block(d, "recovery_uncertain", rec.Reason)
-			return blocked, true, false
+			if uncertain < 0 {
+				uncertain = i
+			}
 		}
 	}
-	return d, false, false
+	if len(batch) == 0 {
+		return d, false, false
+	}
+	for i, o := range batch {
+		// Keep one proven receipt running until its atomic phase+receipt CAS.
+		// A crash midway must not leave pushing_* with no pending evidence and
+		// consequently permit a duplicate push. Unknowns prohibit that advance.
+		if i == anchor && uncertain < 0 {
+			continue
+		}
+		s := o.step
+		switch o.rec.State {
+		case "not_started":
+			s.Phase = "intent"
+			s.Summary = "已核实未产生写入，交回原阶段重试：" + o.rec.Reason
+		case "observed":
+			s = m.observedReceipt(s, o.rec)
+		default:
+			continue
+		}
+		updated, err := m.store.AdvanceDelivery(d.ID, d.Version, d, &s)
+		if err != nil {
+			return d, true, false
+		}
+		d = updated
+	}
+	if uncertain >= 0 {
+		for _, o := range batch {
+			if o.rec.State == "observed" || o.rec.State == "not_started" {
+				continue
+			}
+			parked, err := m.parkUncertain(d, o.step, o.rec.Reason)
+			if err != nil {
+				return d, true, false
+			}
+			d = parked
+		}
+		return d, true, false
+	}
+	if anchor >= 0 {
+		o := batch[anchor]
+		restored, err := m.backfillObserved(d, o.step, o.rec)
+		if err != nil {
+			return d, true, false
+		}
+		return restored, true, true
+	}
+	// All writes were proven absent and durably recorded. Retry only on a
+	// fresh stage pass, with the new version and all normal gates rechecked.
+	return d, true, true
 }
 
 // Recover reconciles every active cycle before the service accepts new work.
 // It is read-only except for uniquely proven backfills.
 func (m *Manager) Recover(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(m.ctx, cancel)
+	defer stop()
+	defer cancel()
+	if err := m.acquirePass(ctx); err != nil {
+		return err
+	}
+	defer m.releasePass()
 	list, err := m.store.ActiveDeliveries()
 	if err != nil {
 		return err
@@ -84,16 +148,16 @@ func (m *Manager) Recover(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if err := m.recoverOne(ctx, d); err != nil {
-			// A conflicting write means another writer moved the cycle while
-			// we reconciled; that cycle re-evaluates itself, recovery does not
-			// force a lost update.
-			var we *workbench.Error
-			if errors.As(err, &we) && we.Code == "conflict" {
-				continue
-			}
+			// Even a CAS conflict leaves this snapshot unverified. In particular
+			// initial recovery must not open scheduling after skipping a cycle.
 			return err
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.readyOnce.Do(func() { close(m.ready) })
+	m.Wake()
 	return nil
 }
 
@@ -101,14 +165,25 @@ func (m *Manager) Recover(ctx context.Context) error {
 // failure (revoked authorization, changed policy) blocks instead of resuming.
 func (m *Manager) recoverOne(ctx context.Context, d workbench.Delivery) error {
 	if code, reason := m.gateCode(d); code != "" {
-		_, _ = m.block(d, code, reason)
+		next := d
+		next.Phase, next.BlockCode, next.BlockReason = "blocked", code, reason
+		_, err := m.store.AdvanceDelivery(d.ID, d.Version, next, nil)
+		if err == nil {
+			m.dropLease(d.ID, false)
+		}
+		return err
+	}
+	// A persisted manual-check decision survives repeated startup recovery.
+	// If a batch was interrupted while parking several unknowns, a later
+	// observation for another row cannot erase the earlier unresolved result.
+	if d.Phase == "needs_check" && d.BlockCode == "recovery_uncertain" {
 		return nil
 	}
-	page, err := m.store.DeliverySteps(d.ID, 0, 100)
+	steps, err := m.pendingSteps(d.ID)
 	if err != nil {
 		return err
 	}
-	for _, step := range page.Items {
+	for _, step := range steps {
 		if step.Phase != "running" {
 			continue
 		}
@@ -118,7 +193,8 @@ func (m *Manager) recoverOne(ctx context.Context, d workbench.Delivery) error {
 		}
 		switch rec.State {
 		case "observed":
-			if _, err := m.backfillObserved(d, step, rec); err != nil {
+			d, err = m.backfillObserved(d, step, rec)
+			if err != nil {
 				return err
 			}
 		case "not_started":
@@ -126,24 +202,53 @@ func (m *Manager) recoverOne(ctx context.Context, d workbench.Delivery) error {
 			// owning stage run again on the next pass.
 			step.Phase = "intent"
 			step.Summary = "已核实未产生写入，交回原阶段重试：" + rec.Reason
-			if _, err := m.store.AdvanceDelivery(d.ID, d.Version, d, &step); err != nil {
+			d, err = m.store.AdvanceDelivery(d.ID, d.Version, d, &step)
+			if err != nil {
 				return err
 			}
 		default:
-			// Unknown windows are never resolved by guessing.
-			next := d
-			next.Phase = "needs_check"
-			next.BlockCode = "recovery_uncertain"
-			next.BlockReason = rec.Reason
-			step.Phase = "uncertain"
-			step.Summary = "结果未知：" + rec.Reason
-			if _, err := m.store.AdvanceDelivery(d.ID, d.Version, next, &step); err != nil {
-				return err
-			}
-			return nil
+			_, err := m.parkUncertain(d, step, rec.Reason)
+			return err
 		}
 	}
 	return nil
+}
+
+// pendingSteps reads complete bounded history, not only the first page.
+// If the history cannot be completely inspected, no caller may repeat a write.
+func (m *Manager) pendingSteps(id string) ([]workbench.DeliveryStep, error) {
+	var running []workbench.DeliveryStep
+	var after uint64
+	for pageNo := 0; pageNo < 64; pageNo++ {
+		page, err := m.store.DeliverySteps(id, after, 100)
+		if err != nil {
+			return nil, err
+		}
+		for _, step := range page.Items {
+			if step.Phase == "running" {
+				running = append(running, step)
+			}
+		}
+		if page.Next == 0 {
+			return running, nil
+		}
+		if page.Next <= after {
+			return nil, errors.New("恢复步骤分页未推进")
+		}
+		after = page.Next
+	}
+	return nil, errors.New("恢复步骤历史超过安全核查上限，请人工审核")
+}
+
+func (m *Manager) parkUncertain(d workbench.Delivery, step workbench.DeliveryStep, reason string) (workbench.Delivery, error) {
+	next := d
+	next.Phase, next.BlockCode, next.BlockReason = "needs_check", "recovery_uncertain", reason
+	step.Phase, step.Summary = "uncertain", "结果未知："+reason
+	out, err := m.store.AdvanceDelivery(d.ID, d.Version, next, &step)
+	if err == nil {
+		m.dropLease(d.ID, false)
+	}
+	return out, err
 }
 
 // ReconcileStep decides one interrupted step from records plus a read-only
@@ -229,12 +334,23 @@ func (m *Manager) backfillObserved(d workbench.Delivery, step workbench.Delivery
 	default:
 		return d, nil
 	}
+	// Duplicate observed records cannot extend a CI window already restored
+	// by an earlier same-stage intent. A different CI stage gets its own budget.
+	if (step.Kind == "push_task" || step.Kind == "push_main") &&
+		d.Phase == next.Phase && !d.CIDeadline.IsZero() && d.CIDeadline.Before(next.CIDeadline) {
+		next.CIDeadline = d.CIDeadline
+	}
+	step = m.observedReceipt(step, rec)
+	return m.store.AdvanceDelivery(d.ID, d.Version, next, &step)
+}
+
+func (m *Manager) observedReceipt(step workbench.DeliveryStep, rec Reconciliation) workbench.DeliveryStep {
 	step.Phase = "observed"
 	step.AfterSHA = rec.AfterSHA
 	step.ExitKnown = true
 	step.FinishedAt = m.now()
-	step.Summary = step.Summary + "（重启恢复补记：" + rec.Reason + "）"
-	return m.store.AdvanceDelivery(d.ID, d.Version, next, &step)
+	step.Summary += "（重启恢复补记：" + rec.Reason + "）"
+	return step
 }
 
 // gitHead/gitParent are tiny wrappers so recovery can prove commit windows.

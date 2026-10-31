@@ -30,6 +30,61 @@ func waitStep(t *testing.T, m *machine, kind, phase string) workbench.DeliverySt
 	return workbench.DeliveryStep{}
 }
 
+// mainCrashWindow runs actual production stages on a dormant fresh manager.
+// A durable running intent alone is not a crash-edge acknowledgement: the old
+// polling helper could clear the hook before push/receipt, or let CI finish.
+func mainCrashWindow(t *testing.T, m *machine, d workbench.Delivery, point string) workbench.DeliveryStep {
+	t.Helper()
+	cfg := m.manager.cfg
+	if err := m.manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	m.manager, err = New(context.Background(), m.store, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setCrashPoint(point)
+	t.Cleanup(clearCrashPoint)
+	m.ci.setOpen(false, false, true, false)
+	if _, err = m.manager.Accept(context.Background(), "accept-"+point, d.ID, d.AcceptanceToken, d.Version); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 16; i++ {
+		current := m.mustDelivery()
+		if _, cont := m.manager.step(*current); cont {
+			continue
+		}
+		page, err := m.store.DeliverySteps(d.ID, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range page.Items {
+			if s.Kind != "push_main" {
+				continue
+			}
+			want := "running"
+			if point == "after-main-receipt" {
+				want = "observed"
+			}
+			if s.Phase != want {
+				continue
+			}
+			expectedPushes := 1
+			if point == "after-main-intent" {
+				expectedPushes = 0
+			}
+			if countMainPushes(m.remote.pushedRefs()) != expectedPushes {
+				t.Fatalf("wrong actual edge %s: pushes=%v", point, m.remote.pushedRefs())
+			}
+			return s
+		}
+		t.Fatalf("production stage stopped before requested edge %s: %s", point, m.mustDelivery().Phase)
+	}
+	t.Fatal("main crash window exceeded bounded stage count")
+	return workbench.DeliveryStep{}
+}
+
 // TestDeliveryCrashAfterMainPushBeforeReceipt drives the machine to each
 // interruption window around the irreversible main push and proves recovery
 // resolves it from records plus a read-only observation only: a landed push is
@@ -42,12 +97,7 @@ func TestDeliveryCrashAfterMainPushBeforeReceipt(t *testing.T) {
 		m := newMachine(t, true)
 		m.finishRound(happyReport())
 		d := m.waitPhase(t, "awaiting_acceptance")
-		setCrashPoint("after-main-push")
-		t.Cleanup(clearCrashPoint)
-		if _, e := m.manager.Accept(ctx, "accept-crash", d.ID, d.AcceptanceToken, d.Version); e != nil {
-			t.Fatal(e)
-		}
-		intent := waitStep(t, m, "push_main", "running")
+		intent := mainCrashWindow(t, m, d, "after-main-push")
 		pushes := m.remote.pushCount()
 		mains := countMainPushes(m.remote.pushedRefs())
 
@@ -72,6 +122,8 @@ func TestDeliveryCrashAfterMainPushBeforeReceipt(t *testing.T) {
 		if ok, e := m.store.AcquireDeliveryTurn(w.ID); e != nil || !ok {
 			t.Fatalf("queue slot lost in recovery: %v %v", ok, e)
 		}
+		m.ci.setOpen(false, false, false, false)
+		m.manager.Wake()
 		m.waitPhase(t, "succeeded")
 		if countMainPushes(m.remote.pushedRefs()) != mains {
 			t.Fatal("recovery caused an extra main push")
@@ -82,12 +134,7 @@ func TestDeliveryCrashAfterMainPushBeforeReceipt(t *testing.T) {
 		m := newMachine(t, true)
 		m.finishRound(happyReport())
 		d := m.waitPhase(t, "awaiting_acceptance")
-		setCrashPoint("after-main-intent")
-		t.Cleanup(clearCrashPoint)
-		if _, e := m.manager.Accept(ctx, "accept-intent", d.ID, d.AcceptanceToken, d.Version); e != nil {
-			t.Fatal(e)
-		}
-		waitStep(t, m, "push_main", "running")
+		mainCrashWindow(t, m, d, "after-main-intent")
 		mains := countMainPushes(m.remote.pushedRefs())
 
 		clearCrashPoint()
@@ -95,6 +142,8 @@ func TestDeliveryCrashAfterMainPushBeforeReceipt(t *testing.T) {
 			t.Fatal(e)
 		}
 		// The stage re-runs: exactly one main push, and the cycle completes.
+		m.ci.setOpen(false, false, false, false)
+		m.manager.Wake()
 		m.waitPhase(t, "succeeded")
 		if got := countMainPushes(m.remote.pushedRefs()); got != mains+1 {
 			t.Fatalf("main pushes %d, want exactly one retry", got)
@@ -105,17 +154,14 @@ func TestDeliveryCrashAfterMainPushBeforeReceipt(t *testing.T) {
 		m := newMachine(t, true)
 		m.finishRound(happyReport())
 		d := m.waitPhase(t, "awaiting_acceptance")
-		setCrashPoint("after-main-receipt")
-		t.Cleanup(clearCrashPoint)
-		if _, e := m.manager.Accept(ctx, "accept-receipt", d.ID, d.AcceptanceToken, d.Version); e != nil {
-			t.Fatal(e)
-		}
-		waitStep(t, m, "push_main", "observed")
+		mainCrashWindow(t, m, d, "after-main-receipt")
 		pushes := m.remote.pushCount()
 		clearCrashPoint()
 		if e := m.manager.Recover(ctx); e != nil {
 			t.Fatal(e)
 		}
+		m.ci.setOpen(false, false, false, false)
+		m.manager.Wake()
 		m.waitPhase(t, "succeeded")
 		if m.remote.pushCount() != pushes {
 			t.Fatal("recovery repeated a completed push")
@@ -126,12 +172,7 @@ func TestDeliveryCrashAfterMainPushBeforeReceipt(t *testing.T) {
 		m := newMachine(t, true)
 		m.finishRound(happyReport())
 		d := m.waitPhase(t, "awaiting_acceptance")
-		setCrashPoint("after-main-push")
-		t.Cleanup(clearCrashPoint)
-		if _, e := m.manager.Accept(ctx, "accept-foreign", d.ID, d.AcceptanceToken, d.Version); e != nil {
-			t.Fatal(e)
-		}
-		waitStep(t, m, "push_main", "running")
+		mainCrashWindow(t, m, d, "after-main-push")
 		// Someone else moved the authorized main ref.
 		m.remote.inject(strings.Repeat("e", 40), "refs/heads/main")
 		pushes := m.remote.pushCount()

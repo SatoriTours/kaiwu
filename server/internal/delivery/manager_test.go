@@ -454,6 +454,11 @@ func newMachine(t *testing.T, worktreeDirty bool) *machine {
 // delivery policy before it is first saved (cycle snapshots are frozen).
 func newMachineWithPolicy(t *testing.T, worktreeDirty bool, mutate func(p *workbench.ProjectDeliveryPolicy)) *machine {
 	t.Helper()
+	return newMachineWithStartup(t, worktreeDirty, mutate, true)
+}
+
+func newMachineWithStartup(t *testing.T, worktreeDirty bool, mutate func(p *workbench.ProjectDeliveryPolicy), recoverFirst bool) *machine {
+	t.Helper()
 	root := t.TempDir()
 	source := filepath.Join(root, "project")
 	if e := os.MkdirAll(source, 0700); e != nil {
@@ -469,6 +474,14 @@ func newMachineWithPolicy(t *testing.T, worktreeDirty bool, mutate func(p *workb
 	}
 	git(source, "init", "--initial-branch=main", "--template=")
 	writeFile(t, filepath.Join(source, "base.txt"), "base\n")
+	if err := os.MkdirAll(filepath.Join(source, "scripts"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(source, "scripts", "check.sh"), "test -f base.txt\n")
+	if e := os.MkdirAll(filepath.Join(source, ".github", "workflows"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	writeFile(t, filepath.Join(source, ".github", "workflows", "task.yml"), "name: task\non: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: exit 1\n")
 	git(source, "add", ".")
 	git(source, "commit", "-m", "base")
 	base := func(dir string, args ...string) string {
@@ -558,6 +571,11 @@ func newMachineWithPolicy(t *testing.T, worktreeDirty bool, mutate func(p *workb
 		t.Fatal(e)
 	}
 	t.Cleanup(func() { _ = m.manager.Close() })
+	if recoverFirst {
+		if err := m.manager.Recover(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return m
 }
 
