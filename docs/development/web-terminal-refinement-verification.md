@@ -44,3 +44,7 @@
 首提交 `6283f44` 已推送并部署至 `.91:7331`，精确归档全量Go vet／测试、前端默认单元／构建、90项浏览器及Go打包通过；无Actions工作流。但实际入口追加交互未通过：公网／局域网HTTP不是安全上下文，`crypto.randomUUID`不存在，新增终端在发出启动请求前即报错。原生产失败证据保留 `live/result-first-failure.json` 及 `live/result-http-failure.json`，不能把localhost全绿外推为实际入口通过。
 
 最小修复复用已有 `workbench.ts:createOperationID`（`getRandomValues`生成128位随机操作ID，可用于LAN HTTP），不改认证、创建幂等或租约协议，不引入依赖。正式浏览器新增“terminal creation works on LAN HTTP without secure-context randomUUID”，仅移除浏览器的安全上下文API，真实Go／Shell验证自动打开、再次新建的独立ID及操作ID、显式结束。该项先失败（`lan-http-red.log`），修复后通过（`lan-http-green.log`），构建通过（`lan-http-build.log`）。修复提交必须重新完成精确SHA全量门禁及 `.91` 实际入口，最终结论仍以artifact `status.md` 为准。
+
+HTTP修复提交 `196b55d`：首次Go全量的未改动预览用例返回409，失败留档；相同源码定向3次通过，再完整复跑后Go／前端／91项浏览器及部署通过。实际`.91`已证明非安全上下文、randomUUID缺失、原生getRandomValues存在时创建与同ID接回正常。
+
+实际入口又发现空态“重新打开”按钮虽可见，却被xterm带z-index的canvas拦截点击。将绘图组件隔离为自身堆叠上下文（`isolation:isolate`），不隐藏禁用的终端或绕过指针检查。扩展原多终端主回归：手动结束／刷新后真实点击重开、获得不同于旧Shell的新ID并结束。修复前真实点击超时，修复后与LAN HTTP两项通过（`reopen-pointer-{red,green,build}.log`）；原生产失败保留`live/result-pointer-failure.json`及`failure-pointer.png`。单纯可见性断言不再冒充重开交互通过；最终交付仍须修复SHA全量门禁及实际入口。

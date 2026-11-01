@@ -89,6 +89,13 @@ test('entry auto opens, restores two independent terminals and uses an edge-to-e
  await expect(restored.getByRole('tab')).toHaveCount(0);
  await restored.reload();await expect(restored.getByRole('tab')).toHaveCount(0);
  await expect(restored.getByRole('button',{name:'重新打开终端'})).toBeVisible();
+ // Visibility alone missed xterm canvas layers intercepting this real pointer action.
+ await restored.getByRole('button',{name:'重新打开终端',exact:true}).click({timeout:5000});
+ await expect(restored.locator('.terminal-status')).toContainText('已连接');
+ await expect(restored.getByRole('tab')).toHaveCount(1);
+ const reopened=await restored.getByRole('tab',{selected:true}).getAttribute('data-terminal-id');
+ expect(reopened).not.toBe(first);expect(reopened).not.toBe(second);
+ await end(restored);
 });
 
 test('natural exit restores the selected result without marking it manually closed',async({page})=>{

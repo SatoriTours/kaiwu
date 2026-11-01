@@ -74,7 +74,7 @@ onBeforeUnmount(()=>{++generation;cancelAnimationFrame(frame);observer?.disconne
 <template><div class="terminal-surface" ref="host" role="group" aria-label="交互终端" :data-renderer="renderer"></div></template>
 
 <style scoped>
-.terminal-surface{position:absolute;inset:0;overflow:hidden;min-width:0;min-height:0}
+.terminal-surface{position:absolute;inset:0;overflow:hidden;min-width:0;min-height:0;isolation:isolate}
 .terminal-surface :deep(.xterm){height:100%;padding:0}
 .terminal-surface :deep(.xterm-viewport){overscroll-behavior:contain;background-color:var(--terminal-bg,#fafbfa)}
 
