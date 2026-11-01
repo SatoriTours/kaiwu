@@ -223,3 +223,25 @@ test('xterm real shell: inline input, history, completion, clear, interrupt, res
  await expect(page.getByRole('button',{name:'新建终端'})).toBeVisible();
  expect(errors).toEqual([]);
 });
+
+test('terminal creation works on LAN HTTP without secure-context randomUUID',async({page})=>{
+ // LAN HTTP exposes getRandomValues, but not randomUUID. Node fixture IDs remain real.
+ await page.addInitScript(()=>Object.defineProperty(Crypto.prototype,'randomUUID',{configurable:true,value:undefined}));
+ await start(page);
+ expect(await page.evaluate(()=>typeof crypto.randomUUID)).toBe('undefined');
+ const first=await page.getByRole('tab',{selected:true}).getAttribute('data-terminal-id');
+ await page.getByRole('button',{name:'新建终端',exact:true}).click();
+ await expect(page.getByRole('tab')).toHaveCount(2);
+ await expect(page.locator('.terminal-status')).toContainText('已连接');
+ const second=await page.getByRole('tab',{selected:true}).getAttribute('data-terminal-id');
+ expect(second).not.toBe(first);
+ const projectId=new URL(page.url()).pathname.split('/')[2]!;
+ const response=await page.request.post('/api/tools/terminal/list',{headers:{Origin:new URL(page.url()).origin,'X-Kaiwu-Client':'web'},data:{projectId}});
+ expect(response.ok()).toBeTruthy();
+ const running=(await response.json()).filter((t:{running:boolean})=>t.running);
+ expect(running).toHaveLength(2);
+ const operations=running.map((t:{operationId:string})=>t.operationId);
+ expect(new Set(operations).size).toBe(2);
+ for(const id of operations){expect(typeof id).toBe('string');expect(id.length).toBeGreaterThan(0);expect(id.length).toBeLessThanOrEqual(100)}
+ await end(page);await end(page);
+});

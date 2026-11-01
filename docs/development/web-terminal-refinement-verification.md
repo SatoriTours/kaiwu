@@ -38,3 +38,9 @@
 开发验收未运行全项目门禁；用户要求提交后，沿用仓库提交钩子的精确SHA干净归档全量Go vet／测试、前端单元／构建、全部既有分组浏览器及Go打包，再更新实际 `.91:7331`，核对版本及真实页面。仓库本次查询无GitHub Actions工作流，不声称CI通过。完整提交SHA／全量结果／推送与实际入口证据保存在同一artifact目录的 `status.md`。
 
 不测试真实模型、真机软键盘、硬件GPU或跨浏览器矩阵。服务更新会终止旧内存Shell，恢复保证仅限同一服务运行期。
+
+## 提交交付增量：局域网 HTTP
+
+首提交 `6283f44` 已推送并部署至 `.91:7331`，精确归档全量Go vet／测试、前端默认单元／构建、90项浏览器及Go打包通过；无Actions工作流。但实际入口追加交互未通过：公网／局域网HTTP不是安全上下文，`crypto.randomUUID`不存在，新增终端在发出启动请求前即报错。原生产失败证据保留 `live/result-first-failure.json` 及 `live/result-http-failure.json`，不能把localhost全绿外推为实际入口通过。
+
+最小修复复用已有 `workbench.ts:createOperationID`（`getRandomValues`生成128位随机操作ID，可用于LAN HTTP），不改认证、创建幂等或租约协议，不引入依赖。正式浏览器新增“terminal creation works on LAN HTTP without secure-context randomUUID”，仅移除浏览器的安全上下文API，真实Go／Shell验证自动打开、再次新建的独立ID及操作ID、显式结束。该项先失败（`lan-http-red.log`），修复后通过（`lan-http-green.log`），构建通过（`lan-http-build.log`）。修复提交必须重新完成精确SHA全量门禁及 `.91` 实际入口，最终结论仍以artifact `status.md` 为准。

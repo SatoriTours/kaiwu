@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {ref,computed,watch,onBeforeUnmount,nextTick} from 'vue';
 import {copyText} from './clipboard.ts';
+import {createOperationID} from './workbench.ts';
 import CustomSelect from './CustomSelect.vue';
 import TerminalSurface from './TerminalSurface.vue';
 import TerminalToolbar from './TerminalToolbar.vue';
@@ -130,7 +131,7 @@ async function upload(files:FileList|null){
 }
 async function start(ensure=false){
  const target={...scope.value},token=epoch;
- const operationId=readPendingTerminal(terminalStorage,target.projectId,target.taskId)||crypto.randomUUID();
+ const operationId=readPendingTerminal(terminalStorage,target.projectId,target.taskId)||createOperationID();
  await guarded(async()=>{
   writePendingTerminal(terminalStorage,target.projectId,target.taskId,operationId);
   try{
