@@ -28,8 +28,9 @@ type executionLease struct {
 	poison bool
 }
 type processOwner struct {
-	Boot  string
-	Group int
+	Boot   string
+	Group  int
+	Groups map[string]int `json:",omitempty"`
 }
 
 func (l *executionLease) inheritedFile() *os.File { return l.file }
@@ -70,12 +71,24 @@ func acquireLease(parent, lockName, markerName string) (*executionLease, error) 
 			return nil, errors.New("旧执行归属记录损坏，请先检查保留的工作区")
 		}
 		if owner.Boot == l.boot {
-			if owner.Group <= 0 {
-				return nil, errors.New("上次启动期间服务异常退出，无法确认旧进程归属；请先检查保留的工作区")
-			}
-			gone, err := groupAbsent(owner.Group)
-			if err != nil || !gone {
-				return nil, errors.New("旧任务进程仍存在或无法核实已退出，未启动另一个执行者")
+			if len(owner.Groups) > 0 {
+				for _, pid := range owner.Groups {
+					if pid <= 0 {
+						return nil, errors.New("终端启动归属未知，未启动另一个执行者")
+					}
+					gone, err := groupAbsent(pid)
+					if err != nil || !gone {
+						return nil, errors.New("旧终端进程仍存在或无法核实，未启动另一个执行者")
+					}
+				}
+			} else {
+				if owner.Group <= 0 {
+					return nil, errors.New("上次启动期间服务异常退出，无法确认旧进程归属；请先检查保留的工作区")
+				}
+				gone, err := groupAbsent(owner.Group)
+				if err != nil || !gone {
+					return nil, errors.New("旧任务进程仍存在或无法核实已退出，未启动另一个执行者")
+				}
 			}
 		}
 	} else if !os.IsNotExist(err) {
@@ -136,8 +149,19 @@ func groupAbsent(group int) (bool, error) {
 	return true, nil
 }
 
+func (l *executionLease) writeTerminalOwners(groups map[string]int) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed || l.attempted {
+		return errors.New("终端组租约不可用")
+	}
+	return l.writeProcessOwner(processOwner{Boot: l.boot, Groups: groups})
+}
 func (l *executionLease) writeOwner(pid int) error {
-	b, _ := json.Marshal(processOwner{Boot: l.boot, Group: pid})
+	return l.writeProcessOwner(processOwner{Boot: l.boot, Group: pid})
+}
+func (l *executionLease) writeProcessOwner(owner processOwner) error {
+	b, _ := json.Marshal(owner)
 	f, e := os.OpenFile(l.marker+".tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if e != nil {
 		return e

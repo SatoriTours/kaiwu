@@ -9,6 +9,7 @@ import {
   nextTick,
 } from "vue";
 import ProjectTools from "./ProjectTools.vue";
+import {terminalStorage,readMainView,writeMainView} from "./terminal-state.ts";
 import {addDraftAttachments,removeDraftAttachment,uploadAttachment} from "./attachments.ts";
 import KanbanBoard from "./KanbanBoard.vue";
 import ProjectMenu from "./ProjectMenu.vue";
@@ -112,6 +113,8 @@ function requestCompletion(t:Task){const target=completionFor(t);if(!target)retu
 async function finishCompletion(){const target=completionTarget.value,epoch=authEpoch;if(!target||!completionEligible.value||completionBusy.value)return;completionBusy.value=true;completionError.value='';try{await command({type:'confirm_result',projectId:target.projectId,taskId:target.taskId,conversationId:target.conversationId,roundId:target.roundId});if(epoch===authEpoch&&completionTarget.value===target)completionTarget.value=undefined}catch(e){if(epoch===authEpoch&&completionTarget.value===target)completionError.value=e instanceof Error?e.message:String(e)}finally{if(epoch===authEpoch)completionBusy.value=false}}
 const settingsOpen=ref(false);
 const mainView=ref<"board"|"files"|"terminal">("board");
+watch(projectID,id=>{mainView.value=readMainView(terminalStorage,id)},{immediate:true});
+watch(mainView,value=>{if(projectID.value)writeMainView(terminalStorage,projectID.value,value)});
 const uploading=reactive<Record<string,boolean>>({});
 const chatPanel=ref<InstanceType<typeof ChatPanel>>();
 const resultTarget=ref<{projectId:string;taskId:string;roundId:string}>();
@@ -1588,7 +1591,7 @@ onBeforeUnmount(() => {
     </div>
   </main>
   <template v-else
-    ><header class="top">
+    ><header class="top" :class="{'terminal-top':mainView==='terminal'&&project&&!resultTarget}">
       <span class="logo">悟</span><span class="brand">开悟</span
       ><span class="slash">/</span
       ><ProjectMenu
@@ -1603,9 +1606,11 @@ onBeforeUnmount(() => {
       <nav v-if="project" class="project-tools-nav" aria-label="项目视图">
         <button v-for="v in (['board','files','terminal'] as const)" :key="v" :aria-pressed="mainView===v" :aria-label="({board:'看板',files:'文件',terminal:'终端'})[v]" :title="({board:'看板',files:'文件',terminal:'终端'})[v]" @click="mainView=v;closeResult()"><span aria-hidden="true">{{({board:'▦',files:'▱',terminal:'>_'})[v]}}</span><span class="tool-nav-label">{{({board:'看板',files:'文件',terminal:'终端'})[v]}}</span></button>
       </nav>
+      <div v-if="project&&mainView==='terminal'&&!resultTarget" id="terminal-toolbar-host"></div>
       <button v-if="project" class="project-chat-top" aria-label="项目对话" title="项目对话" @click="navigate()">◌<span> 项目对话</span></button>
       <div class="compact-global-actions"><ThemePicker /><button class="settings-toggle" aria-label="全局设置" :aria-expanded="settingsOpen" @click="settingsOpen=!settingsOpen">⋯</button>
       <div class="global-actions" :class="{'settings-open':settingsOpen}" role="group" aria-label="全局操作">
+        <button v-if="project&&mainView==='terminal'" class="terminal-mobile-chat" @click="navigate();settingsOpen=false">项目对话</button>
         <VersionBadge />
         <button aria-label="默认模型" title="为新项目和任务选择默认模型" @click="openModels()">默认模型</button>
         <span class="connection" :class="{ off: !online }" role="status">{{

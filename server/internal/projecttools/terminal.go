@@ -8,18 +8,21 @@ import (
 	"github.com/SatoriTours/kaiwu/server/internal/preview"
 	"os"
 	"os/exec"
+	"sort"
 	"sync"
 	"time"
 )
 
 type TerminalSnapshot struct {
-	Offset  int64  `json:"offset"`
-	ID      string `json:"id"`
-	Scope   string `json:"scope"`
-	Output  string `json:"output"`
-	Running bool   `json:"running"`
-	Cols    int    `json:"cols"`
-	Rows    int    `json:"rows"`
+	Number      int    `json:"number"`
+	OperationID string `json:"operationId,omitempty"`
+	Offset      int64  `json:"offset"`
+	ID          string `json:"id"`
+	Scope       string `json:"scope"`
+	Output      string `json:"output"`
+	Running     bool   `json:"running"`
+	Cols        int    `json:"cols"`
+	Rows        int    `json:"rows"`
 }
 type terminal struct {
 	TerminalSnapshot
@@ -31,12 +34,88 @@ type terminal struct {
 	inputMu sync.Mutex
 }
 type Terminals struct {
-	mu      sync.Mutex
-	entries map[string]*terminal
-	closed  bool
+	launchMu   sync.Mutex
+	sequence   int
+	operations map[string]string
+	mu         sync.Mutex
+	entries    map[string]*terminal
+	closed     bool
 }
 
 func NewTerminals(_ context.Context) *Terminals { return &Terminals{entries: map[string]*terminal{}} }
+
+// Open serializes admission across connections. Ensure is safe for concurrent
+// first entry; an operation ID also deduplicates explicit creation after a lost reply.
+func (m *Terminals) Open(scope, dir, operationID string, ensure bool, acquire func() (preview.Lease, error)) (TerminalSnapshot, error) {
+	m.launchMu.Lock()
+	defer m.launchMu.Unlock()
+	if len(operationID) > 100 {
+		return TerminalSnapshot{}, errors.New("终端操作ID过长")
+	}
+	entries := m.List(scope)
+	key := scope + "\x00" + operationID
+	if operationID != "" {
+		if id, ok := m.operations[key]; ok {
+			for _, entry := range entries {
+				if entry.ID == id {
+					return entry, nil
+				}
+			}
+			return TerminalSnapshot{ID: id, Scope: scope, OperationID: operationID, Running: false}, nil
+		}
+		if len(m.operations) >= 4096 {
+			return TerminalSnapshot{}, errors.New("终端操作记录已达上限，请先核查现有终端")
+		}
+	}
+	if ensure {
+		for _, entry := range entries {
+			if entry.Running {
+				if operationID != "" {
+					if m.operations == nil {
+						m.operations = map[string]string{}
+					}
+					m.operations[key] = entry.ID
+				}
+				return entry, nil
+			}
+		}
+	}
+	lease, e := acquire()
+	if e != nil {
+		return TerminalSnapshot{}, e
+	}
+	result, e := m.Start(scope, dir, lease)
+	if e != nil {
+		return result, e
+	}
+	m.mu.Lock()
+	if operationID != "" {
+		if m.operations == nil {
+			m.operations = map[string]string{}
+		}
+		m.operations[key] = result.ID
+	}
+	m.entries[result.ID].OperationID = operationID
+	result = m.entries[result.ID].TerminalSnapshot
+	m.mu.Unlock()
+	return result, nil
+}
+
+// Lookup resolves a launch receipt (including ensure aliases and evicted
+// histories) without ever acquiring a lease or attempting to launch a process.
+func (m *Terminals) Lookup(scope, operationID string) (TerminalSnapshot, bool) {
+	m.launchMu.Lock()
+	defer m.launchMu.Unlock()
+	id, known := m.operations[scope+"\x00"+operationID]
+	if !known || operationID == "" {
+		return TerminalSnapshot{}, false
+	}
+	if result, e := m.Read(id); e == nil {
+		result.Output = ""
+		return result, true
+	}
+	return TerminalSnapshot{ID: id, Scope: scope, OperationID: operationID, Running: false}, true
+}
 func (m *Terminals) Start(scope, dir string, lease preview.Lease) (TerminalSnapshot, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -57,7 +136,11 @@ func (m *Terminals) Start(scope, dir string, lease preview.Lease) (TerminalSnaps
 		if t.Running {
 			count++
 			if t.Scope == scope {
-				return refuse(errors.New("此工作区已有终端，请接回原终端"))
+				shared, ok := lease.(interface{ TerminalGroup() string })
+				existing, existingOK := t.lease.(interface{ TerminalGroup() string })
+				if !ok || !existingOK || shared.TerminalGroup() == "" || shared.TerminalGroup() != existing.TerminalGroup() {
+					return refuse(errors.New("此工作区已有终端，请接回原终端"))
+				}
 			}
 		}
 	}
@@ -77,7 +160,8 @@ func (m *Terminals) Start(scope, dir string, lease preview.Lease) (TerminalSnaps
 	if _, e := rand.Read(id); e != nil {
 		return refuse(e)
 	}
-	t := &terminal{TerminalSnapshot: TerminalSnapshot{ID: hex.EncodeToString(id), Scope: scope, Running: true, Cols: 100, Rows: 30}, done: make(chan struct{}), changed: make(chan struct{}), lease: lease}
+	m.sequence++
+	t := &terminal{TerminalSnapshot: TerminalSnapshot{Number: m.sequence, ID: hex.EncodeToString(id), Scope: scope, Running: true, Cols: 100, Rows: 30}, done: make(chan struct{}), changed: make(chan struct{}), lease: lease}
 	cmd, pty, e := startPTY(dir, lease)
 	if e != nil {
 		return refuse(e)
@@ -144,6 +228,7 @@ func (m *Terminals) List(scope string) []TerminalSnapshot {
 			out = append(out, s)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Number < out[j].Number })
 	return out
 }
 func (m *Terminals) Changed(id string) (<-chan struct{}, error) {

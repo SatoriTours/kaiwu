@@ -10,6 +10,9 @@ import (
 type executionLease struct{}
 
 func (*executionLease) inheritedFile() *os.File { return nil }
+func (*executionLease) writeTerminalOwners(map[string]int) error {
+	return errors.New("execution is unsupported")
+}
 
 func acquireExecutionLease(string) (*executionLease, error) {
 	return nil, errors.New("execution is unsupported")

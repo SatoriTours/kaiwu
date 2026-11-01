@@ -1,6 +1,8 @@
+:root{--terminal-bg:#fafbfa;--terminal-tab-active:#edf2ee;--terminal-tab-border:#dbe3dc}
 /* Undefined theme tokens preserve each existing light color as its fallback.
    CSS media queries keep system mode live without JS listeners or an app reload. */
 :root[data-theme="dark"] {
+  --terminal-bg:#292e35;--terminal-tab-active:#39424e;--terminal-tab-border:#4b5665;
   color-scheme: dark;
   --theme-text: #e7ebf1;
   --theme-muted: #b6c0ce;
@@ -39,6 +41,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    --terminal-bg:#292e35;--terminal-tab-active:#39424e;--terminal-tab-border:#4b5665;
     color-scheme: dark;
     --theme-text: #e7ebf1;
     --theme-muted: #b6c0ce;

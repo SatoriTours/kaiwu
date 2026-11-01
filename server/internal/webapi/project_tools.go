@@ -17,6 +17,8 @@ import (
 )
 
 type toolRequest struct {
+	OperationID    string `json:"operationId,omitempty"`
+	Ensure         bool   `json:"ensure,omitempty"`
 	ProjectID      string `json:"projectId"`
 	TaskID         string `json:"taskId,omitempty"`
 	ConversationID string `json:"conversationId,omitempty"`
@@ -112,15 +114,22 @@ func (h *handler) projectTools(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(path, "/api/tools/terminal/") {
 		switch {
+		case path == "/api/tools/terminal/resolve" && r.Method == "POST":
+			if q.OperationID == "" || len(q.OperationID) > 100 {
+				h.failure(w, workbench.Invalid("终端操作ID无效"))
+				return
+			}
+			result, known := h.terminals.Lookup(scope, q.OperationID)
+			respond(w, 200, map[string]any{"known": known, "terminal": result})
 		case path == "/api/tools/terminal/list" && r.Method == "POST":
 			respond(w, 200, h.terminals.List(scope))
 		case path == "/api/tools/terminal/start" && r.Method == "POST":
-			l, e := h.toolLease(r.Context(), q)
-			if e != nil {
-				h.failure(w, e)
-				return
-			}
-			t, e := h.terminals.Start(scope, root, l)
+			t, e := h.terminals.Open(scope, root, q.OperationID, q.Ensure, func() (preview.Lease, error) {
+				if h.cfg.AcquireTerminalLease != nil {
+					return h.cfg.AcquireTerminalLease(r.Context(), q.ProjectID, q.TaskID)
+				}
+				return h.toolLease(r.Context(), q)
+			})
 			if e != nil {
 				h.failure(w, workbench.Conflict(e.Error()))
 				return

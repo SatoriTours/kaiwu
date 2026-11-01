@@ -29,6 +29,8 @@ type instance struct {
 	lease                 *executionLease
 }
 type Manager struct {
+	terminalMu       sync.Mutex
+	terminalGroups   map[string]*terminalLeaseGroup
 	previewStop      func(context.Context, string) error
 	mu               sync.Mutex
 	ctx              context.Context

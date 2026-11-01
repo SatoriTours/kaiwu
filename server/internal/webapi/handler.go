@@ -36,10 +36,11 @@ type Commander interface {
 	AnswerInteraction(conversationID, interactionID string) error
 }
 type Config struct {
-	DataDir          string
-	AcquireToolLease func(context.Context, string, string) (preview.Lease, error)
-	Previews         *preview.Manager
-	Models           interface {
+	DataDir              string
+	AcquireToolLease     func(context.Context, string, string) (preview.Lease, error)
+	AcquireTerminalLease func(context.Context, string, string) (preview.Lease, error)
+	Previews             *preview.Manager
+	Models               interface {
 		List(context.Context) ([]pimodel.Model, error)
 	}
 	Git            GitCommander
