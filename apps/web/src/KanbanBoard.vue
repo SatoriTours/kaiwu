@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, nextTick, onMounted, onUnmounted } from 'vue';
-import type { Topic, Task, Conversation, GitStatus, Execution, DeliverySummary } from "./types.ts";
+import type { Topic, Task, Conversation, GitStatus, Execution, DeliverySummary, SubagentSummary } from "./types.ts";
 import {taskState} from "./task-state.ts";
 import {deliveryView, isDeliveryActive} from "./delivery.ts";
 import {createCompletionIntent} from './task-completion.ts';
@@ -8,7 +8,10 @@ import GitStatusView from "./GitStatus.vue";
 import MergeIcon from "./MergeIcon.vue";
 import TaskActionIcon from "./TaskActionIcon.vue";
 import CustomSelect from "./CustomSelect.vue";
+import SubagentBadge from "./SubagentBadge.vue";
+import {summarizeSubagents} from "./subagents.ts";
 const props = defineProps<{
+  subagents?: Record<string, SubagentSummary>;
   topics: Topic[];
   executions:Record<string,Execution>;
   git: Record<string, GitStatus>;
@@ -22,6 +25,7 @@ const props = defineProps<{
   conversations: Record<string, Conversation>;
 }>();
 const emit = defineEmits<{
+  subagents: [Task];
   select: [Task];
   process: [Task];
   project: [];
@@ -213,6 +217,7 @@ function actionLabel(task: Task) {
                 </div>
               </div>
             </div>
+            <SubagentBadge :runs="summarizeSubagents(subagents,task.projectId,task.conversationId)" :online="online" @open="emit('subagents',task)" />
           </article>
           <div v-if="!tasks.some((t) => t.topicId === topic.id)" class="empty">
             暂无任务<br />点击上方 ＋ 添加第一张卡片

@@ -77,7 +77,7 @@ func TestDeliveryMigrationAtomicStart(t *testing.T) {
 		t.Fatal(e)
 	}
 	_ = migrated.db.QueryRow("SELECT count(*) FROM login_sessions").Scan(&logins)
-	if schema != 2 || logins != 1 {
+	if schema != 5 || logins != 1 {
 		t.Fatalf("migration lost schema/login: %d %d", schema, logins)
 	}
 	legacy := migrated.Snapshot()

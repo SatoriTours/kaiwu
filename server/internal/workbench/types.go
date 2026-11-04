@@ -1,15 +1,22 @@
 // Package workbench owns durable product state, independent of CLI and HTTP.
 package workbench
 
-import "fmt"
+import (
+	"fmt"
+	"github.com/SatoriTours/kaiwu/server/internal/aiconfig"
+	"github.com/SatoriTours/kaiwu/server/internal/projectstorage"
+)
 
-type Profile struct {
-	CredentialSource string `json:"credentialSource,omitempty"`
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	Thinking         string `json:"thinking"`
+func (p Project) Storage() projectstorage.ProjectRef {
+	return projectstorage.ProjectRef{ID: p.ID, Path: p.Path, StorageMode: p.StorageMode, StorageRoot: p.StorageRoot, DirectoryName: p.DirectoryName, LayoutVersion: p.LayoutVersion}
 }
+
+type Profile = aiconfig.Profile
 type Project struct {
+	StorageMode        string `json:"storageMode"`
+	StorageRoot        string `json:"storageRoot,omitempty"`
+	DirectoryName      string `json:"directoryName,omitempty"`
+	LayoutVersion      int    `json:"layoutVersion,omitempty"`
 	MainSeen           bool   `json:"mainSeen,omitempty"`
 	DefaultBranch      string `json:"defaultBranch,omitempty"`
 	MainBranchOverride string `json:"mainBranchOverride,omitempty"`
@@ -27,15 +34,16 @@ type Topic struct {
 	Protected bool   `json:"protected"`
 }
 type Task struct {
-	ID             string  `json:"id"`
-	ProjectID      string  `json:"projectId"`
-	TopicID        string  `json:"topicId"`
-	Title          string  `json:"title"`
-	Request        string  `json:"request"`
-	Status         string  `json:"status"`
-	ConversationID string  `json:"conversationId"`
-	Profile        Profile `json:"profile"`
-	ExecutionID    string  `json:"executionId,omitempty"`
+	ConfigSnapshot *aiconfig.Resolved `json:"configSnapshot,omitempty"`
+	ID             string             `json:"id"`
+	ProjectID      string             `json:"projectId"`
+	TopicID        string             `json:"topicId"`
+	Title          string             `json:"title"`
+	Request        string             `json:"request"`
+	Status         string             `json:"status"`
+	ConversationID string             `json:"conversationId"`
+	Profile        Profile            `json:"profile"`
+	ExecutionID    string             `json:"executionId,omitempty"`
 }
 type ToolRecord struct {
 	ID     string `json:"id"`
@@ -75,16 +83,17 @@ type Message struct {
 	Delivery    string       `json:"delivery"`
 }
 type Conversation struct {
-	Rounds      []Round   `json:"rounds,omitempty"`
-	ID          string    `json:"id"`
-	ProjectID   string    `json:"projectId"`
-	TaskID      string    `json:"taskId,omitempty"`
-	SessionID   string    `json:"sessionId"`
-	SessionFile string    `json:"sessionFile,omitempty"`
-	RunState    string    `json:"runState"`
-	Error       string    `json:"error,omitempty"`
-	Profile     Profile   `json:"profile"`
-	Messages    []Message `json:"messages"`
+	ConfigSnapshot *aiconfig.Resolved `json:"configSnapshot,omitempty"`
+	Rounds         []Round            `json:"rounds,omitempty"`
+	ID             string             `json:"id"`
+	ProjectID      string             `json:"projectId"`
+	TaskID         string             `json:"taskId,omitempty"`
+	SessionID      string             `json:"sessionId"`
+	SessionFile    string             `json:"sessionFile,omitempty"`
+	RunState       string             `json:"runState"`
+	Error          string             `json:"error,omitempty"`
+	Profile        Profile            `json:"profile"`
+	Messages       []Message          `json:"messages"`
 	// Interactions are the authoritative user-interaction requests of this
 	// conversation. report.question stays readable history, never a live form.
 	Interactions []InteractionRequest `json:"interactions,omitempty"`
@@ -93,6 +102,7 @@ type Conversation struct {
 	PendingProfile *Profile `json:"pendingProfile,omitempty"`
 }
 type State struct {
+	ConfigError       string                           `json:"configError,omitempty"`
 	Deliveries        map[string]DeliverySummary       `json:"deliveries"`
 	DeliveryPolicies  map[string]DeliveryPolicySummary `json:"deliveryPolicies"`
 	ProfileConfigured bool                             `json:"profileConfigured,omitempty"`
@@ -104,8 +114,12 @@ type State struct {
 	Topics            []Topic                          `json:"topics"`
 	Tasks             map[string]Task                  `json:"tasks"`
 	Conversations     map[string]Conversation          `json:"conversations"`
-	Profile           Profile                          `json:"profile"`
-	Executions        map[string]Execution             `json:"executions"`
+	// Subagents is the lightweight summary projection only; run requests and
+	// execution events live in their own tables and never reach the browser
+	// through the snapshot.
+	Subagents  map[string]SubagentSummary `json:"subagents"`
+	Profile    Profile                    `json:"profile"`
+	Executions map[string]Execution       `json:"executions"`
 }
 type Command struct {
 	Attachments        []Attachment      `json:"attachments,omitempty"`

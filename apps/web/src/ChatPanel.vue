@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AttachmentList from "./AttachmentList.vue";
 import { ref, watch, nextTick, computed, onMounted, onUnmounted } from "vue";
-import type { Conversation, Task, Execution, GitStatus, Message, DeliverySummary, TaskPreview, Attachment } from "./types.ts";
+import type { Conversation, Task, Execution, GitStatus, Message, DeliverySummary, TaskPreview, Attachment, SubagentSummary } from "./types.ts";
 import { isStartRequest } from "./workbench.ts";
 import {taskState} from "./task-state.ts";
 import MergeIcon from "./MergeIcon.vue";
@@ -26,7 +26,9 @@ import {
   type InteractionAnswers,
   type InteractionOthers,
 } from "./interaction.ts";
+import SubagentBadge from "./SubagentBadge.vue";
 const props = defineProps<{
+  subagents?: SubagentSummary[];
   conversation: Conversation;
   tasks:Task[];
   task?: Task;
@@ -44,6 +46,7 @@ const props = defineProps<{
   preview?: TaskPreview;
 }>();
 const emit = defineEmits<{
+  subagents: [];
   draft: [string];
   attach:[File[]];
   removeAttachment:[string];
@@ -511,6 +514,7 @@ const deliveryLabels: Record<string, string> = {
       @retry="payload => emit('retryInteraction', payload)"
     />
 
+    <SubagentBadge :runs="subagents ?? []" :online="online" @open="emit('subagents')" />
     <div v-if="shouldCollapseComposer" class="composer-collapsed-bar" role="status">
       <span>{{ interactionView?.label }}，不是开发完成</span>
       <button

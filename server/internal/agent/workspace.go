@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/SatoriTours/kaiwu/server/internal/gitops"
+	"github.com/SatoriTours/kaiwu/server/internal/projectstorage"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
 )
 
@@ -61,7 +62,11 @@ func (m *Manager) prepareWorkspace(ctx context.Context, task workbench.Task, x w
 	if e != nil || root != source {
 		return x, errors.New("项目不是 Git 工作目录根目录")
 	}
-	dataRoot, e := filepath.EvalSymlinks(m.cfg.DataDir)
+	layout, e := m.projectLayout(task.ProjectID)
+	if e != nil {
+		return x, e
+	}
+	dataRoot, e := filepath.EvalSymlinks(layout.Root)
 	if e != nil {
 		return x, e
 	}
@@ -69,9 +74,9 @@ func (m *Manager) prepareWorkspace(ctx context.Context, task workbench.Task, x w
 	if e != nil {
 		return x, e
 	}
-	parent := filepath.Join(dataRoot, "worktrees", task.ID)
+	parent := filepath.Join(layout.Worktrees, task.ID)
 	expectedParent := parent
-	if e = os.MkdirAll(parent, 0700); e != nil {
+	if e = projectstorage.EnsureDir(parent); e != nil {
 		return x, e
 	}
 	parent, e = filepath.EvalSymlinks(parent)

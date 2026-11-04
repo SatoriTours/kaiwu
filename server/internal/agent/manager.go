@@ -8,7 +8,6 @@ import (
 	"github.com/SatoriTours/kaiwu/server/internal/pirpc"
 	"github.com/SatoriTours/kaiwu/server/internal/projecttools"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -261,7 +260,12 @@ func (m *Manager) run(c workbench.Conversation, entry *instance, messageID strin
 		m.stopFailed(c.ID, entry, client, "无法保存发送状态", false)
 		return
 	}
-	params, attachmentErr := attachmentPrompt(projecttools.Attachments{Dir: filepath.Join(m.cfg.DataDir, "attachments")}, c.ID, text, attachments)
+	layout, layoutErr := m.projectLayout(c.ProjectID)
+	if layoutErr != nil {
+		m.stopFailed(c.ID, entry, client, "项目材料归属不可用，消息未发送", false)
+		return
+	}
+	params, attachmentErr := attachmentPrompt(projecttools.Attachments{Dir: layout.Attachments}, c.ID, text, attachments)
 	if attachmentErr != nil {
 		m.stopFailed(c.ID, entry, client, "附件不可用，消息未发送；请重新选择附件", false)
 		return

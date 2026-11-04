@@ -39,7 +39,13 @@ func trackedRun(ctx context.Context, dir string, lease ProcessLease, args ...str
 // workingTree returns the tree hash the current working contents would
 // produce, computed through a temporary index so the real index is untouched.
 func workingTree(ctx context.Context, dir string, lease ProcessLease) (string, error) {
-	f, e := os.CreateTemp("", "kaiwu-index-")
+	// Keep the temporary index with Git-owned project metadata instead of
+	// placing code fingerprints in the server's shared system temp directory.
+	tempDir, e := output(ctx, dir, "rev-parse", "--path-format=absolute", "--git-dir")
+	if e != nil {
+		return "", e
+	}
+	f, e := os.CreateTemp(tempDir, "kaiwu-index-")
 	if e != nil {
 		return "", e
 	}

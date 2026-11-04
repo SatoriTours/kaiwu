@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/SatoriTours/kaiwu/server/internal/projectstorage"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
 	"os"
 	"os/exec"
@@ -49,6 +50,15 @@ func ValidateWorktree(ctx context.Context, source, tree, branch string) error {
 	return nil
 }
 func validateOwner(ctx context.Context, p workbench.Project, t workbench.Task, x workbench.Execution) error {
+	if p.StorageMode == "managed" {
+		layout, err := projectstorage.ResolveProject(p.Storage(), "")
+		if err != nil {
+			return err
+		}
+		if !projectstorage.ValidDirectoryName(t.ID) || x.Workspace != filepath.Join(layout.Worktrees, t.ID, "tree") {
+			return errors.New("managed workspace outside project storage")
+		}
+	}
 	source, e := filepath.EvalSymlinks(p.Path)
 	if e != nil || source != p.Path {
 		return errors.New("项目目录路径已改变")

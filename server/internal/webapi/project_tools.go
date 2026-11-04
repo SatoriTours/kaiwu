@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/SatoriTours/kaiwu/server/internal/preview"
+	"github.com/SatoriTours/kaiwu/server/internal/projectstorage"
 	"github.com/SatoriTours/kaiwu/server/internal/projecttools"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
 	"github.com/coder/websocket"
@@ -26,14 +27,34 @@ type toolRequest struct {
 	ID             string `json:"id,omitempty"`
 }
 
-func (h *handler) attachments() projecttools.Attachments {
-	return projecttools.Attachments{Dir: filepath.Join(h.cfg.DataDir, "attachments")}
+func (h *handler) attachments(convID string) (projecttools.Attachments, error) {
+	st := h.store.Snapshot()
+	c, ok := st.Conversations[convID]
+	if !ok {
+		return projecttools.Attachments{}, workbench.Missing()
+	}
+	p, ok := st.Projects[c.ProjectID]
+	if !ok {
+		return projecttools.Attachments{}, workbench.Missing()
+	}
+	layout, err := projectstorage.ResolveProject(p.Storage(), h.cfg.DataDir)
+	if err != nil {
+		return projecttools.Attachments{}, err
+	}
+	if err := projectstorage.EnsureDir(layout.Attachments); err != nil {
+		return projecttools.Attachments{}, err
+	}
+	return projecttools.Attachments{Dir: layout.Attachments}, nil
 }
 func (h *handler) toolScope(q toolRequest) (root, scope string, err error) {
 	st := h.store.Snapshot()
 	p, ok := st.Projects[q.ProjectID]
 	if !ok {
 		return "", "", workbench.Missing()
+	}
+	layout, e := projectstorage.ResolveProject(p.Storage(), h.cfg.DataDir)
+	if e != nil {
+		return "", "", e
 	}
 	if q.TaskID == "" {
 		return p.Path, p.ID, nil
@@ -45,6 +66,9 @@ func (h *handler) toolScope(q toolRequest) (root, scope string, err error) {
 	x, ok := st.Executions[t.ExecutionID]
 	if !ok || x.Workspace == "" {
 		return "", "", workbench.Conflict("任务尚无独立工作区")
+	}
+	if p.StorageMode == "managed" && (!projectstorage.ValidDirectoryName(t.ID) || x.Workspace != filepath.Join(layout.Worktrees, t.ID, "tree") || x.TaskID != t.ID || x.ConversationID != t.ConversationID) {
+		return "", "", workbench.Conflict("任务工作区不属于当前项目")
 	}
 	// A task scope is derived exclusively from the stored execution, not a client path.
 	return x.Workspace, p.ID + "/" + t.ID, nil
@@ -72,10 +96,14 @@ func (h *handler) normalizeAttachments(c *workbench.Command) error {
 	if !ok || conv.ProjectID != c.ProjectID {
 		return workbench.Missing()
 	}
+	attachments, e := h.attachments(c.ConversationID)
+	if e != nil {
+		return e
+	}
 	seen := map[string]bool{}
 	total := 0
 	for i, a := range c.Attachments {
-		_, meta, e := h.attachments().Load(c.ConversationID, a.ID)
+		_, meta, e := attachments.Load(c.ConversationID, a.ID)
 		if e != nil {
 			return workbench.Invalid("附件不存在或不属于当前会话")
 		}
@@ -219,7 +247,12 @@ func (h *handler) projectTools(w http.ResponseWriter, r *http.Request) {
 			h.failure(w, workbench.Invalid(e.Error()))
 			return
 		}
-		a, e := h.attachments().Save(c.ID, filepath.Base(q.Path), strings.NewReader(string(b)))
+		attachments, e := h.attachments(c.ID)
+		if e != nil {
+			h.failure(w, e)
+			return
+		}
+		a, e := attachments.Save(c.ID, filepath.Base(q.Path), strings.NewReader(string(b)))
 		if e != nil {
 			h.failure(w, e)
 			return
@@ -253,6 +286,11 @@ func (h *handler) attachmentHTTP(w http.ResponseWriter, r *http.Request) {
 		h.failure(w, workbench.Missing())
 		return
 	}
+	attachments, e := h.attachments(conv)
+	if e != nil {
+		h.failure(w, e)
+		return
+	}
 	if r.URL.Path == "/api/attachments" && r.Method == "POST" {
 		r.Body = http.MaxBytesReader(w, r.Body, projecttools.MaxFile+(64<<10))
 		mr, e := r.MultipartReader()
@@ -265,7 +303,7 @@ func (h *handler) attachmentHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "invalid_upload", "附件无效")
 			return
 		}
-		a, e := h.attachments().Save(conv, part.FileName(), part)
+		a, e := attachments.Save(conv, part.FileName(), part)
 		if e != nil {
 			h.failure(w, workbench.Invalid(e.Error()))
 			return
@@ -278,7 +316,7 @@ func (h *handler) attachmentHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/attachments/")
-	b, a, e := h.attachments().Load(conv, id)
+	b, a, e := attachments.Load(conv, id)
 	if e != nil {
 		h.failure(w, workbench.Missing())
 		return

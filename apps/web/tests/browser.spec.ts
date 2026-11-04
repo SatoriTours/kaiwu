@@ -5,10 +5,17 @@ import type { Page, BrowserContext, Cookie } from "@playwright/test";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
-import { resolve } from "node:path";
+import { resolve, basename, join } from "node:path";
 // Intercept real WebSocket frames; all business requests still reach the real Go server.
 const socketProbes = new WeakMap<Page, {calls:any[];received:any[];held:(()=>void)[];holdMethod:string;holdType:string;dropMethod:string;modelMode:string;missingReceipt?:boolean;transform?:(v:any)=>void;deliver?:(v:any)=>void}>();
 test.beforeEach(async({page})=>{
+ // Opt-in evidence routing keeps regression screenshots out of a dirty checkout.
+ const artifactRoot=process.env.KAIWU_BROWSER_ARTIFACTS;
+ if(artifactRoot){
+  mkdirSync(artifactRoot,{recursive:true});
+  const capture=page.screenshot.bind(page);
+  page.screenshot=options=>capture({...options,...(options?.path?{path:join(artifactRoot,basename(String(options.path)))}:{})});
+ }
  const probe={calls:[] as any[],received:[] as any[],held:[] as (()=>void)[],holdMethod:'',holdType:'',dropMethod:'',modelMode:''};socketProbes.set(page,probe);
  await page.routeWebSocket('**/api/socket',client=>{
   const server=client.connectToServer(),methods=new Map<string,string>();

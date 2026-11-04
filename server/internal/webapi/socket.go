@@ -61,8 +61,26 @@ func (h *handler) socketCall(r *http.Request, input socketRequest) socketReply {
 	query := ""
 	switch input.Method {
 	case "tools/mkdir", "tools/attach", "tools/terminal/start", "tools/terminal/stop", "tools/terminal/list", "tools/terminal/resolve", "commands", "git/refresh", "git/preview", "git/merge", "previews/status", "previews/start", "previews/stop", "previews/open",
-		"delivery/policy", "delivery/preflight", "delivery/accept", "delivery/control", "delivery/status", "delivery/steps":
+		"pi/connections/save", "pi/connections/remove", "pi/connections/models", "pi/oauth/start", "pi/oauth/finish", "pi/oauth/cancel",
+		"delivery/policy", "delivery/preflight", "delivery/accept", "delivery/control", "delivery/status", "delivery/steps", "subagents/detail":
 		path = "/api/" + input.Method
+	case "ai/config/read":
+		method, path = "GET", "/api/ai/config"
+		var v struct {
+			ProjectID string `json:"projectId"`
+		}
+		if json.Unmarshal(input.Body, &v) != nil {
+			return socketFailure(input.ID, 400, "配置请求无效")
+		}
+		values := url.Values{}
+		values.Set("projectId", v.ProjectID)
+		query = values.Encode()
+	case "ai/config/write":
+		method, path = "PUT", "/api/ai/config"
+	case "projects/creations":
+		method, path = "GET", "/api/projects/creations"
+	case "pi/connections":
+		method, path = "GET", "/api/pi/connections"
 	case "models", "models?refresh=1":
 		method = "GET"
 		path = "/api/models"
@@ -204,7 +222,7 @@ func (h *handler) socket(w http.ResponseWriter, r *http.Request) {
 			deltas = nil
 		}
 		if reset != nil {
-			if e := writeSnapshot(map[string]any{"type": "snapshot", "streamId": h.streamID, "state": reset, "capabilities": map[string]bool{"agent": h.cfg.AgentAvailable, "git": h.cfg.Git != nil, "interactions": true}}, write); e != nil {
+			if e := writeSnapshot(map[string]any{"type": "snapshot", "streamId": h.streamID, "state": reset, "capabilities": map[string]bool{"managedProjects": h.cfg.ManagedProjects && h.cfg.ProjectsRoot != "", "agent": h.cfg.AgentAvailable, "git": h.cfg.Git != nil, "interactions": true}}, write); e != nil {
 				return e
 			}
 			cursor = reset.Revision

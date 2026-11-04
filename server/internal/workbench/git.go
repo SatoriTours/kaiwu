@@ -179,6 +179,9 @@ func (s *Store) findMergeLocked(req MergeRequest) (MergeOperation, bool, error) 
 	var receipt []byte
 	e := s.db.QueryRow("SELECT fingerprint,receipt FROM operations WHERE id=?", req.OperationID).Scan(&fp, &receipt)
 	if errors.Is(e, sql.ErrNoRows) {
+		if err := s.rejectCreationOperationLocked(req.OperationID); err != nil {
+			return MergeOperation{}, false, err
+		}
 		return MergeOperation{}, false, nil
 	}
 	if e != nil {

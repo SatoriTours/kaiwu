@@ -16,13 +16,15 @@ import (
 )
 
 type Store struct {
-	mu          sync.Mutex
-	db          *sql.DB
-	state       State
-	subscribers map[chan uint64]struct{}
-	closed      bool
-	syncEvents  []SyncEvent
-	syncBytes   int
+	dataDir      string
+	aiConfigRoot string
+	mu           sync.Mutex
+	db           *sql.DB
+	state        State
+	subscribers  map[chan uint64]struct{}
+	closed       bool
+	syncEvents   []SyncEvent
+	syncBytes    int
 	// persistBarrier is a durability test seam: when set it runs before the
 	// state write and may fail it, so tests can prove what survives a store
 	// failure without changing production behaviour (nil by default).
@@ -76,7 +78,7 @@ func Open(path string, profile Profile) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db, subscribers: make(map[chan uint64]struct{})}
+	s := &Store{dataDir: filepath.Dir(path), db: db, subscribers: make(map[chan uint64]struct{})}
 	failed := true
 	defer func() {
 		if failed {
@@ -89,7 +91,7 @@ func Open(path string, profile Profile) (*Store, error) {
 	var body []byte
 	err = db.QueryRow("SELECT body FROM state WHERE id=1").Scan(&body)
 	if errors.Is(err, sql.ErrNoRows) {
-		s.state = State{Projects: map[string]Project{}, Topics: []Topic{}, Tasks: map[string]Task{}, Conversations: map[string]Conversation{}, Profile: profile}
+		s.state = State{Projects: map[string]Project{}, Topics: []Topic{}, Tasks: map[string]Task{}, Conversations: map[string]Conversation{}, Subagents: map[string]SubagentSummary{}, Profile: profile}
 		body, _ = json.Marshal(s.state)
 		_, err = db.Exec("INSERT INTO state VALUES (1,0,?)", body)
 	} else if err == nil {
@@ -113,11 +115,20 @@ func Open(path string, profile Profile) (*Store, error) {
 	if s.state.Deliveries == nil {
 		s.state.Deliveries = map[string]DeliverySummary{}
 	}
+	if s.state.Subagents == nil {
+		s.state.Subagents = map[string]SubagentSummary{}
+	}
 	if s.state.DeliveryPolicies == nil {
 		s.state.DeliveryPolicies = map[string]DeliveryPolicySummary{}
 	}
 	// Never replay requests that may already have reached a model or tool.
 	if err = s.Update(func(st *State) error {
+		for id, p := range st.Projects {
+			if p.StorageMode == "" {
+				p.StorageMode = "legacy"
+				st.Projects[id] = p
+			}
+		}
 		for id, op := range st.Merges {
 			if MergeActive(op.Phase) {
 				op.Phase = "needs_check"
@@ -146,6 +157,21 @@ func Open(path string, profile Profile) (*Store, error) {
 				t.Status = "interrupted"
 				st.Tasks[id] = t
 			}
+		}
+
+		// A subagent run that was active when the server stopped is not a
+		// verified zero and is not restarted: it stays unknown, keeps every
+		// stored event and its parent identity, and never revives.
+		restartedAt := time.Now().UTC().Format(time.RFC3339)
+		for key, sub := range st.Subagents {
+			if sub.Status != SubagentStatusStarting && sub.Status != SubagentStatusRunning {
+				continue
+			}
+			sub.Status = SubagentStatusUnknown
+			sub.UpdatedAt = restartedAt
+			sub.FinishedAt = restartedAt
+			sub.Version++
+			st.Subagents[key] = sub
 		}
 
 		for key, c := range st.Conversations {
@@ -200,7 +226,21 @@ func (s *Store) SetPersistBarrier(fn func(State) error) {
 	s.persistBarrier = fn
 }
 
-func (s *Store) Snapshot() State { s.mu.Lock(); defer s.mu.Unlock(); return clone(s.state) }
+func (s *Store) Snapshot() State {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snapshot := clone(s.state)
+	if s.aiConfigRoot != "" {
+		view, err := s.aiConfigLocked("")
+		if err == nil {
+			snapshot.Profile = view.Resolved.Profile
+		} else {
+			snapshot.Profile = Profile{}
+			snapshot.ConfigError = "文件配置不可用，请检查配置；已有任务快照不变"
+		}
+	}
+	return snapshot
+}
 func (s *Store) persist(next State, operationID, fingerprint string, receipt Receipt) error {
 	return s.persistWith(next, operationID, fingerprint, receipt, nil)
 }
@@ -220,6 +260,9 @@ func (s *Store) persistWith(next State, operationID, fingerprint string, receipt
 		return err
 	}
 	defer tx.Rollback()
+	if err := validateRuntimeOwnersTx(tx, next); err != nil {
+		return err
+	}
 	if write != nil {
 		if err := write(tx); err != nil {
 			return err
@@ -317,6 +360,9 @@ func (s *Store) PreparedCommand(c Command, prepare func() error) (Receipt, error
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Receipt{}, err
 	}
+	if err := s.rejectCreationOperationLocked(c.OperationID); err != nil {
+		return Receipt{}, err
+	}
 	stale := c.Revision != s.state.Revision
 	if c.StructureRevision != nil {
 		stale = *c.StructureRevision != s.state.StructureRevision
@@ -343,6 +389,9 @@ func (s *Store) PreparedCommand(c Command, prepare func() error) (Receipt, error
 			}
 			return Receipt{}, Conflict("请求已超时，请等待 AI 重新询问")
 		}
+		return Receipt{}, err
+	}
+	if err := s.configureCommand(&next, c, r); err != nil {
 		return Receipt{}, err
 	}
 	if (c.Type == "send_message" || c.Type == "start_task" || c.Type == "answer_interaction") && r.CreatedID != "" {

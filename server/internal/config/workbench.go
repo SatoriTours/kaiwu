@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-type Workbench struct{ Token, DataDir, Program, Provider, Model, Thinking, PiAgentDir string }
+type Workbench struct{ Token, DataDir, ProjectsRoot, ConfigRoot, Program, Provider, Model, Thinking, PiAgentDir string }
 
 func LoadWorkbench(lookup func(string) (string, bool)) (Workbench, error) {
 	get := func(k string) string { v, _ := lookup(k); return v }
@@ -28,6 +28,25 @@ func LoadWorkbench(lookup func(string) (string, bool)) (Workbench, error) {
 	}
 	if !filepath.IsAbs(c.DataDir) {
 		return c, errors.New("KAIWU_DATA_DIR: absolute path required")
+	}
+	c.ProjectsRoot = get("KAIWU_PROJECTS_ROOT")
+	if c.ProjectsRoot == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return c, err
+		}
+		c.ProjectsRoot = filepath.Join(home, "projects")
+	}
+	c.ConfigRoot = get("KAIWU_CONFIG_DIR")
+	if c.ConfigRoot == "" {
+		root, err := os.UserConfigDir()
+		if err != nil {
+			return c, err
+		}
+		c.ConfigRoot = filepath.Join(root, "kaiwu")
+	}
+	if !filepath.IsAbs(c.ConfigRoot) {
+		return c, errors.New("KAIWU_CONFIG_DIR: absolute path required")
 	}
 	c.Program = get("KAIWU_PI_PROGRAM")
 	if c.Program == "" {
@@ -63,6 +82,9 @@ func (c Workbench) Validate() error {
 	}
 	if !filepath.IsAbs(c.DataDir) {
 		return errors.New("KAIWU_DATA_DIR: absolute path required")
+	}
+	if c.ProjectsRoot != "" && !filepath.IsAbs(c.ProjectsRoot) {
+		return errors.New("KAIWU_PROJECTS_ROOT: absolute path required")
 	}
 	if c.Program != "" && !filepath.IsAbs(c.Program) {
 		return errors.New("KAIWU_PI_PROGRAM: absolute path required")

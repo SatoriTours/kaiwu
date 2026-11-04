@@ -23,6 +23,7 @@ import (
 	"github.com/SatoriTours/kaiwu/server/internal/pimodel"
 	"github.com/SatoriTours/kaiwu/server/internal/pirpc"
 	"github.com/SatoriTours/kaiwu/server/internal/preview"
+	"github.com/SatoriTours/kaiwu/server/internal/projectstorage"
 	"github.com/SatoriTours/kaiwu/server/internal/projecttools"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
 	"github.com/coder/websocket"
@@ -36,7 +37,12 @@ type Commander interface {
 	AnswerInteraction(conversationID, interactionID string) error
 }
 type Config struct {
+	ProjectsRoot string
+	// ManagedProjects is an internal rollout gate, intentionally not connected
+	// to a production setting until execution isolation is approved and verified.
+	ManagedProjects      bool
 	DataDir              string
+	Connections          *pimodel.Connections
 	AcquireToolLease     func(context.Context, string, string) (preview.Lease, error)
 	AcquireTerminalLease func(context.Context, string, string) (preview.Lease, error)
 	Previews             *preview.Manager
@@ -100,6 +106,9 @@ func (h *handler) failure(w http.ResponseWriter, err error) {
 		}
 		if e.Code == "conflict" {
 			status = 409
+		}
+		if e.Code == "project_creation_incomplete" {
+			status = 503
 		}
 		fail(w, status, e.Code, e.Message)
 		return
@@ -189,10 +198,14 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/api/pi/"):
+		h.piConnections(w, r)
 	case strings.HasPrefix(r.URL.Path, "/api/tools/") || strings.HasPrefix(r.URL.Path, "/api/attachments"):
 		h.projectTools(w, r)
 	case strings.HasPrefix(r.URL.Path, "/api/previews/"):
 		h.taskPreview(w, r)
+	case r.URL.Path == "/api/ai/config" && (r.Method == "GET" || r.Method == "PUT"):
+		h.aiConfig(w, r)
 	case r.URL.Path == "/api/models" && r.Method == "GET":
 		if h.cfg.Models == nil {
 			fail(w, 503, "models_unavailable", "服务未找到 pi，请检查服务 PATH 或 KAIWU_PI_PROGRAM")
@@ -217,8 +230,21 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.version(w, r)
 	case r.URL.Path == "/api/session" && r.Method == "GET":
 		respond(w, 200, map[string]bool{"ok": true})
+	case r.URL.Path == "/api/subagents/detail" && r.Method == "POST":
+		h.subagentDetail(w, r)
+	case r.URL.Path == "/api/projects/creations" && r.Method == "GET":
+		if !h.cfg.ManagedProjects {
+			fail(w, 503, "managed_projects_unavailable", "托管项目尚未开放")
+			return
+		}
+		items, err := h.store.PendingProjectCreations()
+		if err != nil {
+			h.failure(w, err)
+			return
+		}
+		respond(w, 200, map[string]any{"creations": items})
 	case r.URL.Path == "/api/snapshot" && r.Method == "GET":
-		respond(w, 200, map[string]any{"state": h.store.Snapshot(), "capabilities": map[string]bool{"git": h.cfg.Git != nil, "merge": h.cfg.Git != nil && pirpc.ProcessGroupsSupported(), "agent": h.cfg.AgentAvailable, "execution": h.cfg.AgentAvailable && pirpc.ProcessGroupsSupported(), "interactions": true}})
+		respond(w, 200, map[string]any{"state": h.store.Snapshot(), "capabilities": map[string]bool{"managedProjects": h.cfg.ManagedProjects && h.cfg.ProjectsRoot != "", "git": h.cfg.Git != nil, "merge": h.cfg.Git != nil && pirpc.ProcessGroupsSupported(), "agent": h.cfg.AgentAvailable, "execution": h.cfg.AgentAvailable && pirpc.ProcessGroupsSupported(), "interactions": true}})
 	case r.URL.Path == "/api/logout" && r.Method == "POST":
 		c, _ := r.Cookie("kaiwu_session")
 		if err := h.store.RevokeLogin(credentialHash(c.Value)); err != nil {
@@ -309,6 +335,27 @@ func (h *handler) command(w http.ResponseWriter, r *http.Request) {
 			h.failure(w, workbench.Conflict("人工终端或其他写入正在使用工作区，请先结束；草稿已保留"))
 			return
 		}
+	}
+	if c.Type == "create_project" {
+		if !h.cfg.ManagedProjects || h.cfg.ProjectsRoot == "" {
+			fail(w, 503, "managed_projects_unavailable", "托管项目尚未开放；执行隔离待核验，现有项目不受影响")
+			return
+		}
+		receipt, err := h.store.CreateManagedProject(c, h.cfg.ProjectsRoot, func(p workbench.Project) error {
+			ctx, cancel := context.WithTimeout(h.cfg.Context, 15*time.Second)
+			defer cancel()
+			_, err := projectstorage.Create(ctx, h.cfg.ProjectsRoot, p.ID, p.DirectoryName)
+			if err != nil {
+				return workbench.Conflict("托管目录创建未完成，原身份和文件已保留；请检查目录归属后以原操作重试")
+			}
+			return nil
+		})
+		if err != nil {
+			h.failure(w, err)
+			return
+		}
+		respond(w, 200, receipt)
+		return
 	}
 	var prepare func() error
 	if c.Type == "set_default_profile" || c.Type == "set_conversation_profile" {

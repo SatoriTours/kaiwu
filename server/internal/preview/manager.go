@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/SatoriTours/kaiwu/server/internal/gitops"
+	"github.com/SatoriTours/kaiwu/server/internal/projectstorage"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
 )
 
@@ -133,15 +134,18 @@ func (m *Manager) target(req Request) (string, error) {
 			return "", workbench.Conflict("仅能预览最新已结束轮次；历史效果未存档")
 		}
 	}
-	data, e := filepath.Abs(m.cfg.DataDir)
+	layout, e := projectstorage.ResolveProject(p.Storage(), m.cfg.DataDir)
 	if e != nil {
 		return "", e
 	}
-	data, e = filepath.EvalSymlinks(data)
+	data, e := filepath.EvalSymlinks(layout.Worktrees)
 	if e != nil {
 		return "", e
 	}
-	expected := filepath.Join(data, "worktrees", t.ID, "tree")
+	if !projectstorage.ValidDirectoryName(t.ID) {
+		return "", workbench.Invalid("invalid task identity")
+	}
+	expected := filepath.Join(data, t.ID, "tree")
 	if x.Workspace != expected || x.Branch != "kaiwu/task-"+t.ID {
 		return "", workbench.Conflict("预览必须使用原任务独立工作区")
 	}

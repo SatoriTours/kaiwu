@@ -73,9 +73,15 @@ func apply(st *State, c Command) (Receipt, error) {
 		key := id()
 		conversation := newConversation(key, "", st.Profile)
 		st.Conversations[conversation.ID] = conversation
-		st.Projects[key] = Project{ID: key, Name: strings.TrimSpace(c.Name), Path: c.Path, ConversationID: conversation.ID}
+		st.Projects[key] = Project{ID: key, Name: strings.TrimSpace(c.Name), Path: c.Path, ConversationID: conversation.ID, StorageMode: "legacy"}
 		st.Topics = append(st.Topics, Topic{key + "_other", key, "其他", true})
 		r.CreatedID = key
+	case "rename_project":
+		if !validText(c.Name, 80) {
+			return r, Invalid("项目名称需为 1–80 字")
+		}
+		project.Name = strings.TrimSpace(c.Name)
+		st.Projects[project.ID] = project
 	case "update_project_git":
 		for _, op := range st.Merges {
 			if op.ProjectID == project.ID && MergeActive(op.Phase) {

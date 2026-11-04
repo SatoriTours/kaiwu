@@ -2,6 +2,11 @@
 
 ## 当前实际状态
 
+- [ ] 托管项目／AI 配置／运行资源（2026-11-01）：A/B 门禁内本地实现与独立功能／视觉验收通过。名称创建与恢复、稳定身份／legacy 兼容；文件 AI 配置真源、全局→项目继承／来源、CAS 保存及任务冻结快照；managed 会话／HOME／TMP／worktree／附件、Git 与预览下载消费者采用项目布局。独立发现的空提供商凭据越界已红绿修复并复验。Go 全量、受影响包 race／vet、前端测试／构建、新 5 项／旧 6 项浏览器通过。生产新建仍关闭，不迁移、不称 OS 隔离；C 已做 `.91` 预检与获准原生 systemd 临时试验，有限隔离、CPU／内存／PID 超限及退出回收实测通过；磁盘总量硬限额／产品接线未完成，C 尚未完成，D/E 未实现；未提交／部署。[计划与执行记录](superpowers/plans/2026-11-01-managed-projects.md#执行记录2026-11-01)。[C 实施子计划](superpowers/plans/2026-11-01-managed-sandbox-systemd.md)通过独立设计修订检查，已落首批 Go 准入／参数／配置基础代码，未接入 Agent/PTY/预览，基础层独立限定验收通过；后续运行账本（schema 5）、桥握手／FD 交接、pidfd peer 核验及宿主 commit-intent／只查询恢复已落地、Go 全量／race／vet 及独立限定复验通过（认证共享超时缺口已关闭）；桥端本地 Prepare/once-exec/spool/wire/反向 FD 已实现，自测及独立本地切片验收通过，真实宿主子进程退出后租约和任务继续；只读 unit ownership Inspector/peer 适配已落地，自测及独立本地切片验收通过，持久 key/public-bootstrap、稳定 inode 的 host socket 重建、早期 hardening API 已实现；初审 NNP 线程边界缺口改为验证可信 pre-exec 继承前提，修后自测及独立窄复验通过、B-I1 关闭（仅本地切片）；桥侧公共 bootstrap 读取已通过自测与独立本地限定验收；鉴权后的 PREPARE／FD／attestation 回执及 SQLite 启动事务本地组合已通过自测与独立限定验收；BridgeRuntime 已持有跨连接 Session／租约并处理丢回执后的只查询回接，自测与独立本地生命周期验收通过；实际 unit 组合及 Start/Attestor、CLI 入口与完整 RPC 接线仍缺。磁盘仍缺硬配额证据，完整控制桥／出口／验收未完成。
+
+
+- [x] pi 连接设置 V2（2026-11-01）本地限定范围验收：全局模型与账号、URL／API Key 增删改、OpenAI ChatGPT／Anthropic Claude 手动回调授权、模型刷新／搜索多选／手动添加；凭据仅存服务器私有文件，原 pi 配置只读，默认与已有会话不追溯。前端默认测试／构建、Go 四包 race／vet、5项连接浏览器、11项主题／控件及4项看板／模型回归通过，独立功能／安全／桌面手机读图通过；真实授权、token刷新与生成调用未验证，未提交／部署。[记录](development/web-pi-connections-verification.md)。
+
 - [x] 终端精修 A（2026-11-01）：48px全站顶栏轻底色标签、正文零边距／紧凑行距、实时主题；终端组逐成员持久归属／最后退出释放、原子首次打开与创建幂等、同工作区多Shell、关页后原ID／选择恢复及结束确认已本地实现。默认前端测试／构建、相关Go四包race和修复后16项真实Shell／文件／主题回归分组通过，独立功能及桌面／手机深浅色验收通过；用户已要求提交交付，按全量门禁／推送及 `.91:7331` 实际入口核验收口，不承诺跨服务重启恢复Shell。[记录](development/web-terminal-refinement-verification.md)。
 
 - [x] 网页终端 xterm.js＋WebGL 本地改造（2026-10-31）：提示符直接输入、历史／补全／中断／清屏／颜色、尺寸同步、字节无损与有界输出确认、切页接回；默认关闭读屏以兼容 input-only 输入，可选开启。前端测试／构建、Go 两包 race、3 项真实 Shell 浏览器与独立功能／桌面手机视口视觉验收通过；已进入提交交付，实际版本以入口修订号为准；真机键盘及硬件 GPU 矩阵未验。[记录](development/web-xterm-verification.md)。
@@ -32,7 +37,7 @@
 
 - [x] 2026-10-18 收口：7331 已恢复最后验证程序 `ddc811f`，备份／原数据身份保留及独立实际入口烟测通过；自动交付仍禁用。
 - [x] 前两批交互＋成果历史收口：独立候选排除第三批7共享修改＋11新增；前端29＋18、构建、同步修正独立复验及重建产物8＋1浏览器通过。Go全量旧崩溃注入窗口失败留档，独立裁决不阻塞禁用worker的限定发布，不称全套通过。22:43已更新7331，逐资源一致、schema2及原消息／会话／19条登录保留，最终独立实际入口烟测通过；功能提交 `1c9fcc7` 已推送 GitHub `main`；无 Actions workflow／运行记录，不称 CI 通过。不直接构建当前混合主目录上线。
-- [ ] 第三批子Agent概览：公共后端自测，UI及真实启动桥未完成；全部安全停写，成果原地保留，本轮不纳入提交／部署。待本轮交付后另协调续接，不自动恢复。
+- [ ] 子 Agent 概览（2026-10-30 续接）：公共后端及三级只读 UI 已本地实现；7 项新增单元、前端测试／构建、3 项真实 Go＋临时 SQLite 浏览器、Go 相关两包及子 Agent race 自测通过。独立功能验收及四图视觉补验通过；真实启动桥及执行写权限分支仍未完成，整项保持未完成，未提交／部署。[验收](development/web-task-subagents-verification.md) · [台账](development/web-task-subagents-ledger.md)。
 
 以下旧条目按各批次保留；原 README 的收口总览与阶段记录已迁至[历史归档](development/project-history.md)，当前部署以实际服务证据为准。
 

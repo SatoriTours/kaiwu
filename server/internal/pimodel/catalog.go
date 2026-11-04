@@ -15,6 +15,7 @@ import (
 
 type Model struct {
 	Provider      string `json:"provider"`
+	ProviderName  string `json:"providerName,omitempty"`
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	Reasoning     bool   `json:"reasoning"`
@@ -22,6 +23,7 @@ type Model struct {
 }
 type Catalog struct {
 	mu                          sync.Mutex
+	Connections                 *Connections
 	Program, SourceDir, DataDir string
 	models                      []Model
 	expires                     time.Time
@@ -61,7 +63,11 @@ func (c *Catalog) List(ctx context.Context) ([]Model, error) {
 	if err = os.MkdirAll(home, 0700); err != nil {
 		return nil, errors.New("无法准备模型检测目录")
 	}
-	if err = Prepare(c.SourceDir, agentDir, ""); err != nil {
+	prepare := Prepare
+	if c.Connections != nil {
+		prepare = c.Connections.Prepare
+	}
+	if err = prepare(c.SourceDir, agentDir, ""); err != nil {
 		return nil, err
 	}
 	spec := pirpc.LaunchSpec{Program: c.Program, Dir: root, Env: Environment(home, agentDir), OwnProcessGroup: pirpc.ProcessGroupsSupported(), Args: []string{"--mode", "rpc", "--no-session", "--no-tools", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", "--offline"}}
@@ -86,6 +92,12 @@ func (c *Catalog) List(ctx context.Context) ([]Model, error) {
 		return nil, errors.New("pi 未返回有效模型列表，请检查版本和服务器登录配置")
 	}
 	models := []Model{}
+	names := map[string]string{}
+	if c.Connections != nil {
+		for _, v := range c.Connections.List() {
+			names[v.Provider] = v.Name
+		}
+	}
 	seen := map[string]bool{}
 	for _, model := range data.Models {
 		key := model.Provider + "\x00" + model.ID
@@ -93,6 +105,7 @@ func (c *Catalog) List(ctx context.Context) ([]Model, error) {
 			continue
 		}
 		seen[key] = true
+		model.ProviderName = names[model.Provider]
 		models = append(models, model)
 	}
 	sort.Slice(models, func(i, j int) bool {

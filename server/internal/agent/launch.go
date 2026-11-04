@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"github.com/SatoriTours/kaiwu/server/internal/aiconfig"
 	"github.com/SatoriTours/kaiwu/server/internal/gitops"
 	"github.com/SatoriTours/kaiwu/server/internal/pimodel"
 	"github.com/SatoriTours/kaiwu/server/internal/pirpc"
+	"github.com/SatoriTours/kaiwu/server/internal/projectstorage"
 	"github.com/SatoriTours/kaiwu/server/internal/workbench"
 	"os"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 
 type Config struct {
 	Program, DataDir, PiAgentDir string
+	Connections                  *pimodel.Connections
 	BaseArgs, ExtraEnv           []string
 	// Remote is the read-only manual-review remote runner. It is assembled
 	// independently of automated delivery and never enables it.
@@ -45,14 +48,27 @@ const taskPreviewInstructions = `
 `
 
 func (m *Manager) launch(c workbench.Conversation) (pirpc.LaunchSpec, error) {
-	root := filepath.Join(m.cfg.DataDir, "sessions", c.ID)
+	if c.Profile.CredentialSource == "server_pi" && (strings.TrimSpace(c.Profile.Provider) == "" || strings.TrimSpace(c.Profile.Model) == "") {
+		return pirpc.LaunchSpec{}, errors.New("server_pi requires a selected provider and model")
+	}
+	root, err := m.sessionRoot(c)
+	if err != nil {
+		return pirpc.LaunchSpec{}, err
+	}
 	for _, dir := range []string{root, filepath.Join(root, "home"), filepath.Join(root, "agent")} {
-		if e := os.MkdirAll(dir, 0700); e != nil {
+		if e := projectstorage.EnsureDir(dir); e != nil {
 			return pirpc.LaunchSpec{}, e
 		}
 	}
 	if c.Profile.CredentialSource == "server_pi" {
-		if err := pimodel.Prepare(m.cfg.PiAgentDir, filepath.Join(root, "agent"), c.Profile.Provider); err != nil {
+		prepare := pimodel.Prepare
+		if m.cfg.Connections != nil {
+			prepare = m.cfg.Connections.Prepare
+			if c.PendingProfile != nil {
+				prepare = m.cfg.Connections.AddProvider
+			}
+		}
+		if err := prepare(m.cfg.PiAgentDir, filepath.Join(root, "agent"), c.Profile.Provider); err != nil {
 			return pirpc.LaunchSpec{}, err
 		}
 	}
@@ -66,8 +82,23 @@ func (m *Manager) launch(c workbench.Conversation) (pirpc.LaunchSpec, error) {
 		prompt = "当前任务的独立工作区是 " + dir + "。在此完成任务并说明修改及实际验证；不要自动提交、合并、推送或删除工作区。原项目目录为 " + m.store.Snapshot().Projects[c.ProjectID].Path + "，请保留其内容。"
 		prompt += taskPreviewInstructions
 	}
+	var skillArgs []string
+	if c.ConfigSnapshot != nil {
+		layout, err := m.projectLayout(c.ProjectID)
+		if err != nil {
+			return pirpc.LaunchSpec{}, err
+		}
+		if err := aiconfig.Freeze(layout.Snapshots, c.ID, *c.ConfigSnapshot); err != nil {
+			return pirpc.LaunchSpec{}, err
+		}
+		prompt += "\n项目方案规则（不授予额外工具、凭据或执行权限）：\n" + strings.Join(c.ConfigSnapshot.Rules, "\n\n")
+		for _, skill := range c.ConfigSnapshot.Skills {
+			skillArgs = append(skillArgs, "--skill", filepath.Join(layout.Snapshots, c.ID+".skills", skill, "SKILL.md"))
+		}
+	}
 	args := append([]string{}, m.cfg.BaseArgs...)
 	args = append(args, "--mode", "rpc", "--session-dir", root, "--name", "开悟独立对话", "--tools", tools, "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", "--offline", "--append-system-prompt", prompt+workbench.ReportInstructions+workbench.InteractionInstructions+replyLanguageInstructions+replyTurnInstructions)
+	args = append(args, skillArgs...)
 	if c.SessionFile != "" && (hasHistory(c) || fileExists(c.SessionFile)) {
 		if e := m.validateSession(c, c.SessionFile); e != nil {
 			return pirpc.LaunchSpec{}, e
@@ -87,6 +118,26 @@ func (m *Manager) launch(c workbench.Conversation) (pirpc.LaunchSpec, error) {
 	}
 	env := pimodel.Environment(filepath.Join(root, "home"), filepath.Join(root, "agent"))
 	env = append(env, m.cfg.ExtraEnv...)
+	project := m.store.Snapshot().Projects[c.ProjectID]
+	if project.StorageMode == "managed" {
+		layout, err := m.projectLayout(c.ProjectID)
+		if err != nil {
+			return pirpc.LaunchSpec{}, err
+		}
+		tmp := filepath.Join(layout.Tmp, c.ID)
+		if err := projectstorage.EnsureDir(tmp); err != nil {
+			return pirpc.LaunchSpec{}, err
+		}
+		filtered := make([]string, 0, len(env))
+		for _, entry := range env {
+			key, _, _ := strings.Cut(entry, "=")
+			if strings.HasSuffix(key, "_API_KEY") || key == "TMPDIR" || key == "TMP" || key == "TEMP" {
+				continue
+			}
+			filtered = append(filtered, entry)
+		}
+		env = append(filtered, "TMPDIR="+tmp, "TMP="+tmp, "TEMP="+tmp)
+	}
 	return pirpc.LaunchSpec{Program: m.cfg.Program, Args: args, Dir: dir, Env: env, OwnProcessGroup: development}, nil
 }
 
@@ -100,7 +151,11 @@ func hasHistory(c workbench.Conversation) bool {
 }
 func fileExists(file string) bool { _, e := os.Lstat(file); return e == nil || !os.IsNotExist(e) }
 func (m *Manager) validateLocation(c workbench.Conversation, file string) error {
-	root, e := filepath.EvalSymlinks(filepath.Join(m.cfg.DataDir, "sessions", c.ID))
+	location, e := m.sessionRoot(c)
+	if e != nil {
+		return e
+	}
+	root, e := filepath.EvalSymlinks(location)
 	if e != nil {
 		return e
 	}
@@ -116,7 +171,11 @@ func (m *Manager) validateLocation(c workbench.Conversation, file string) error 
 
 // pi itself creates a new session for missing/empty --session files. Fail closed.
 func (m *Manager) validateSession(c workbench.Conversation, file string) error {
-	root, e := filepath.EvalSymlinks(filepath.Join(m.cfg.DataDir, "sessions", c.ID))
+	location, e := m.sessionRoot(c)
+	if e != nil {
+		return e
+	}
+	root, e := filepath.EvalSymlinks(location)
 	if e != nil {
 		return e
 	}

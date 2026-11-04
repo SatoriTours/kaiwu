@@ -5,6 +5,10 @@ export interface Profile {
   thinking: string;
 }
 export interface Project {
+  storageMode?: 'legacy' | 'managed';
+  storageRoot?: string;
+  directoryName?: string;
+  layoutVersion?: number;
   defaultBranch?: string;
   mainBranchOverride?: string;
   commitName?: string;
@@ -84,6 +88,7 @@ export interface Snapshot {
   conversations: Record<string, Conversation>;
   profile: Profile;
   executions?: Record<string, Execution>;
+  subagents?: Record<string, SubagentSummary>;
 }
 export interface Receipt {
   revision: number;
@@ -444,3 +449,57 @@ export interface InteractionRequest {
   response?: InteractionResponse;
 }
 
+export type SubagentStatus =
+  | "starting"
+  | "running"
+  | "completed"
+  | "failed"
+  | "interrupted"
+  | "unknown";
+
+export type SubagentEventKind =
+  | "text"
+  | "tool_start"
+  | "tool_update"
+  | "tool_end"
+  | "status";
+
+export interface SubagentSummary {
+  id: string;
+  projectId: string;
+  conversationId: string;
+  taskId?: string;
+  roundId: string;
+  parentSessionId: string;
+  title: string;
+  taskSummary: string;
+  status: SubagentStatus;
+  profile: Profile;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+  version: number;
+  truncated: boolean;
+}
+
+export interface SubagentEvent {
+  id: string;
+  sequence: number;
+  at: string;
+  kind: SubagentEventKind;
+  text?: string;
+  toolId?: string;
+  toolName?: string;
+  input?: string;
+  output?: string;
+  failed?: boolean;
+  status?: SubagentStatus;
+}
+
+export interface SubagentDetailPage {
+  run: SubagentSummary;
+  request: string;
+  events: SubagentEvent[];
+  next: number;
+  hasMore: boolean;
+}

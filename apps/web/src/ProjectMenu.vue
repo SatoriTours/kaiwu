@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import type { Project } from './types.ts';
 
 const props = defineProps<{ projects: Project[]; currentId: string }>();
-const emit = defineEmits<{ choose: [id: string]; add: []; git: []; delivery: []; refresh: [] }>();
+const emit = defineEmits<{ choose: [id: string]; add: []; rename: []; git: []; delivery: []; config: []; refresh: [] }>();
 const root = ref<HTMLElement>();
 const trigger = ref<HTMLButtonElement>();
 const menu = ref<HTMLElement>();
@@ -33,11 +33,13 @@ function choose(id: string) {
   // Clicking the current project must not discard the selected task or draft.
   if (id !== props.currentId) emit('choose', id);
 }
-function action(kind: 'add' | 'git' | 'delivery' | 'refresh') {
+function action(kind: 'add' | 'rename' | 'git' | 'delivery' | 'config' | 'refresh') {
   close(true);
   if (kind === 'add') emit('add');
+  else if (kind === 'rename') emit('rename');
   else if (kind === 'git') emit('git');
   else if (kind === 'delivery') emit('delivery');
+  else if (kind === 'config') emit('config');
   else emit('refresh');
 }
 function keydown(event: KeyboardEvent) {
@@ -91,13 +93,18 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside));
         <button v-for="p in projects" :key="p.id" type="button" role="menuitemradio" tabindex="-1"
           :aria-checked="p.id === currentId" :aria-label="p.name" :data-project-id="p.id" @click="choose(p.id)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a1 1 0 0 1 1-1h5l3 3h8a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z" /></svg>
-          <span>{{ p.name }}</span>
+          <span>{{ p.name }}<small v-if="projects.filter(other => other.name === p.name).length > 1"> · {{ p.id.slice(0, 8) }}</small></span>
           <svg v-if="p.id === currentId" class="project-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
         </button>
         <p v-if="!projects.length" class="project-menu-empty">还没有项目，添加一个开始使用</p>
       </div>
       <template v-if="current">
         <div class="project-menu-divider" role="separator"></div>
+        <button type="button" role="menuitem" tabindex="-1" @click="action('rename')">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l5-1L20 8a2.8 2.8 0 0 0-4-4L5 15Z" /></svg>
+          <span>重命名项目</span>
+        </button>
+        <button type="button" role="menuitem" tabindex="-1" @click="action('config')"><span aria-hidden="true">◈</span><span>AI 配置</span></button>
         <button type="button" role="menuitem" tabindex="-1" @click="action('git')">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 3-.6 2.2-2 .9-2-.6-2 3.5L5 10.6v2.8l-1.6 1.6 2 3.5 2-.6 2 .9L10 21h4l.6-2.2 2-.9 2 .6 2-3.5-1.6-1.6v-2.8L20.6 9l-2-3.5-2 .6-2-.9L14 3Z" /><circle cx="12" cy="12" r="3" /></svg>
           <span>Git 设置</span>

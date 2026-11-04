@@ -8,6 +8,8 @@ import {
   onBeforeUnmount,
   nextTick,
 } from "vue";
+import SubagentPanel from "./SubagentPanel.vue";
+import { summarizeSubagents } from "./subagents.ts";
 import ProjectTools from "./ProjectTools.vue";
 import {terminalStorage,readMainView,writeMainView} from "./terminal-state.ts";
 import {addDraftAttachments,removeDraftAttachment,uploadAttachment} from "./attachments.ts";
@@ -40,6 +42,8 @@ import MergeDialog from "./MergeDialog.vue";
 import { createMergeIntent, invalidateMergeIntent, beginMerge, settleMerge, rejectMerge, reconcileMerge, uncertainMergeOperation, reviewedRoundId, isPushOnlyReview } from "./merge-intent.ts";
 import { mergeFinished } from "./merge.ts";
 import ModelDialog from "./ModelDialog.vue";
+import PiSettings from "./PiSettings.vue";
+import AIConfigDialog from "./AIConfigDialog.vue";
 import DeliverySettings from "./DeliverySettings.vue";
 import VersionBadge from "./VersionBadge.vue";
 import ThemePicker from "./ThemePicker.vue";
@@ -93,6 +97,8 @@ const authenticated = ref(false),
   loaded = ref(false),
   online = ref(false),
   agentAvailable = ref(false),
+  managedProjectsAvailable = ref(false),
+  dialogProjectID = ref(''),
   token = ref(""),
   showToken = ref(false),
   loginBusy = ref(false),
@@ -111,7 +117,12 @@ function completionFor(t:Task){return createCompletionIntent({task:t,conversatio
 const completionEligible=computed(()=>{const target=completionTarget.value;if(!target)return false;const t=state.value?.tasks[target.taskId];return !!t&&completionFor(t)?.roundId===target.roundId});
 function requestCompletion(t:Task){const target=completionFor(t);if(!target)return;completionTarget.value=target;completionError.value=''}
 async function finishCompletion(){const target=completionTarget.value,epoch=authEpoch;if(!target||!completionEligible.value||completionBusy.value)return;completionBusy.value=true;completionError.value='';try{await command({type:'confirm_result',projectId:target.projectId,taskId:target.taskId,conversationId:target.conversationId,roundId:target.roundId});if(epoch===authEpoch&&completionTarget.value===target)completionTarget.value=undefined}catch(e){if(epoch===authEpoch&&completionTarget.value===target)completionError.value=e instanceof Error?e.message:String(e)}finally{if(epoch===authEpoch)completionBusy.value=false}}
+const subagentTarget=ref<{projectId:string;conversationId:string}>();
+watch([projectID, () => local.current, authenticated], () => { subagentTarget.value=undefined });
 const settingsOpen=ref(false);
+const aiConfigTarget=ref<{projectId?:string}>();
+const piSettingsOpen=ref(false);
+function settingsModel(){piSettingsOpen.value=false;openModels();}
 const mainView=ref<"board"|"files"|"terminal">("board");
 watch(projectID,id=>{mainView.value=readMainView(terminalStorage,id)},{immediate:true});
 watch(mainView,value=>{if(projectID.value)writeMainView(terminalStorage,projectID.value,value)});
@@ -254,7 +265,7 @@ function clearIdentity() {
   projectID.value = "";
   taskID.value = "";
 }
-function applyData(data:{state:Snapshot;capabilities:{agent:boolean}}){
+function applyData(data:{state:Snapshot;capabilities:{agent:boolean;managedProjects?:boolean}}){
     for (const c of Object.values(data.state.conversations)) {
       const length = c.messages.reduce(
           (n, m) => n + (m.role === "assistant" ? m.text.length : 0),
@@ -268,6 +279,7 @@ function applyData(data:{state:Snapshot;capabilities:{agent:boolean}}){
     mergeSnapshot(local, data.state);
     authenticated.value = true;
     agentAvailable.value = data.capabilities.agent;
+    managedProjectsAvailable.value = !!data.capabilities.managedProjects;
     const projects = Object.values(data.state.projects);
     if (!projectID.value && projects.length) projectID.value = projects[0]!.id;
     if (projectID.value && !data.state.projects[projectID.value]) {
@@ -299,7 +311,7 @@ const refresh = createRefreshQueue(async () => {
     if(ws?.open){await ws.request("sync",{after:streamID?(state.value?.revision??0):0});return}
     const data = await api<{
       state: Snapshot;
-      capabilities: { agent: boolean };
+      capabilities: { agent: boolean; managedProjects?: boolean };
     }>("snapshot");
     if (epoch !== authEpoch) return;
     applyData(data);
@@ -321,7 +333,7 @@ function report(e: unknown) {
   if (e instanceof APIError && e.status === 401) clearIdentity();
 }
 function connect() {
- if(stopped||!authenticated.value)return;
+ if(stopped||!authenticated.value||!navigator.onLine)return;
  ws?.close();const epoch=authEpoch;
  let client:SocketClient;
  client=new SocketClient((location.protocol==="https:"?"wss:":"ws:")+"//"+location.host+"/api/socket",frame=>{
@@ -331,7 +343,7 @@ function connect() {
    if(frame.type==="patch"&&state.value){
  if(streamID!==frame.streamId){void client.request("sync",{after:0});return}
     if(frame.revision<=state.value.revision)return;
-    applyData({state:applyPatch(state.value,frame),capabilities:{agent:agentAvailable.value}});
+    applyData({state:applyPatch(state.value,frame),capabilities:{agent:agentAvailable.value,managedProjects:managedProjectsAvailable.value}});
    }
   }catch{void refresh()}
  },()=>{if(ws!==client||epoch!==authEpoch)return;online.value=true;void reconcile();void updateWatch()},event=>{
@@ -379,12 +391,12 @@ async function logout() {
     if (epoch === authEpoch) report(e);
   }
 }
-async function command(body: Record<string, unknown> & {conversationId?:string;text?:string}): Promise<Receipt> {
+async function command(body: Record<string, unknown> & {conversationId?:string;text?:string}, recoveryID?:string): Promise<Receipt> {
   const epoch = authEpoch;
   if (!state.value) throw new Error("服务数据尚未就绪");
   const scope = body.type + ":" + (body.conversationId ?? "form");
   const signature = JSON.stringify(body);
-  let operation = operations.get(scope);
+  let operation = recoveryID ? {id:recoveryID,signature,draftRevision:undefined} : operations.get(scope);
   if (operation && operation.signature !== signature)
     throw new Error("上一操作结果尚未确认，请保留原输入并先重试确认");
   operation ??= {
@@ -419,7 +431,7 @@ async function command(body: Record<string, unknown> & {conversationId?:string;t
       } catch {
         if (epoch !== authEpoch) throw new Error("身份已切换");
       }
-    } else if (e instanceof APIError) operations.delete(scope);
+    } else if (e instanceof APIError && e.code !== 'project_creation_incomplete') operations.delete(scope);
     await refresh();
     throw e;
   }
@@ -493,6 +505,7 @@ async function reconcile(retryOriginal = false) {
 }
 function open(kind: string, topic = "") {
   dialog.value = kind;
+  dialogProjectID.value = projectID.value;
   dialogTopic.value = topic || projectID.value + "_other";
   formError.value = "";
 }
@@ -809,27 +822,33 @@ async function controlDelivery(summary: DeliverySummary, action: 'pause' | 'resu
   }
 }
 
-async function save(values: Record<string, string>) {
+async function save(values: Record<string, string>, recoveryID?:string) {
   const epoch = authEpoch;
   saving.value = true;
   formError.value = "";
   try {
     const kind = dialog.value;
+    const startingProject = projectID.value;
     const receipt = await command({
       ...values,
       type: (
         {
-          project: "add_project",
+          project: managedProjectsAvailable.value ? "create_project" : "add_project",
+          rename: "rename_project",
           topic: "add_topic",
           task: "add_task",
           delete: "delete_topic",
           git: "update_project_git",
         } as Record<string, string>
       )[kind]!,
-      projectId: kind === "project" ? "" : projectID.value,
+      projectId: kind === "project" ? "" : dialogProjectID.value,
       ...(kind === "delete" ? { topicId: dialogTopic.value } : {}),
-    });
+    }, recoveryID);
     if (epoch !== authEpoch) return;
+    // The initial snapshot auto-selects the first project before its receipt
+    // reaches this form. That is not a user-initiated scope switch.
+    const firstProjectSelected = kind === 'project' && !startingProject && projectID.value === receipt.createdId;
+    if (projectID.value !== startingProject && !firstProjectSelected) return;
     dialog.value = "";
     if (kind === "project" && receipt.createdId)
       chooseProject(receipt.createdId);
@@ -1500,6 +1519,11 @@ function pop() {
   chatVisible.value = !!taskID.value;
   void refresh();
 }
+function networkChanged() {
+  clearTimeout(retry);
+  if (!navigator.onLine) { online.value = false; ws?.close(); }
+  else connect();
+}
 onMounted(async () => {
   readLocation();
   chatVisible.value = !!taskID.value;
@@ -1507,6 +1531,8 @@ onMounted(async () => {
   window.addEventListener("beforeunload", beforeUnload);
   window.addEventListener("resize", resize);
   window.addEventListener("popstate", pop);
+  window.addEventListener("offline", networkChanged);
+  window.addEventListener("online", networkChanged);
   document.addEventListener("visibilitychange", visibility);
   await refresh();
   connect();
@@ -1524,6 +1550,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("beforeunload", beforeUnload);
   window.removeEventListener("resize", resize);
   window.removeEventListener("popstate", pop);
+  window.removeEventListener("offline", networkChanged);
+  window.removeEventListener("online", networkChanged);
 });
 </script>
 <template>
@@ -1599,6 +1627,8 @@ onBeforeUnmount(() => {
         :current-id="projectID"
         @choose="chooseProject"
         @add="open('project')"
+        @rename="open('rename')"
+        @config="aiConfigTarget={projectId:project?.storageMode==='managed'?projectID:undefined}"
         @git="open('git')"
         @delivery="deliverySettingsOpen = true"
         @refresh="pollGit(true)"
@@ -1608,7 +1638,7 @@ onBeforeUnmount(() => {
       </nav>
       <div v-if="project&&mainView==='terminal'&&!resultTarget" id="terminal-toolbar-host"></div>
       <button v-if="project" class="project-chat-top" aria-label="项目对话" title="项目对话" @click="navigate()">◌<span> 项目对话</span></button>
-      <div class="compact-global-actions"><ThemePicker /><button class="settings-toggle" aria-label="全局设置" :aria-expanded="settingsOpen" @click="settingsOpen=!settingsOpen">⋯</button>
+      <div class="compact-global-actions"><ThemePicker /><button class="pi-settings-entry" aria-label="设置" title="设置" @click="piSettingsOpen=true;settingsOpen=false">⚙</button><button class="settings-toggle" aria-label="全局设置" :aria-expanded="settingsOpen" @click="settingsOpen=!settingsOpen">⋯</button>
       <div class="global-actions" :class="{'settings-open':settingsOpen}" role="group" aria-label="全局操作">
         <button v-if="project&&mainView==='terminal'" class="terminal-mobile-chat" @click="navigate();settingsOpen=false">项目对话</button>
         <VersionBadge />
@@ -1633,7 +1663,7 @@ onBeforeUnmount(() => {
     <div v-if="!project" class="entry">
       <div>
         <h1>从你的第一个项目开始</h1>
-        <p>添加服务器上的项目目录，也可初始化新 Git 项目。</p>
+        <p>{{ managedProjectsAvailable ? '填写名称，开悟会管理项目代码、会话与成果。' : '添加服务器上的项目目录，也可初始化新 Git 项目。' }}</p>
         <button class="primary" @click="open('project')">＋ 添加项目</button>
       </div>
     </div>
@@ -1649,6 +1679,8 @@ onBeforeUnmount(() => {
         <ResultPreview v-if="resultTarget&&task&&conversation" :task="task" :conversation="conversation" :execution="task.executionId?state?.executions?.[task.executionId]:undefined" :round-id="resultTarget.roundId" :preview="taskPreview" :preview-blocked-url="previewBlockedURL" :busy="previewBusy" :error="previewError" :online="online" @back="closeResult();chatVisible=false" @chat="resultChat" @refresh="loadTaskPreview('status',true)" @start="resultTarget && runPreviewFlow(resultTarget, true)" @stop="loadTaskPreview('stop')" @revise="reviseResult" @instructions="previewInstructions"/>
         <ProjectTools v-else-if="mainView!=='board'" :key="projectID" :view="mainView" :project="project" :tasks="tasks" :executions="state?.executions??{}" :conversation-id="local.current" :online="online" @attach="addDraftAttachments(local,$event.conversationId,[$event.attachment]);chatVisible=true" />
         <KanbanBoard v-else
+          :subagents="state?.subagents"
+          @subagents="subagentTarget={projectId:$event.projectId,conversationId:$event.conversationId}"
           :executions="state?.executions??{}"
           :git="state?.taskGit ?? {}"
           :deliveries="state?.deliveries"
@@ -1674,6 +1706,8 @@ onBeforeUnmount(() => {
           v-if="conversation"
           :key="'chat-panel'"
           ref="chatPanel"
+          :subagents="summarizeSubagents(state?.subagents, projectID, conversation.id)"
+          @subagents="subagentTarget={projectId:projectID,conversationId:conversation.id}"
           :conversation="conversation"
           :task="task"
           :git="task ? state?.taskGit?.[task.id] : undefined"
@@ -1728,6 +1762,7 @@ onBeforeUnmount(() => {
         </aside></ChatDrawer>
       </div></template
     >
+    <SubagentPanel v-if="subagentTarget" :key="subagentTarget.projectId+':'+subagentTarget.conversationId" :project-id="subagentTarget.projectId" :conversation-id="subagentTarget.conversationId" :runs="summarizeSubagents(state?.subagents,subagentTarget.projectId,subagentTarget.conversationId)" :online="online" @close="subagentTarget=undefined" />
     <MergeDialog
       v-if="mergePreview && mergeTarget"
       :key="mergePreview.id"
@@ -1743,6 +1778,8 @@ onBeforeUnmount(() => {
       @confirm="confirmMerge"
       @recheck="recheckMerge"
     />
+    <AIConfigDialog v-if="aiConfigTarget" :project-id="aiConfigTarget.projectId" @close="aiConfigTarget=undefined" />
+    <PiSettings v-if="piSettingsOpen" :profile="state?.profile" @close="piSettingsOpen=false" @model="settingsModel" />
     <ModelDialog v-if="modelTarget" :key="modelTarget.scope" :scope="modelTarget.scope" :profile="modelTarget.profile" :saving="modelSaving" :error="modelError" @close="modelTarget = undefined" @submit="saveModel" />
     <DeliverySettings
       v-if="deliverySettingsOpen && project"
@@ -1757,13 +1794,15 @@ onBeforeUnmount(() => {
     <TaskDialog
       v-if="dialog"
       :kind="dialog"
-      :project="project"
+      :managed-projects="managedProjectsAvailable"
+      :project="state?.projects[dialogProjectID] ?? project"
       :topic-i-d="dialogTopic"
       :topics="topics"
       :error="formError"
       :saving="saving"
       @close="dialog = ''"
       @submit="save"
+      @retry="save({name:$event.name},$event.operationId)"
     />
   </template>
 </template>

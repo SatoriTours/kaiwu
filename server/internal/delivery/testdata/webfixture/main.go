@@ -36,8 +36,8 @@ import (
 const fixtureToken = "kaiwu-delivery-fixture-token-00000000"
 
 type pushRecord struct {
-	SHA string `json:"sha"`
-	Ref string `json:"ref"`
+	SHA    string `json:"sha"`
+	Ref    string `json:"ref"`
 	TaskID string `json:"taskId"`
 }
 type runRecord struct{ SHA, Branch, Conclusion string }
@@ -161,7 +161,7 @@ func (f *fixture) remoteCommand(ctx context.Context, dir string, target gitops.R
 	if err == nil && len(a) > 0 && a[0] == "push" {
 		sha, ref, _ := strings.Cut(a[len(a)-1], ":")
 		f.mu.Lock()
-		f.pushes = append(f.pushes, pushRecord{SHA:sha, Ref:ref, TaskID:strings.TrimPrefix(target.TaskRef,"refs/heads/kaiwu/task-")})
+		f.pushes = append(f.pushes, pushRecord{SHA: sha, Ref: ref, TaskID: strings.TrimPrefix(target.TaskRef, "refs/heads/kaiwu/task-")})
 		f.mu.Unlock()
 	}
 	return out, err
@@ -200,7 +200,7 @@ func (f *fixture) RoundTrip(req *http.Request) (*http.Response, error) {
 			// Scenario comes from the user's synthetic task request, not from
 			// fabricated product status; repair output may legitimately omit it.
 			st := f.store.Snapshot()
-			scenarioTaskID := strings.TrimPrefix(branch,"kaiwu/task-")
+			scenarioTaskID := strings.TrimPrefix(branch, "kaiwu/task-")
 			for taskID, d := range st.Deliveries {
 				if d.CandidateSHA == sha {
 					contents += st.Tasks[taskID].Request
@@ -209,7 +209,7 @@ func (f *fixture) RoundTrip(req *http.Request) (*http.Response, error) {
 			}
 			count := 0
 			for _, p := range pushes {
-				if p.Ref == "refs/heads/"+branch && (branch!="main" || p.TaskID==scenarioTaskID) {
+				if p.Ref == "refs/heads/"+branch && (branch != "main" || p.TaskID == scenarioTaskID) {
 					count++
 				}
 			}

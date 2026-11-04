@@ -25,6 +25,9 @@ func (s *Store) deliveryOperation(key, fp string) (Receipt, bool, error) {
 	var body []byte
 	err := s.db.QueryRow("SELECT fingerprint,receipt FROM operations WHERE id=?", key).Scan(&previous, &body)
 	if errors.Is(err, sql.ErrNoRows) {
+		if err := s.rejectCreationOperationLocked(key); err != nil {
+			return Receipt{}, false, err
+		}
 		var count int
 		if err = s.db.QueryRow("SELECT count(*) FROM operations").Scan(&count); err != nil {
 			return Receipt{}, false, err

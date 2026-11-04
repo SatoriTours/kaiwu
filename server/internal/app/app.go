@@ -114,6 +114,11 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 			return fmt.Errorf("open workbench: %w", err)
 		}
 		defer func() { result = errors.Join(result, store.Close()) }()
+		if wb.ConfigRoot != "" {
+			if err := store.ConfigureAI(wb.ConfigRoot); err != nil {
+				return fmt.Errorf("configure AI files: %w", err)
+			}
+		}
 		// The manual review remote is assembled on its own: it is read-only and
 		// never enables or stands in for automated delivery. A missing resolver
 		// (no service credentials) leaves push review explicitly blocked while
@@ -122,7 +127,11 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 		if remoteErr != nil {
 			return remoteErr
 		}
-		manager := agent.New(ctx, store, agent.Config{Program: wb.Program, DataDir: wb.DataDir, PiAgentDir: wb.PiAgentDir, Remote: manualRemote})
+		connections, err := pimodel.OpenConnections(filepath.Join(wb.DataDir, "pi"))
+		if err != nil {
+			return err
+		}
+		manager := agent.New(ctx, store, agent.Config{Connections: connections, Program: wb.Program, DataDir: wb.DataDir, PiAgentDir: wb.PiAgentDir, Remote: manualRemote})
 		defer func() { result = errors.Join(result, manager.Close()) }()
 		previews := preview.New(ctx, store, preview.Config{DataDir: wb.DataDir, Reserve: manager.AcquirePreviewLease})
 		manager.SetPreviewStopper(previews.StopTask)
@@ -143,8 +152,8 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 				return err
 			}
 		}
-		catalog := &pimodel.Catalog{Program: wb.Program, SourceDir: wb.PiAgentDir, DataDir: filepath.Join(wb.DataDir, "probes")}
-		handler = webapi.New(webapi.Config{DataDir: wb.DataDir, AcquireToolLease: manager.AcquireToolLease, AcquireTerminalLease: manager.AcquireTerminalLease, Previews: previews, Models: catalog, Git: manager, Delivery: deliveryCommander(deliveryMgr), Context: ctx, Host: ln.Addr().String(), Token: wb.Token, Assets: webui.Files(), Health: handler, AgentAvailable: wb.Program != "", Version: buildinfo.Current(), Status: func() buildinfo.DeploymentStatus { return buildinfo.ReadDeploymentStatus(wb.DataDir) }}, store, manager)
+		catalog := &pimodel.Catalog{Connections: connections, Program: wb.Program, SourceDir: wb.PiAgentDir, DataDir: filepath.Join(wb.DataDir, "probes")}
+		handler = webapi.New(webapi.Config{Connections: connections, ProjectsRoot: wb.ProjectsRoot, DataDir: wb.DataDir, AcquireToolLease: manager.AcquireToolLease, AcquireTerminalLease: manager.AcquireTerminalLease, Previews: previews, Models: catalog, Git: manager, Delivery: deliveryCommander(deliveryMgr), Context: ctx, Host: ln.Addr().String(), Token: wb.Token, Assets: webui.Files(), Health: handler, AgentAvailable: wb.Program != "", Version: buildinfo.Current(), Status: func() buildinfo.DeploymentStatus { return buildinfo.ReadDeploymentStatus(wb.DataDir) }}, store, manager)
 		defer func() {
 			if closer, ok := handler.(interface{ Close() error }); ok {
 				result = errors.Join(result, closer.Close())

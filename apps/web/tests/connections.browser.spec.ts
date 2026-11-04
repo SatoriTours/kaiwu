@@ -1,0 +1,113 @@
+import {test,expect,type Page} from '@playwright/test';
+import {mkdirSync} from 'node:fs';
+import {join} from 'node:path';
+const origin='http://127.0.0.1:17331';
+async function setup(page:Page){
+ await page.goto('/');
+ const res=await page.request.post('/api/login',{headers:{Origin:origin,'X-Kaiwu-Client':'web'},data:{token:'kaiwu-connections-test-token-00000'}});expect(res.ok()).toBe(true);
+ await page.reload();
+ await page.getByRole('button',{name:'设置',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'设置',exact:true})).toBeVisible();
+}
+async function shot(page:Page,name:string){const dir=process.env.KAIWU_CONNECTION_ARTIFACTS;if(dir){mkdirSync(dir,{recursive:true});await page.screenshot({path:join(dir,name+'.png')})}}
+test('settings entry opens approved interface',async({page})=>{
+ await page.setViewportSize({width:1280,height:960});await setup(page);
+ expect((await page.locator('.pi-settings').boundingBox())!.width).toBeGreaterThan(700);
+ await expect(page.getByRole('heading',{name:'pi 连接',exact:true})).toBeVisible();await shot(page,'settings-empty');
+ await page.keyboard.press('Escape');await expect(page.getByRole('dialog',{name:'设置',exact:true})).toHaveCount(0);
+});
+test('save, refresh, search, manual models, edit with retained key and remove',async({page})=>{
+ await page.setViewportSize({width:1280,height:960});await setup(page);
+ await page.getByRole('button',{name:'添加连接',exact:true}).click();
+ await page.getByRole('textbox',{name:'连接名称',exact:true}).fill('浏览器测试接口');
+ await page.getByRole('textbox',{name:'接口 URL',exact:true}).fill('http://127.0.0.1:17334/v1');
+ await page.getByLabel('API Key',{exact:true}).fill('synthetic-secret');
+ await page.getByRole('button',{name:'刷新获取',exact:true}).click();
+ await expect(page.getByRole('checkbox',{name:'demo-model',exact:true})).toBeVisible();
+ await page.getByRole('checkbox',{name:'demo-model',exact:true}).check();
+ await page.getByRole('textbox',{name:'搜索模型',exact:true}).fill('another');
+ await expect(page.getByRole('checkbox')).toHaveCount(1);
+ await page.getByRole('textbox',{name:'搜索模型',exact:true}).fill('');
+ await page.getByRole('button',{name:'手动添加',exact:true}).click();
+ await page.getByRole('textbox',{name:'手动输入模型 ID',exact:true}).fill('manual-model');
+ await page.getByRole('button',{name:'添加模型',exact:true}).click();
+ await page.getByRole('button',{name:'刷新获取',exact:true}).click();
+ await expect(page.getByRole('checkbox',{name:'manual-model',exact:true})).toBeChecked();
+ await expect(page.getByRole('button',{name:'刷新获取',exact:true})).toBeEnabled();
+ await page.locator('.pi-settings-body').evaluate(el=>el.scrollTop=0);
+ await shot(page,'connection-form-desktop');
+ await page.getByRole('button',{name:'保存连接',exact:true}).click();
+ await expect(page.getByText('浏览器测试接口',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'编辑 浏览器测试接口',exact:true}).click();
+ await expect(page.getByLabel('API Key',{exact:true})).toHaveValue('');
+ await page.getByRole('button',{name:'刷新获取',exact:true}).click();
+ await expect(page.getByRole('checkbox',{name:'demo-model',exact:true})).toBeChecked();
+ await page.getByRole('textbox',{name:'连接名称',exact:true}).fill('浏览器接口改名');
+ await page.getByRole('button',{name:'保存连接',exact:true}).click();
+ await page.reload();await page.getByRole('button',{name:'设置',exact:true}).click();
+ await expect(page.getByText('浏览器接口改名',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'更多 浏览器接口改名',exact:true}).click();
+ await page.getByRole('button',{name:'移除连接',exact:true}).click();
+ await expect(page.getByRole('alertdialog').getByText('已有会话保留原凭据快照',{exact:false})).toBeVisible();
+ await expect(page.getByRole('alertdialog').getByRole('button',{name:'取消',exact:true})).toBeFocused();
+ await page.keyboard.press('Shift+Tab');await expect(page.getByRole('button',{name:'确认移除',exact:true})).toBeFocused();
+ await page.keyboard.press('Escape');await expect(page.getByRole('alertdialog')).toHaveCount(0);
+ await page.getByRole('button',{name:'更多 浏览器接口改名',exact:true}).click();await page.getByRole('button',{name:'移除连接',exact:true}).click();
+ await page.getByRole('button',{name:'确认移除',exact:true}).click();
+ await expect(page.getByText('浏览器接口改名',{exact:true})).toHaveCount(0);
+});
+test('failed refresh is redacted and preserves selected models; OAuth URL stays separate',async({page})=>{
+ await setup(page);await page.getByRole('button',{name:'添加连接',exact:true}).click();
+ await page.getByRole('textbox',{name:'连接名称',exact:true}).fill('授权流程示例');
+ await page.getByRole('textbox',{name:'接口 URL',exact:true}).fill('http://127.0.0.1:17334/v1');
+ await page.getByLabel('API Key',{exact:true}).fill('invalid-SHOULD-NOT-ECHO');
+ await page.getByRole('button',{name:'手动添加',exact:true}).click();
+ await page.getByRole('textbox',{name:'手动输入模型 ID',exact:true}).fill('manual-keep');
+ await page.getByRole('button',{name:'添加模型',exact:true}).click();
+ await page.getByRole('button',{name:'刷新获取',exact:true}).click();
+ await expect(page.getByRole('alert')).toContainText('服务商未返回模型列表');
+ await expect(page.getByRole('checkbox',{name:'manual-keep',exact:true})).toBeChecked();
+ await expect(page.locator('.pi-settings')).not.toContainText('SHOULD-NOT-ECHO');
+ await page.getByRole('button',{name:'账号登录',exact:true}).click();
+ await page.getByRole('button',{name:'生成授权链接',exact:true}).click();
+ await expect(page.getByRole('link',{name:'打开授权页面',exact:true})).toHaveAttribute('href',/^https:\/\/auth.openai.com\//);
+ await page.getByRole('textbox',{name:'授权码或回调 URL',exact:true}).fill('http://127.0.0.1:1455/auth/callback?code=wrong&state=wrong&client_id=x');
+ await page.getByRole('button',{name:'完成绑定',exact:true}).click();
+ await expect(page.getByRole('alert')).toContainText('state 不匹配');
+ await shot(page,'oauth-state-error');
+});
+test('mobile and dark layouts fit and keep actions accessible',async({page})=>{
+ await page.setViewportSize({width:390,height:844});await setup(page);
+ expect((await page.locator('.pi-settings').boundingBox())!.width).toBeGreaterThan(388);
+ await shot(page,'settings-mobile-light');
+ await page.getByRole('button',{name:'添加连接',exact:true}).click();
+ await page.getByRole('button',{name:'手动添加',exact:true}).click();
+ await page.getByRole('textbox',{name:'手动输入模型 ID',exact:true}).fill('mobile-model');
+ await page.getByRole('button',{name:'添加模型',exact:true}).click();
+ await page.locator('.pi-settings-body').evaluate(el=>el.scrollTop=el.scrollHeight);
+ await shot(page,'form-mobile-light');
+ expect(await page.locator('.pi-settings').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+ await page.evaluate(()=>document.documentElement.dataset.theme='dark');await shot(page,'form-mobile-dark');
+ const save=page.getByRole('button',{name:'保存连接',exact:true});await expect(save).toBeVisible();
+ await page.setViewportSize({width:1280,height:960});await shot(page,'form-desktop-dark');
+});
+
+test('late model replies cannot replace a changed endpoint directory',async({page})=>{
+ let held:any,requestID='',client:any;
+ await page.routeWebSocket('**/api/socket',ws=>{
+  client=ws;const server=ws.connectToServer();
+  ws.onMessage(message=>{const v=JSON.parse(String(message));if(v.method==='pi/connections/models')requestID=v.id;server.send(message)});
+  server.onMessage(message=>{const v=JSON.parse(String(message));if(v.id===requestID)held=message;else ws.send(message)});
+ });
+ await setup(page);await page.getByRole('button',{name:'添加连接',exact:true}).click();
+ await page.getByRole('textbox',{name:'连接名称',exact:true}).fill('stale test');
+ await page.getByRole('textbox',{name:'接口 URL',exact:true}).fill('http://127.0.0.1:17334/v1');
+ await page.getByLabel('API Key',{exact:true}).fill('synthetic-secret');
+ await page.getByRole('button',{name:'刷新获取',exact:true}).click();
+ await expect.poll(()=>!!held).toBe(true);
+ await page.getByRole('textbox',{name:'接口 URL',exact:true}).fill('http://127.0.0.1:17334/changed');
+ client.send(held);
+ await expect(page.getByRole('button',{name:'刷新获取',exact:true})).toBeEnabled();
+ await expect(page.getByRole('checkbox')).toHaveCount(0);
+ await expect(page.locator('.pi-model-meta').getByRole('status')).toContainText('连接信息已变化');
+});
