@@ -1239,7 +1239,20 @@ class Handler(BaseHTTPRequestHandler):
 HTTPServer(('127.0.0.1',a.port),Handler).serve_forever()
 `);
  }
- const command=async(body:any)=>{const st=(await(await page.request.get('/api/snapshot')).json()).state;const response=await page.request.post('/api/commands',{headers,data:{...body,revision:st.revision}});expect(response.ok()).toBe(true);return response.json()};
+ // A previously started fake pi can publish progress between snapshot and
+ // fixture setup. Retry only rejected setup commands, retaining operationId;
+ // never replay start_task/model input or relax the product revision guard.
+ const command=async(body:any)=>{
+  for(let attempt=0;attempt<3;attempt++){
+   const st=(await(await page.request.get('/api/snapshot')).json()).state;
+   const response=await page.request.post('/api/commands',{headers,data:{...body,revision:st.revision}});
+   const result=await response.json();
+   if(response.status()===409&&result?.error?.code==='conflict'&&['add_project','add_task'].includes(body.type)&&attempt<2)continue;
+   expect(response.ok(),`fixture ${body.type}: HTTP ${response.status()} ${JSON.stringify(result)}`).toBe(true);
+   return result;
+  }
+  throw new Error('fixture revision conflict retry budget exhausted');
+ };
  const projectId=(await command({type:'add_project',operationId:'preview-project-'+label,name:'预览项目 '+label,path})).createdId;
  const taskId=(await command({type:'add_task',operationId:'preview-task-'+label,projectId,title:'预览任务 '+label,request:'结构化效果预览验收'})).createdId;
  if(run)await command({type:'start_task',operationId:'preview-run-'+label,projectId,taskId});
