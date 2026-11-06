@@ -48,6 +48,7 @@ test('title leads, identity sits below, and theme-local card styling leaves chat
   await expect(card.locator('.owner,.avatar')).toHaveCount(0);
   await expect(card.locator('.task-actions .start-task')).toHaveCount(1);
   await expect(card.locator('.task-actions .task-menu-toggle')).toHaveCount(1);
+  await expect(card.getByRole('heading', { name: title, exact: true })).toBeVisible();
   await expect(card.locator('.task-select')).toHaveAccessibleName('选择任务 ' + title);
   await expect(card.locator('.task-select')).toHaveAccessibleDescription('未开始');
   for (const [theme, color] of [['light', 'rgb(255, 255, 255)'], ['dark', 'rgb(48, 54, 62)']] as const) {

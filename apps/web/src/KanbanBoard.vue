@@ -222,7 +222,7 @@ function actionLabel(task: Task) {
             @click="emit('select', task)"
           >
             <div class="task-top">
-              <h3>
+              <h3 :aria-label="task.title">
                 <button
                   class="task-select"
                   :aria-pressed="selected === task.id"
