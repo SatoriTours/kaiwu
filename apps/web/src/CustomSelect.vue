@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="T extends string | number">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, useSlots, watch } from "vue";
 import {
   calculateNextIndex,
   getSelectAriaAttributes,
@@ -18,6 +18,7 @@ const props = withDefaults(
     name?: string;
     id?: string;
     ariaLabel?: string;
+    ariaDescribedby?: string;
     title?: string;
     compact?: boolean;
   }>(),
@@ -29,6 +30,7 @@ const props = withDefaults(
   }
 );
 
+const slots = useSlots();
 const emit = defineEmits<{
   "update:modelValue": [val: T];
   change: [val: T];
@@ -144,7 +146,8 @@ function onListboxKeydown(event: KeyboardEvent) {
     return;
   }
   if (event.key === "Tab") {
-    close(false);
+    // Footer actions remain reachable; focusout closes when leaving the root.
+    if (!slots.footer) close(false);
     return;
   }
   if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
@@ -216,6 +219,7 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
       type="button"
       class="custom-select-trigger"
       :aria-label="ariaLabel"
+      :aria-describedby="ariaDescribedby"
       :title="title || displayLabel"
       :disabled="disabled"
       v-bind="ariaAttrs"
@@ -226,7 +230,7 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
         class="custom-select-label"
         :class="{ 'custom-select-placeholder': !currentOption && placeholder }"
       >
-        {{ displayLabel }}
+        <slot name="trigger" :option="currentOption">{{ displayLabel }}</slot>
       </span>
       <svg
         class="custom-select-chevron"
@@ -240,15 +244,18 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
 
     <div
       v-if="expanded"
-      :id="listboxId"
-      ref="listbox"
       class="custom-select-dropdown"
-      role="listbox"
-      tabindex="-1"
-      :aria-label="ariaLabel || '选项列表'"
-      @keydown="onListboxKeydown"
+      @keydown.esc.stop.prevent="close(true)"
     >
-      <div class="custom-select-options" role="group">
+      <div
+        :id="listboxId"
+        ref="listbox"
+        class="custom-select-options"
+        role="listbox"
+        tabindex="-1"
+        :aria-label="ariaLabel || '选项列表'"
+        @keydown="onListboxKeydown"
+      >
         <button
           v-for="(option, index) in options"
           :key="String(option.value)"
@@ -267,9 +274,7 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
           @click="select(option)"
           @mouseenter="activeIndex = index"
         >
-          <span class="custom-select-option-text">{{
-            formatOptionLabel(option)
-          }}</span>
+          <span class="custom-select-option-text"><slot name="option" :option="option">{{ formatOptionLabel(option) }}</slot></span>
           <svg
             v-if="option.value === currentValue"
             class="custom-select-check"
@@ -280,6 +285,9 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
           </svg>
         </button>
         <p v-if="!options.length" class="custom-select-empty">无可用选项</p>
+      </div>
+      <div v-if="$slots.footer" class="custom-select-footer">
+        <slot name="footer" :close="() => close(true)" />
       </div>
     </div>
   </div>

@@ -6,3 +6,4 @@ createApp(App).mount("#app");
 
 import "./progress.css";
 import "./chat-focus.css";
+import "./board-cards.css";

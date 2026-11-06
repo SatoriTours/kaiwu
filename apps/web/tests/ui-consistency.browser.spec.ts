@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { resolve } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
+const artifacts = process.env.KAIWU_UI_ARTIFACTS || "../../docs/design/ui-consistency";
 
 async function authenticateResultTest(page: any) {
   const fixture = readFileSync(
@@ -105,7 +106,7 @@ test.describe("UI Consistency & CustomSelect Verification", () => {
 
     // 截取带选项焦点的实际渲染截图，存入 docs/design/ui-consistency/
     await page.screenshot({
-      path: resolve("../../docs/design/ui-consistency/custom-select-keynav-focus.png"),
+      path: resolve(artifacts, "custom-select-keynav-focus.png"),
     });
 
     await page.keyboard.press("Escape");
@@ -194,7 +195,7 @@ test.describe("UI Consistency & CustomSelect Verification", () => {
 
     // 截图保存到 docs/design/ui-consistency/
     await page.screenshot({
-      path: resolve("../../docs/design/ui-consistency/custom-select-dialog.png"),
+      path: resolve(artifacts, "custom-select-dialog.png"),
     });
 
     // 展开提供商下拉框
@@ -230,7 +231,7 @@ test.describe("UI Consistency & CustomSelect Verification", () => {
 
     // 3. 截取看板与聊天输入框聚焦风格，验证无残留突兀蓝色
     await page.screenshot({
-      path: resolve("../../docs/design/ui-consistency/kanban-gray-green-tokens.png"),
+      path: resolve(artifacts, "kanban-gray-green-tokens.png"),
     });
   });
 });

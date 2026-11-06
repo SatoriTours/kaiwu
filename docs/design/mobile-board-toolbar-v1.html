@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>手机看板 · 专题切换设计</title>
+<style>
+:root{color-scheme:dark;--canvas:#24282e;--column:#333a43;--card:#30363e;--text:#e7ebf1;--muted:#aab4c2;--line:#454e59;--menu:#30363e;--hover:#3a434e;--accent:#bfd2c6;--accent-ink:#23372d;--accent-bg:#3e5148;--focus:#aac6b5;--shadow:#0004;--warning:#e5c18b}
+:root[data-theme=light]{color-scheme:light;--canvas:#f5f6f4;--column:#f3f5f3;--card:#fff;--text:#303635;--muted:#68736c;--line:#dce2dc;--menu:#fff;--hover:#e9eee9;--accent:#365343;--accent-ink:#f6faf6;--accent-bg:#3f594a;--focus:#64866e;--shadow:#17203218;--warning:#876326}
+*{box-sizing:border-box}body{margin:0;background:var(--canvas);color:var(--text);font:13px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}button:disabled{cursor:not-allowed}svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}h1,h2,h3,p{margin:0}.page{max-width:940px;margin:auto;padding:30px 28px}.intro{display:flex;align-items:center;justify-content:space-between;gap:20px}.eyebrow{font-size:11px;color:var(--muted);letter-spacing:.1em}h1{font-size:23px;letter-spacing:-.025em;font-weight:550;margin:6px 0 10px}.lead{color:var(--muted);max-width:650px;font-size:12px;line-height:1.8}.theme{border:1px solid var(--line);border-radius:6px;background:transparent;min-height:36px;padding:4px 12px;white-space:nowrap}.previews{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:26px}.sample-label{font-size:11px;color:var(--muted);margin:0 0 10px 2px}.sample-label strong{color:var(--text);font-weight:500;margin-right:8px}.phone{height:620px;max-width:390px;margin:auto;display:flex;flex-direction:column;background:var(--canvas);border:1px solid var(--line);border-radius:10px;overflow:hidden;position:relative}.topbar{height:45px;display:flex;align-items:center;gap:10px;padding:0 14px;background:var(--card);border-bottom:1px solid var(--line);font-size:12px;flex-shrink:0}.brand{font-weight:550}.project{padding-left:10px;border-left:1px solid var(--line);color:var(--muted)}.topbar .subtle{margin-left:auto;color:var(--muted)}.tabs{display:flex;padding:8px 14px 0;gap:8px;flex-shrink:0}.tabs span{height:32px;flex:1;display:grid;place-items:center;border:1px solid var(--line);border-radius:6px;color:var(--muted);font-size:12px}.tabs .active{color:var(--text);background:var(--card)}.board-wrap{padding:14px;flex:1;min-height:0;display:flex;flex-direction:column}.column{background:var(--column);border-radius:8px;flex:1;min-height:0;position:relative;display:flex;flex-direction:column}.column-head{display:flex;align-items:center;gap:8px;padding:6px 10px;min-height:56px;flex-shrink:0}.topic-picker{min-width:0;flex:1}.topic-trigger{border:0;background:transparent;display:flex;align-items:center;gap:7px;padding:0 4px;min-height:44px;width:100%;text-align:left;border-radius:5px}.topic-trigger:hover{background:var(--hover)}.topic-name{font-size:14px;font-weight:550;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.topic-count{color:var(--muted);font-size:11px;line-height:18px;font-variant-numeric:tabular-nums}.topic-trigger svg{width:13px;height:13px;color:var(--muted)}.new-task{flex-shrink:0;position:relative;isolation:isolate;min-height:44px;min-width:76px;display:flex;align-items:center;justify-content:center;gap:5px;border:0;border-radius:6px;background:transparent;color:var(--accent);font-size:12px;font-weight:500;padding:0 10px}.new-task:before{content:"";position:absolute;inset:6px 0;z-index:-1;background:var(--accent-bg);border:1px solid var(--accent);opacity:.3;border-radius:5px}.new-task:hover:before{opacity:.5}.new-task svg{width:14px;height:14px}.cards{padding:0 10px 12px;overflow-y:auto;flex:1;min-height:0}.task{background:var(--card);border:1px solid var(--line);border-radius:7px;padding:14px;margin-bottom:10px}.task-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:start}.task h3{font-size:14px;line-height:22px;font-weight:500;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;text-wrap:balance}.task-status{font-size:11px;line-height:22px;white-space:nowrap;color:var(--muted)}.task-foot{display:flex;align-items:center;justify-content:space-between;margin-top:8px;min-height:44px;font-size:11px;color:var(--muted)}.card-actions{display:flex}.card-actions span{width:44px;min-height:44px;display:grid;place-items:center}.card-actions svg{width:16px;height:16px}.old-actions{display:flex;gap:8px;margin-bottom:10px}.old-actions span{padding:4px 8px;border:1px solid var(--line);border-radius:5px;font-size:11px}.old-actions .old-primary{background:#a6b5d3;color:#19212f}.old-select{display:flex;align-items:center;justify-content:space-between;min-height:34px;border:1px solid #566171;background:#3d424a;border-radius:6px;color:#e7ebf1;padding:4px 9px;font-size:12px;margin-bottom:20px}.old-head{display:flex;align-items:center;padding:11px 14px;font-size:13px;min-height:50px}.old-head .old-plus{margin-left:auto;font-size:22px;color:var(--muted)}.old-count{margin-left:7px;color:var(--muted);font-size:11px}.menu{position:absolute;top:51px;left:10px;right:10px;z-index:3;background:var(--menu);border:1px solid var(--line);border-radius:8px;padding:6px;box-shadow:0 10px 26px var(--shadow)}.menu[hidden]{display:none}.menu-label{font-size:10px;color:var(--muted);padding:5px 8px 6px;letter-spacing:.04em}.options{max-height:230px;overflow-y:auto}.option{display:flex;align-items:center;gap:9px;width:100%;min-height:44px;padding:9px 8px;border:0;border-radius:4px;background:transparent;text-align:left;font-size:13px}.option:hover,.option:focus-visible{background:var(--hover)}.option[aria-selected=true]{background:var(--hover)}.option .check{width:14px;height:14px;color:var(--accent)}.option .label{flex:1;min-width:0;overflow-wrap:anywhere;line-height:20px}.option .count{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}.create-topic{display:flex;align-items:center;gap:9px;min-height:44px;width:100%;border:0;border-top:1px solid var(--line);margin-top:6px;padding:9px 8px;background:transparent;color:var(--muted);font-size:12px;text-align:left}.create-topic:hover{color:var(--text);background:var(--hover)}.create-topic svg{width:14px;height:14px}.empty{padding:18px 4px;color:var(--muted);font-size:12px}.pending{margin:0 10px 8px;font-size:11px;color:var(--warning)}.pending[hidden]{display:none}.notes{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:24px;font-size:12px;color:var(--muted)}.notes strong{display:block;font-weight:500;color:var(--text);margin-bottom:5px}.disclaimer{font-size:11px;color:var(--muted);margin-top:20px}.toast{position:absolute;left:14px;right:14px;bottom:16px;z-index:5;border:1px solid var(--line);background:var(--menu);border-radius:6px;padding:10px 12px;font-size:12px;box-shadow:0 5px 20px var(--shadow)}.toast[hidden]{display:none}
+:root[data-theme=light] .old-select{background:#fff;color:var(--text);border-color:var(--line)}:root[data-theme=light] .old-primary{background:#3f594a;color:#fff}
+body.preview .page{padding:0;max-width:none}body.preview .intro,body.preview .lead,body.preview .before,body.preview .sample-label,body.preview .notes,body.preview .disclaimer{display:none}body.preview .previews{display:block;margin:0}body.preview .phone{max-width:none;width:100%;height:100dvh;border:0;border-radius:0}
+@media(max-width:700px){.page{padding:22px 16px}.previews{grid-template-columns:1fr;gap:24px}.phone{width:100%}.notes{grid-template-columns:1fr;gap:12px}h1{font-size:20px}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute;overflow:hidden" aria-hidden="true"><defs>
+<symbol id="down" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+<symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></symbol>
+<symbol id="check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+<symbol id="dots" viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01" stroke-width="2.6"/></symbol>
+</defs></svg>
+<main class="page">
+<header class="intro"><div><p class="eyebrow">手机看板 / 局部设计提案</p><h1>让专题切换，回到专题列头</h1></div><button class="theme">切换浅色</button></header>
+<p class="lead">不再把切换器画成一条表单。合并重复标题，只保留一个轻量切换入口和一个主操作；原有专题背景不动。</p>
+<div class="previews">
+<section class="example before"><p class="sample-label"><strong>当前问题</strong>两行控件＋重复列头</p><div class="phone">
+<div class="topbar"><span class="brand">悟</span><span class="project">开悟工作台⌄</span><span class="subtle">☼　⋯</span></div>
+<div class="tabs"><span class="active">▦ 看板</span><span>◌ 聊天</span></div>
+<div class="board-wrap"><div class="old-actions"><span>＋ 专题</span><span class="old-primary">＋ 任务</span></div><div class="old-select"><span>其他 · 2</span><svg><use href="#down"/></svg></div><div class="column"><div class="old-head">其他<span class="old-count">2</span><span class="old-plus">＋</span></div><div class="cards" id="before-cards"></div></div></div></div></section>
+<section class="example after"><p class="sample-label"><strong>推荐方案</strong>一个列头，两个明确入口</p><div class="phone">
+<div class="topbar"><span class="brand">悟</span><span class="project">开悟工作台⌄</span><span class="subtle">☼　⋯</span></div>
+<div class="tabs"><span class="active">▦ 看板</span><span>◌ 聊天</span></div>
+<div class="board-wrap"><section class="column" aria-label="专题示意"><header class="column-head">
+<div class="topic-picker"><button class="topic-trigger" role="combobox" aria-label="切换专题：其他，2个任务" aria-expanded="false" aria-controls="topic-options" aria-haspopup="listbox" title="其他"><span class="topic-name">其他</span><span class="topic-count">2</span><svg aria-hidden="true"><use href="#down"/></svg></button></div>
+<button class="new-task" aria-label="在当前专题新建任务" title="新建任务"><svg aria-hidden="true"><use href="#plus"/></svg>任务</button>
+</header>
+<div class="pending" hidden role="status">1 项需要你处理</div>
+<div class="menu" hidden><div class="menu-label">切换专题</div><div class="options" id="topic-options" role="listbox" aria-label="专题"></div><button class="create-topic"><svg aria-hidden="true"><use href="#plus"/></svg>新建专题</button></div>
+<div class="cards" id="after-cards"></div>
+</section></div><div class="toast" role="status" hidden></div></div></section>
+</div>
+<section class="notes"><div><strong>不再重复</strong>「其他」只出现一次。切换器不再独占一行，也不再套大块灰色输入框。</div><div><strong>主次有别</strong>「＋任务」常驻；较少使用的「新建专题」放入菜单底部，仍是明确入口。</div><div><strong>触控不缩水</strong>视觉表面32px，真实命中区域至少44px。长名省略，菜单显示完整名称。</div></section>
+<p class="disclaimer">静态合成数据设计稿，不调用API。只提议手机局部布局，不代表已改正式代码或获准实施；PC、会话、Git与任务状态不改。</p>
+</main>
+<script>
+const params=new URLSearchParams(location.search);
+if(params.get('view')==='preview')document.body.classList.add('preview');
+if(params.get('theme')==='light')document.documentElement.dataset.theme='light';
+const topics=[{name:'其他',count:2},{name:'账号与登录',count:5},{name:'工作台布局与移动端交互细节',count:12},{name:'稍后考虑',count:0}];
+const trigger=document.querySelector('.topic-trigger'),menu=document.querySelector('.menu'),options=document.querySelector('.options');
+const titles=['添加数据库的能力，我要能输入我的每段话','支持 Windows、macOS 和 Linux 长项目名 /workspace/projects/very-long-project-name'];
+const card=(title,index)=>'<article class="task"><div class="task-head"><h3>'+title+'</h3><span class="task-status">未开始</span></div><footer class="task-foot"><span>KW-'+['57c1e8','7d1a3a'][index]+'</span><div class="card-actions" aria-hidden="true"><span><svg><use href="#play"/></svg></span><span><svg><use href="#dots"/></svg></span></div></footer></article>';
+document.querySelector('#before-cards').innerHTML=titles.map(card).join('');
+let selected=params.get('topic')==='long'?2:0;
+function render(){
+const topic=topics[selected];trigger.querySelector('.topic-name').textContent=topic.name;trigger.querySelector('.topic-count').textContent=String(topic.count);trigger.title=topic.name;trigger.setAttribute('aria-label','切换专题：'+topic.name+'，'+topic.count+'个任务');
+options.innerHTML=topics.map((t,i)=>'<button class="option" role="option" aria-selected="'+(i===selected)+'" data-index="'+i+'"><svg class="check" aria-hidden="true">'+(i===selected?'<use href="#check"/>':'')+'</svg><span class="label">'+t.name+'</span><span class="count">'+t.count+'</span></button>').join('');
+document.querySelector('#after-cards').innerHTML=topic.count?titles.map(card).join(''):'<p class="empty">暂无任务，点击右上角 ＋任务 添加</p>';
+}
+function close(focus=false){if(menu.hidden)return;menu.hidden=true;trigger.setAttribute('aria-expanded','false');if(focus)trigger.focus({preventScroll:true})}
+function show(){menu.hidden=false;trigger.setAttribute('aria-expanded','true');options.querySelector('[aria-selected=true]').focus({preventScroll:true})}
+trigger.onclick=()=>menu.hidden?show():close(true);
+trigger.onkeydown=e=>{if(['ArrowDown','ArrowUp',' '].includes(e.key)){e.preventDefault();show()}};
+options.onclick=e=>{const item=e.target.closest('.option');if(item){selected=Number(item.dataset.index);render();close(true)}};
+menu.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close(true)}else if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){e.preventDefault();const list=[...options.querySelectorAll('.option')],i=list.indexOf(document.activeElement);list[e.key==='Home'?0:e.key==='End'?list.length-1:(i+(e.key==='ArrowDown'?1:-1)+list.length)%list.length].focus({preventScroll:true})}};
+document.addEventListener('pointerdown',e=>{if(!menu.contains(e.target)&&!trigger.contains(e.target))close()});
+document.querySelector('.after .column').addEventListener('focusout',e=>{if(!document.querySelector('.after .column').contains(e.relatedTarget))close()});
+document.querySelector('.after .cards').addEventListener('scroll',()=>close());
+window.addEventListener('resize',()=>close(true));
+function toast(text){const el=document.querySelector('.toast');el.hidden=false;el.textContent=text}
+document.querySelector('.new-task').onclick=()=>toast('设计示意：打开当前专题的新建任务窗口，不实际创建任务。');
+document.querySelector('.create-topic').onclick=()=>{close(true);toast('设计示意：打开新建专题窗口，不实际创建专题。')};
+document.querySelector('.theme').onclick=()=>{const root=document.documentElement;root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';document.querySelector('.theme').textContent=root.dataset.theme==='dark'?'切换浅色':'切换深色'};
+if(params.get('pending')==='1')document.querySelector('.pending').hidden=false;
+render();
+</script>
+</body></html>
