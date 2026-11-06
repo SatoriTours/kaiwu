@@ -72,11 +72,13 @@ async function addProject(page: Page, name: string): Promise<void> {
 
 async function newTask(page: Page, project: string, topic: string, title: string, request = "任务对话流") {
   await addProject(page, project);
+  const mobileTopic = page.getByRole("combobox", { name: "当前看板专题", exact: true });
+  if (await mobileTopic.isVisible()) await clickInView(page, mobileTopic);
   await clickInView(page, page.locator("[data-action=new-topic]"));
   await page.locator("input[name=name]").fill(topic);
   await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
   await expect(page.locator(".column h2").first()).toHaveText(topic);
-  await clickInView(page, page.getByRole("button", { includeHidden: true, name: `在 ${topic} 新建任务`, exact: true }));
+  await clickInView(page, page.getByRole("button", { name: `在 ${topic} 新建任务`, exact: true }));
   await page.locator("input[name=title]").fill(title);
   await page.locator("textarea[name=request]").fill(request);
   await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));

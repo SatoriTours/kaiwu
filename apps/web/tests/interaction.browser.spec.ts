@@ -71,6 +71,8 @@ async function addProject(page: Page, name: string): Promise<void> {
 
 async function newTask(page: Page, project: string, topic: string, title: string) {
   await addProject(page, project);
+  const mobileTopic = page.getByRole("combobox", { name: "当前看板专题", exact: true });
+  if (await mobileTopic.isVisible()) await mobileTopic.click();
   await page.locator("[data-action=new-topic]").click();
   await page.locator("input[name=name]").fill(topic);
   await page.getByRole("button", { name: "保存", exact: true }).click();
