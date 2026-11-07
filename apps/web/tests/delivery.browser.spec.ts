@@ -16,9 +16,17 @@ async function configure(page:Page,manual=false){
  await post(page.request,'delivery/policy',{operationId:randomUUID(),expectedVersion:policy.version,policy});return info.projectId;
 }
 async function addTask(page:Page,request:string){
- await clickInView(page, page.locator('[data-action=new-task]'));await page.locator("textarea[name=request]").fill(request + "\n" + request);await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'创建',exact:true}));
- await expect(page.locator('#chat-title')).toContainText(request);
- const st=await snapshot(page.request);return Object.values(st.tasks).find((t:any)=>t.title===request) as any;
+ await clickInView(page, page.locator('[data-action=new-task]'));
+ const dialog=page.getByRole('dialog',{name:'创建任务卡片',exact:true});
+ await dialog.locator('textarea[name=request]').fill(request);
+ await clickInView(page,dialog.getByRole('button',{name:'创建',exact:true}));
+ await expect(dialog).not.toBeVisible();
+ const st=await snapshot(page.request);
+ const task=Object.values(st.tasks).find((t:any)=>t.request===request) as any;
+ expect(task,'完整需求保留且只创建一次').toBeTruthy();
+ expect(Object.values(st.tasks).filter((t:any)=>t.request===request)).toHaveLength(1);
+ await expect(page.locator('#chat-title')).toContainText(task.title);
+ return task;
 }
 async function startTask(page:Page,task:any){
  await clickInView(page, page.locator('.task-card[data-taskid="'+task.id+'"]').getByRole('button',{ includeHidden: true,name:'开始开发',exact:true}));
