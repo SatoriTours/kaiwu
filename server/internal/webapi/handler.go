@@ -37,6 +37,7 @@ type Commander interface {
 	AnswerInteraction(conversationID, interactionID string) error
 }
 type Config struct {
+	Titles       TitleSummarizer
 	ProjectsRoot string
 	// ManagedProjects is an internal rollout gate, intentionally not connected
 	// to a production setting until execution isolation is approved and verified.
@@ -63,6 +64,8 @@ type Config struct {
 	Status  func() buildinfo.DeploymentStatus
 }
 type handler struct {
+	titleWG       sync.WaitGroup
+	titleActive   int
 	terminals     *projecttools.Terminals
 	cfg           Config
 	store         *workbench.Store
@@ -86,7 +89,9 @@ func New(cfg Config, store *workbench.Store, agent Commander) http.Handler {
 	if _, e := rand.Read(b); e != nil {
 		panic(e)
 	}
-	return &handler{terminals: projecttools.NewTerminals(owned), cfg: cfg, store: store, agent: agent, cancel: cancel, streamID: hex.EncodeToString(b)}
+	h := &handler{terminals: projecttools.NewTerminals(owned), cfg: cfg, store: store, agent: agent, cancel: cancel, streamID: hex.EncodeToString(b)}
+	h.recoverTitles()
+	return h
 }
 func respond(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -473,6 +478,12 @@ func (h *handler) command(w http.ResponseWriter, r *http.Request) {
 	if e != nil {
 		h.failure(w, e)
 		return
+	}
+	if receipt.Type == "add_task" {
+		h.scheduleTitle(receipt.CreatedID)
+	}
+	if receipt.Type == "set_conversation_profile" {
+		h.scheduleTitle(h.store.Snapshot().Conversations[receipt.ConversationID].TaskID)
 	}
 	if !receipt.Replay && h.agent != nil {
 		switch receipt.Type {

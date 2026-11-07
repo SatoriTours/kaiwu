@@ -34,6 +34,8 @@ type Topic struct {
 	Protected bool   `json:"protected"`
 }
 type Task struct {
+	TitleState     string             `json:"titleState,omitempty"`
+	TitleError     string             `json:"titleError,omitempty"`
 	ConfigSnapshot *aiconfig.Resolved `json:"configSnapshot,omitempty"`
 	ID             string             `json:"id"`
 	ProjectID      string             `json:"projectId"`
@@ -122,6 +124,7 @@ type State struct {
 	Executions map[string]Execution       `json:"executions"`
 }
 type Command struct {
+	AutoTitle          bool              `json:"autoTitle,omitempty"`
 	Attachments        []Attachment      `json:"attachments,omitempty"`
 	RoundID            string            `json:"roundId,omitempty"`
 	Provider           string            `json:"provider,omitempty"`

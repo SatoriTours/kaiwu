@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {creationFailure, type CreationNotice} from "./task-creation.ts";
 import {
   reactive,
   watch,
@@ -138,7 +139,8 @@ const mergeReceipt = ref<MergeOperation>();
 const mergeStale = ref(false);
 let mergeEpoch = 0;
 let mergeIntent = createMergeIntent();
-const modelTarget = ref<{ scope: string; projectId?: string; conversationId?: string; taskId?: string; profile?: Profile }>();
+const modelTarget = ref<{ scope: string; projectId?: string; conversationId?: string; taskId?: string; profile?: Profile; startTaskId?: string }>();
+const creationNotice = ref<CreationNotice>();
 const modelSaving = ref(false), modelError = ref("");
 const deliverySettingsOpen = ref(false);
 const deliverySaving = ref(false);
@@ -241,6 +243,7 @@ function clearIdentity() {
   saving.value = false;
   dialog.value = "";
   modelTarget.value = undefined;
+  creationNotice.value = undefined;
   modelSaving.value = false;
   modelError.value = "";
   closeMerge();
@@ -494,6 +497,22 @@ async function reconcile(retryOriginal = false) {
       }
       error.value = receipt.notice ?? "";
       await refresh();
+      if (epoch !== authEpoch) return;
+      const recovered = JSON.parse(operation.signature) as Record<string,string>;
+      if (recovered.type === 'add_task' && receipt.createdId) {
+        const created = state.value?.tasks[receipt.createdId];
+        if (created && projectID.value === created.projectId) {
+          if (dialog.value === 'task' && dialogProjectID.value === created.projectId) dialog.value = '';
+          navigate(created);
+          // Recovery proves creation, not a new instruction to start development.
+          creationNotice.value = {taskId:created.id,phase:'recovered',message:'卡片已创建；如需开发，请点击开始开发'};
+        }
+      }
+      if (recovered.type === 'start_task' && creationNotice.value?.taskId === recovered.taskId) {
+        const current = state.value?.conversations[recovered.conversationId];
+        creationNotice.value = current?.runState === 'failed'
+          ? creationFailure(recovered.taskId,new Error(current.error || '会话未能启动')) : undefined;
+      }
     } catch (e) {
       if (epoch !== authEpoch) return;
       if (e instanceof APIError && e.status === 404)
@@ -656,7 +675,11 @@ async function saveModel(values: Record<string, string>) {
       conversationId: target.conversationId ?? '',
       taskId: target.taskId ?? '',
     });
-    if (epoch === authEpoch && modelTarget.value?.scope === target.scope) modelTarget.value = undefined;
+    if (epoch === authEpoch && modelTarget.value === target) {
+      modelTarget.value = undefined;
+      const pendingTask = target.startTaskId && state.value?.tasks[target.startTaskId];
+      if (pendingTask) await start(pendingTask, undefined, true);
+    }
   } catch (e) { if (epoch === authEpoch) modelError.value = e instanceof Error ? e.message : '模型保存失败'; }
   finally { if (epoch === authEpoch) modelSaving.value = false; }
 }
@@ -824,13 +847,16 @@ async function controlDelivery(summary: DeliverySummary, action: 'pause' | 'resu
 
 async function save(values: Record<string, string>, recoveryID?:string) {
   const epoch = authEpoch;
+  if (saving.value) return;
   saving.value = true;
   formError.value = "";
+  const { startAfterCreate, ...formValues } = values;
   try {
     const kind = dialog.value;
     const startingProject = projectID.value;
     const receipt = await command({
-      ...values,
+      ...formValues,
+      ...(kind === "task" ? {autoTitle: true} : {}),
       type: (
         {
           project: managedProjectsAvailable.value ? "create_project" : "add_project",
@@ -859,9 +885,11 @@ async function save(values: Record<string, string>, recoveryID?:string) {
       if (created) {
         mobileTopic.value = created.topicId;
         navigate(created);
+        if (startAfterCreate === "true") await start(created, undefined, true);
       }
     }
-    if (receipt.notice) error.value = receipt.notice;
+    if (epoch !== authEpoch) return;
+    if (receipt.notice) error.value = [error.value, receipt.notice].filter(Boolean).join("；");
     await nextTick();
     if (width.value < 1024 && kind === "task")
       document.querySelector<HTMLElement>("#chat-title")?.focus();
@@ -970,7 +998,7 @@ async function send() {
     if (epoch === authEpoch) local.pending[id] = false;
   }
 }
-async function start(target: Task, sent?: { text: string; revision: number }) {
+async function start(target: Task, sent?: { text: string; revision: number }, afterCreate = false) {
   const epoch = authEpoch,
     id = target.conversationId;
   const c = state.value?.conversations[id];
@@ -983,9 +1011,17 @@ async function start(target: Task, sent?: { text: string; revision: number }) {
   )
     return;
   navigate(target);
-  if (!c.profile.provider || !c.profile.model) { openModels(c); return; }
+  if (!c.profile.provider || !c.profile.model) {
+    openModels(c);
+    if (afterCreate && modelTarget.value) {
+      modelTarget.value.startTaskId = target.id;
+      creationNotice.value = {taskId:target.id,phase:"needs_model",message:"卡片已创建，选择模型后开始开发"};
+    }
+    return;
+  }
   local.pending[id] = true;
   error.value = "";
+  if (afterCreate) creationNotice.value = {taskId:target.id,phase:"starting",message:"卡片已创建，正在启动开发…"};
   try {
     await command({
       type: "start_task",
@@ -995,8 +1031,16 @@ async function start(target: Task, sent?: { text: string; revision: number }) {
       ...(sent ? { text: sent.text } : {}),
     });
     if (epoch === authEpoch && sent) acceptSent(local, id, sent.revision);
+    if (epoch === authEpoch && afterCreate) {
+      const updated = state.value?.conversations[id];
+      if (updated?.runState === 'failed') creationNotice.value = creationFailure(target.id, new Error(updated.error || '会话未能启动'));
+      else creationNotice.value = undefined;
+    }
   } catch (e) {
-    if (epoch === authEpoch) report(e);
+    if (epoch === authEpoch) {
+      report(e);
+      if (afterCreate && authenticated.value) creationNotice.value = creationFailure(target.id,e);
+    }
   } finally {
     if (epoch === authEpoch) local.pending[id] = false;
   }
@@ -1754,7 +1798,18 @@ onBeforeUnmount(() => {
           @answer-interaction="handleAnswerInteraction"
           @cancel-interaction="handleCancelInteraction"
           @retry-interaction="handleRetryInteraction"
-        />
+        >
+          <template #notice>
+    <div v-if="creationNotice && task?.id === creationNotice.taskId" class="creation-notice" role="status">
+      <span>{{ creationNotice.message }}</span>
+      <button v-if="creationNotice.phase === 'unknown'" :disabled="!online" @click="reconcile()">核查启动状态</button>
+      <button v-if="creationNotice.phase === 'recovered'" :disabled="!online" @click="start(task,undefined,true)">开始开发</button>
+      <button v-if="creationNotice.phase === 'failed'" :disabled="!online || !!local.pending[task.conversationId]" @click="start(task,undefined,true)">重试启动</button>
+      <button v-if="creationNotice.phase === 'needs_model'" :disabled="!online" @click="start(task,undefined,true)">选择模型</button>
+      <button v-if="creationNotice.phase !== 'starting'" @click="creationNotice = undefined">关闭提示</button>
+    </div>
+          </template>
+        </ChatPanel>
         <aside v-else class="chat">
           <p class="error">聊天目标无效。请显式选择项目或任务。</p>
           <button @click="navigate()">返回项目对话</button>

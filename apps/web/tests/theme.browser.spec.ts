@@ -168,9 +168,8 @@ test('dark board, messages, Markdown, menus and dialogs remain usable on desktop
   await page.locator('input[name=name]').fill('主题专题');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByRole('button', { name: '在 主题专题 新建任务', exact: true }).click();
-  await page.locator('input[name=title]').fill('深色任务');
-  await page.locator('textarea[name=request]').fill('保持灰绿风格');
-  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await page.locator("textarea[name=request]").fill('深色任务' + "\n" + '保持灰绿风格');
+  await page.getByRole('button', { name: '创建', exact: true }).click();
   await expect(page.locator('#chat-title')).toContainText('深色任务');
   await expect(page).toHaveURL(/\/tasks\//);
   await page.reload(); // Read-only display fixture: no model or resident CLI session.

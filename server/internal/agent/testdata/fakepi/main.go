@@ -109,6 +109,7 @@ func main() {
 		_ = json.Unmarshal([]byte(strings.Split(string(b), "\n")[0]), &h)
 		session = h.ID
 	}
+	titleReply := ""
 	out := json.NewEncoder(os.Stdout)
 	scan := bufio.NewScanner(os.Stdin)
 	scan.Buffer(make([]byte, 4096), 1<<20)
@@ -124,6 +125,9 @@ func main() {
 		if c["type"] == "prompt" {
 			data = map[string]any{"disposition": "started"}
 		}
+		if c["type"] == "get_messages" && strings.Contains(strings.Join(os.Args, " "), "KAIWU_TITLE_ONLY") {
+			data = map[string]any{"messages": []any{map[string]any{"role": "assistant", "stopReason": "stop", "content": []any{map[string]any{"type": "text", "text": titleReply}}}}}
+		}
 		if c["type"] == "get_available_models" {
 			data = map[string]any{"models": []map[string]any{
 				{"provider": "fixture", "id": "isolated-test", "name": "隔离测试模型", "reasoning": true, "contextWindow": 200000, "apiKey": "must-not-reach-browser"},
@@ -132,6 +136,23 @@ func main() {
 			}}
 		}
 		_ = out.Encode(map[string]any{"type": "response", "id": c["id"], "command": c["type"], "success": true, "data": data})
+		if c["type"] == "prompt" && strings.Contains(strings.Join(os.Args, " "), "KAIWU_TITLE_ONLY") {
+			for _, flag := range []string{"--no-session", "--no-tools", "--no-extensions", "--no-mcp", "--no-context-files"} {
+				if !strings.Contains(strings.Join(os.Args, " "), flag) {
+					os.Exit(3)
+				}
+			}
+			if os.Getenv("OPENAI_API_KEY") != "" {
+				os.Exit(4)
+			}
+			titleReply = strings.TrimSpace(strings.Split(fmt.Sprint(c["message"]), "\n")[0])
+			titleReply = strings.TrimPrefix(strings.Split(titleReply, "，")[0], "请帮我")
+			if strings.Contains(fmt.Sprint(c["message"]), "核心需求是") {
+				titleReply = "聊天记录持久化与恢复"
+			}
+			_ = out.Encode(map[string]any{"type": "agent_settled"})
+			continue
+		}
 		if c["type"] == "prompt" {
 			time.Sleep(150 * time.Millisecond)
 			if c["message"] == "__DISCONNECT_FIXTURE__" {

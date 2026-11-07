@@ -16,7 +16,7 @@ async function configure(page:Page,manual=false){
  await post(page.request,'delivery/policy',{operationId:randomUUID(),expectedVersion:policy.version,policy});return info.projectId;
 }
 async function addTask(page:Page,request:string){
- await clickInView(page, page.locator('[data-action=new-task]'));await page.locator('input[name=title]').fill(request);await page.locator('textarea[name=request]').fill(request);await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'保存',exact:true}));
+ await clickInView(page, page.locator('[data-action=new-task]'));await page.locator("textarea[name=request]").fill(request + "\n" + request);await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'创建',exact:true}));
  await expect(page.locator('#chat-title')).toContainText(request);
  const st=await snapshot(page.request);return Object.values(st.tasks).find((t:any)=>t.title===request) as any;
 }

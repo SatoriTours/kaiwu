@@ -131,6 +131,7 @@ func (h *handler) Close() error {
 	h.cancel()
 	h.mu.Unlock()
 	h.socketWG.Wait()
+	h.titleWG.Wait()
 	return h.terminals.Close()
 }
 func (h *handler) socket(w http.ResponseWriter, r *http.Request) {

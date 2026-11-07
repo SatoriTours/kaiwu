@@ -9,6 +9,7 @@ export default defineConfig({
     { name: "ui-consistency", testMatch: "ui-consistency.browser.spec.ts" },
     { name: "theme", testMatch: "theme.browser.spec.ts" },
     { name: "drawer", testMatch: "drawer.browser.spec.ts" },
+    { name: "task-create", testMatch: "task-create.browser.spec.ts" },
     { name: "task-cards", testMatch: "task-cards.browser.spec.ts" },
     { name: "mobile-toolbar", testMatch: "mobile-toolbar.browser.spec.ts" },
   ],

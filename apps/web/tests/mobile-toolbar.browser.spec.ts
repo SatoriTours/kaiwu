@@ -105,9 +105,8 @@ test('topic switching sends no lifecycle writes and retains selector keyboard fo
   const dialog = page.getByRole('dialog', { name: '创建任务卡片', exact: true });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('input[name=topicId]')).toHaveValue(f.normal);
-  await dialog.locator('input[name=title]').fill('当前专题新任务');
-  await dialog.locator('textarea[name=request]').fill('只创建卡片，不启动CLI');
-  await dialog.getByRole('button', { name: '保存', exact: true }).click();
+  await dialog.locator("textarea[name=request]").fill('当前专题新任务' + "\n" + '只创建卡片，不启动CLI');
+  await dialog.getByRole('button', { name: '创建', exact: true }).click();
   await expect(dialog).not.toBeVisible();
   const final = await f.snapshot();
   const created = Object.values(final.tasks).find((t: any) => t.title === '当前专题新任务') as any;

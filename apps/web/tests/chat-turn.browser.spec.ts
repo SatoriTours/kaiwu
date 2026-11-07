@@ -79,9 +79,8 @@ async function newTask(page: Page, project: string, topic: string, title: string
   await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
   await expect(page.locator(".column h2").first()).toHaveText(topic);
   await clickInView(page, page.getByRole("button", { name: `在 ${topic} 新建任务`, exact: true }));
-  await page.locator("input[name=title]").fill(title);
-  await page.locator("textarea[name=request]").fill(request);
-  await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
+  await page.locator("textarea[name=request]").fill(title + "\n" + request);
+  await clickInView(page, page.getByRole("button", { includeHidden: true, name: "创建", exact: true }));
   await expect(page.locator("#chat-title")).toContainText(title);
 }
 
@@ -703,9 +702,8 @@ test.describe("Chat turn and result actions", () => {
     await fillInChat(page, page.locator('#draft'), "草稿保留在当前任务1");
     // Create second task in same topic
     await clickInView(page, page.getByRole("button", { includeHidden: true, name: "在 DevTopic 新建任务", exact: true }));
-    await page.locator("input[name=title]").fill("BubbleTask2");
-    await page.locator("textarea[name=request]").fill("第二任务");
-    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
+    await page.locator("textarea[name=request]").fill("BubbleTask2" + "\n" + "第二任务");
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "创建", exact: true }));
     await expect(page.locator("#chat-title")).toContainText("BubbleTask2");
 
     // Task2 draft must be empty
@@ -939,9 +937,8 @@ test.describe("Chat turn and result actions", () => {
     await expect(page.locator(".message.assistant")).toHaveCount(2, { timeout: 20000 });
 
     await clickInView(page, page.getByRole("button", { includeHidden: true, name: "在 WebTopic 新建任务", exact: true }));
-    await page.locator("input[name=title]").fill("SwitchTaskB");
-    await page.locator("textarea[name=request]").fill("任务B");
-    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
+    await page.locator("textarea[name=request]").fill("SwitchTaskB" + "\n" + "任务B");
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "创建", exact: true }));
     await expect(page.locator("#chat-title")).toContainText("SwitchTaskB");
 
     await clickInView(page, page.locator(".task-card").filter({ hasText: "SwitchTaskA" }));

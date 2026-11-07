@@ -84,9 +84,8 @@ test("real build: login, persistent board, isolated sessions, refresh and respon
   for (const title of ["任务 A", "任务 B"]) {
     await clickInView(page, page
       .getByRole("button", { includeHidden: true, name: "在 功能开发 新建任务", exact: true }));
-    await page.locator("input[name=title]").fill(title);
-    await page.locator("textarea[name=request]").fill("保留独立上下文");
-    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
+    await page.locator("textarea[name=request]").fill(title + "\n" + "保留独立上下文");
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "创建", exact: true }));
     await expect(page.locator("#chat-title")).toContainText(title);
   }
   await clickInView(page, page
@@ -167,9 +166,8 @@ test("real build: login, persistent board, isolated sessions, refresh and respon
     await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
     await clickInView(page, page
       .getByRole("button", { includeHidden: true, name: "在 " + topic + " 新建任务", exact: true }));
-    await page.locator("input[name=title]").fill(title!);
-    await page.locator("textarea[name=request]").fill("浏览器隔离验收示例");
-    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
+    await page.locator("textarea[name=request]").fill(title! + "\n" + "浏览器隔离验收示例");
+    await clickInView(page, page.getByRole("button", { includeHidden: true, name: "创建", exact: true }));
     // Creating a task opens its drawer only after the real command receipt.
     await expect(page.locator("#chat-title")).toContainText(title!);
   }
@@ -819,9 +817,8 @@ test("merge icon and chat approve real Git integration and track later edits", a
   await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
   await expect(page.locator('dialog:not(.chat-drawer)[open]')).toHaveCount(0);
   await clickInView(page, page.locator("[data-action=new-task]"));
-  await page.locator("input[name=title]").fill("集成功能");
-  await page.locator("textarea[name=request]").fill("隔离开发并合并");
-  await clickInView(page, page.getByRole("button", { includeHidden: true, name: "保存", exact: true }));
+  await page.locator("textarea[name=request]").fill("集成功能" + "\n" + "隔离开发并合并");
+  await clickInView(page, page.getByRole("button", { includeHidden: true, name: "创建", exact: true }));
   const card = page.locator(".task-card").filter({
     has: page.getByRole('button', { name: '选择任务 集成功能', exact: true }),
   });
@@ -1005,9 +1002,8 @@ test('structured progress uses bidirectional socket and keeps verification evide
   await expect(page.locator('#chat-title')).toBeVisible();
  const requests:string[]=[];page.on('request',r=>{if(r.url().includes('/api/commands'))requests.push(r.url())});
  await clickInView(page, page.locator('[data-action=new-task]'));
- await page.locator('input[name=title]').fill('结构化进展验收');
- await page.locator('textarea[name=request]').fill('结构化登录恢复');
- await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'保存',exact:true}));
+ await page.locator("textarea[name=request]").fill('结构化进展验收' + "\n" + '结构化登录恢复');
+ await clickInView(page, page.getByRole('button',{ includeHidden: true,name:'创建',exact:true}));
  const card=page.locator('.task-card').filter({has:page.getByRole('heading',{name:'结构化进展验收',exact:true})});
  await clickInView(page, card.getByRole('button',{ includeHidden: true,name:'开始开发',exact:true}));
   const reply=page.locator('.message.assistant').last();
@@ -1371,9 +1367,8 @@ test('result history UI: compact completed bar, history toggle, request summary,
   await expect(page.locator('#chat-title')).toBeVisible();
 
  await clickInView(page, page.locator('[data-action=new-task]'));
- await page.locator('input[name=title]').fill('历史UI测试任务');
- await page.locator('textarea[name=request]').fill('结构化登录恢复');
- await clickInView(page, page.getByRole('button', { includeHidden: true, name: '保存', exact: true }));
+ await page.locator("textarea[name=request]").fill('历史UI测试任务' + "\n" + '结构化登录恢复');
+ await clickInView(page, page.getByRole('button', { includeHidden: true, name: '创建', exact: true }));
 
  await expect(page.locator('#chat-title')).toContainText('历史UI测试任务');
  const card = page.locator('.task-card').filter({ has: page.getByRole('button', { includeHidden: true, name: '选择任务 历史UI测试任务', exact: true }) });

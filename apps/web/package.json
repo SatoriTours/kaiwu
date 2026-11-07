@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "test": "node tests/connections.test.ts && node tests/failure.test.ts && node tests/delivery-definitions.test.ts && node tests/subagents.test.ts && node tests/task-completion.test.ts && node tests/attachments.test.ts && node tests/workbench.test.ts && node tests/preview-intent.test.ts && node tests/merge-intent.test.ts && node tests/artifact-links.test.ts && node tests/version.test.ts && node --test tests/view-navigation.test.ts tests/terminal-state.test.ts",
+    "test": "node --test tests/task-creation.test.ts && node tests/connections.test.ts && node tests/failure.test.ts && node tests/delivery-definitions.test.ts && node tests/subagents.test.ts && node tests/task-completion.test.ts && node tests/attachments.test.ts && node tests/workbench.test.ts && node tests/preview-intent.test.ts && node tests/merge-intent.test.ts && node tests/artifact-links.test.ts && node tests/version.test.ts && node --test tests/view-navigation.test.ts tests/terminal-state.test.ts",
     "build": "vue-tsc --noEmit && vite build && node scripts/copy-build.mjs",
     "test:browser": "playwright test",
     "test:managed-projects": "playwright test --config playwright.managed-projects.config.ts",

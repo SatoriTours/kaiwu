@@ -171,13 +171,14 @@ func apply(st *State, c Command) (Receipt, error) {
 		st.Conversations[conversation.ID] = conversation
 		title := strings.TrimSpace(c.Title)
 		if title == "" {
-			v := []rune(strings.TrimSpace(c.Request))
-			if len(v) > 20 {
-				v = v[:20]
-			}
-			title = string(v)
+			title = taskTitleFromRequest(c.Request)
 		}
 		st.Tasks[key] = Task{ID: key, ProjectID: project.ID, TopicID: topic, Title: title, Request: strings.TrimSpace(c.Request), Status: "idle", ConversationID: conversation.ID, Profile: st.Profile}
+		if c.AutoTitle && strings.TrimSpace(c.Title) == "" {
+			t := st.Tasks[key]
+			t.TitleState = "pending"
+			st.Tasks[key] = t
+		}
 		r.CreatedID = key
 	case "confirm_result":
 		return ConfirmResult(st, c)

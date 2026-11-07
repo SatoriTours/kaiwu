@@ -442,6 +442,8 @@ deploy_sha() {
 		# rate budget or its eight resident agent sessions.
 		run_step "$work/src" "浏览器主题与抽屉（独立生命周期）" npm --prefix apps/web run test:browser -- --project=theme --project=drawer ||
 			pipeline_fail "浏览器主题与抽屉套件"
+		run_step "$work/src" "浏览器创建任务（独立生命周期）" npm --prefix apps/web run test:browser -- --config playwright.task-create.config.ts ||
+			pipeline_fail "浏览器创建任务套件"
 		# Project tools create persistent projects and sessions. Run them in a
 		# fresh service, preserving the legacy suite's empty-database premise.
 		run_step "$work/src" "浏览器项目工具（独立生命周期）" npm --prefix apps/web run test:browser -- --project=project-tools --project=terminal ||

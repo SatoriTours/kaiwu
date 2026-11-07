@@ -232,6 +232,7 @@ function actionLabel(task: Task) {
                   @click.stop="emit('select', task)"
                 >
                   <span class="task-title">{{ task.title }}</span>
+                  <span v-if="task.titleState && task.titleState !== 'ready'" class="task-title-status" :title="task.titleError || '正在根据完整需求总结标题'">{{ task.titleState === 'running' || task.titleState === 'pending' ? '正在总结标题…' : task.titleState === 'needs_model' ? '待选模型总结标题' : '标题暂用需求摘要' }}</span>
                   <span
                     v-if="unread[task.conversationId]"
                     :id="'task-unread-' + task.id"

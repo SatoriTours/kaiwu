@@ -25,6 +25,8 @@ export interface Topic {
   protected: boolean;
 }
 export interface Task {
+  titleState?: string;
+  titleError?: string;
   id: string;
   projectId: string;
   topicId: string;

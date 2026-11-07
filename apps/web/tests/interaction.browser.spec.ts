@@ -78,9 +78,8 @@ async function newTask(page: Page, project: string, topic: string, title: string
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.locator(".column h2").first()).toHaveText(topic);
   await page.getByRole("button", { name: `在 ${topic} 新建任务`, exact: true }).click();
-  await page.locator("input[name=title]").fill(title);
-  await page.locator("textarea[name=request]").fill("交互 E2E 任务");
-  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await page.locator("textarea[name=request]").fill(title + "\n" + "交互 E2E 任务");
+  await page.getByRole("button", { name: "创建", exact: true }).click();
   await expect(page.locator("#chat-title")).toContainText(title);
 }
 
@@ -397,9 +396,8 @@ test.describe("real Go + fake pi interaction integration", () => {
     await field(page, "变更标题").locator("input[type=text]").fill("尚未提交的草稿");
     await closeChat(page);
     await page.getByRole("button", { name: "在 切卡功能 新建任务", exact: true }).click();
-    await page.locator("input[name=title]").fill("切卡任务B");
-    await page.locator("textarea[name=request]").fill("另一个任务");
-    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await page.locator("textarea[name=request]").fill("切卡任务B" + "\n" + "另一个任务");
+    await page.getByRole("button", { name: "创建", exact: true }).click();
     await expect(page.locator("#chat-title")).toContainText("切卡任务B");
     await closeChat(page);
     await page.getByRole("button", { name: "选择任务 切卡任务A", exact: true }).click();

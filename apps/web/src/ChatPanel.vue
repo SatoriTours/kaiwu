@@ -391,6 +391,7 @@ const deliveryLabels: Record<string, string> = {
     </div>
       <button class="chat-close" aria-label="收起聊天" title="收起聊天" autofocus @click="emit('close')">×</button>
     </header>
+    <slot name="notice" />
 
     <div class="progress-panel">
       <DeliveryStatus

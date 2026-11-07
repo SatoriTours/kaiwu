@@ -22,6 +22,7 @@ onMounted(async()=>{
 });
 const dialog = ref<HTMLDialogElement>();
 const selectedTopicId = ref(props.topicID);
+const submittingStart = ref(false);
 const topicOptions = computed(() =>
   props.topics.map((t) => ({ value: t.id, label: t.name }))
 );
@@ -35,18 +36,25 @@ const titles: Record<string, string> = {
   delete: "删除专题",
 };
 function submit(event: Event) {
+  if (props.saving) return;
   const data = Object.fromEntries(
     new FormData(event.target as HTMLFormElement),
   ) as Record<string, string>;
+  if (props.kind === "task") {
+    submittingStart.value = (event as SubmitEvent).submitter?.getAttribute("value") === "start";
+    data.startAfterCreate = submittingStart.value ? "true" : "false";
+  }
   emit("submit", data);
 }
 </script>
 <template>
   <dialog
     ref="dialog"
+    :class="{ 'task-create-dialog': kind === 'task' }"
     aria-labelledby="dialog-title"
-    @cancel.prevent="emit('close')"
+    @cancel.prevent="!saving && emit('close')"
   >
+    <button v-if="kind === 'task'" type="button" class="task-create-close" aria-label="关闭创建任务" :disabled="saving" @click="emit('close')">×</button>
     <h2 id="dialog-title">{{ kind === 'project' && managedProjects ? '创建项目' : titles[props.kind] }}</h2>
     <form @submit.prevent="submit">
       <template v-if="kind === 'project' && managedProjects">
@@ -129,24 +137,25 @@ function submit(event: Event) {
             required
         /></label
         ><label
-          ><span>任务标题（可选）</span
-          ><input name="title" maxlength="80" /></label
-        ><label
-          ><span>需求</span
-          ><textarea name="request" required maxlength="5000" autofocus />
+          ><span>你想做什么？</span
+          ><textarea name="request" required maxlength="5000" placeholder="描述你想完成的功能或解决的问题…" :disabled="saving" autofocus />
         </label>
-        <p>创建卡片不启动 CLI；发送消息时按需启动独立只读会话。</p></template
-      >
+      </template>
       <p v-if="kind === 'delete'">
         删除「{{
           topics.find((t) => t.id === topicID)?.name
         }}」后，所有任务将移到“其他”。对话与执行状态保留。
       </p>
-      <p class="error" role="alert">{{ error }}</p>
-      <div class="dialog-actions">
-        <button type="button" :disabled="saving" @click="emit('close')">
+      <p v-if="error || kind !== 'task'" class="error" role="alert">{{ error }}</p>
+      <div class="dialog-actions" :class="{ 'task-create-actions': kind === 'task' }">
+        <button class="cancel" type="button" :disabled="saving" @click="emit('close')">
           取消</button
-        ><button class="primary" :disabled="saving">
+        >
+        <template v-if="kind === 'task'">
+          <button type="submit" value="create" :disabled="saving">{{ saving && !submittingStart ? "创建中…" : "创建" }}</button>
+          <button type="submit" value="start" class="primary" :disabled="saving"><span aria-hidden="true">▷</span> {{ saving && submittingStart ? "创建中…" : "创建并开始" }}</button>
+        </template>
+        <button v-else class="primary" :disabled="saving">
           {{
             saving
               ? "保存中…"

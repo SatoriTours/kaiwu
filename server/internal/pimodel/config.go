@@ -1,4 +1,4 @@
-// Package pimodel queries pi's own model registry without sending a prompt.
+// Package pimodel queries pi's registry and runs isolated, bounded title summaries.
 package pimodel
 
 import (
